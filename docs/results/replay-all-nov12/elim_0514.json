@@ -1,0 +1,20 @@
+{
+ "run": "20261105-143553-freeroam",
+ "t": 1793908601.4,
+ "robot": "Right",
+ "spot": [
+  17.0,
+  60.1
+ ],
+ "right_own": [
+  27.0,
+  116.0
+ ],
+ "left_own": [
+  17.1,
+  60.0
+ ],
+ "d_cm": 55.7,
+ "why": "Left and Center were unaccounted too but in an unresolved close pass, so left out of the count; Right was the only one counted",
+ "source": "dbg/why_elim.py trace of replay_one.py on, lag 0"
+}
