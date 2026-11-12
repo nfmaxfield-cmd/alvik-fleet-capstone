@@ -20,6 +20,7 @@ are kept so a DOE can move them.
 
 Version / changelog:
   long-hardsim-2026-11-12a  first version (hard simulator build).
+  long-hardsim-2026-11-12e19  only actual contact fails; a pass under 1 cm is a WARNING (the coordinator, e19).
 """
 import argparse
 import glob
@@ -33,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET = os.path.dirname(HERE)
 sys.path.insert(0, FLEET)
 sys.path.insert(0, os.path.join(os.path.dirname(FLEET), "analysis"))
-VERSION = "long-hardsim-2026-11-12a"
+VERSION = "long-hardsim-2026-11-12e19"
 
 
 # single-fault cases the 12 Nov batches broke on (fault, seed, what must hold): each a 0.5 h run on the measured profile
@@ -66,10 +67,13 @@ def check(out):
     real_pics = prof["pictures_s"]["p50"]
     fails = []
 
-    def say(ok, what, val):
-        print("%s  %s: %s" % ("PASS" if ok else "FAIL", what, val))
+    warns = []
+
+    def say(ok, what, val, warn=False):
+        """(e19, the coordinator: only actual contact is a failure; a pass under 1 cm is a WARNING)"""
+        print("%s  %s: %s" % ("PASS" if ok else ("WARN" if warn else "FAIL"), what, val))
         if not ok:
-            fails.append(what)
+            (warns if warn else fails).append(what)
     M, H = load(os.path.join(out, "measured")), load(os.path.join(out, "harsh"))
     if not M:
         print("no measured runs in", out)
@@ -83,8 +87,8 @@ def check(out):
     say(abs(pc - real_pics) <= 0.3 * real_pics, "pictures a second (real %.1f)" % real_pics, pc)
     say(all(r["broke"]["contacts"] == 0 for r in M), "measured: no body contact",
         [r["broke"]["contacts"] for r in M])
-    say(all(r["broke"]["min_gap_cm"] >= 1.0 for r in M), "measured: bodies never closer than 1 cm",
-        [r["broke"]["min_gap_cm"] for r in M])
+    say(all(r["broke"]["min_gap_cm"] >= 1.0 for r in M), "measured: bodies never closer than 1 cm (a warning: no "
+        "contact)", [r["broke"]["min_gap_cm"] for r in M], warn=True)
     say(all(r["broke"]["falls"] == 0 for r in M), "measured: no robot off the board", [r["broke"]["falls"] for r in M])
     say(all(r["broke"]["swaps"] == 0 for r in M), "measured: no name swaps", [r["broke"]["swaps"] for r in M])
     say(all(r["broke"].get("longest_free_stand_s", r["broke"]["longest_stand_s"]) <= 60 for r in M),
@@ -123,6 +127,8 @@ def check(out):
         elif what == "no_long_hang":
             say(b["hung_s"] <= 120, "case %s seed %d: robots hung at an edge 120 s at most in all" % (fault, seed),
                 b["hung_s"])
+    if warns:
+        print("%d warning(s): %s" % (len(warns), "; ".join(warns)))
     print("%d check(s) failed" % len(fails) if fails else "all checks passed")
     return 1 if fails else 0
 

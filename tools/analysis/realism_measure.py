@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Realism measures from a real free-roam run's logs (logs only; nothing touches a robot or a Pi).
 
-Version realism-measure-2026-11-12a (hard simulator build). Changelog:
+Version realism-measure-2026-11-12e19. Changelog:
+  2026-11-12e19 (the Fable audit) the timeline: one entry per bridge picture, arrivals in order (picture_timeline).
   2026-11-12a  first version: what the fast simulator's "measured" profile is built from, and the same measures the
                validation compares the simulator against (tools/fleet/fastsim_realism.py measure_sim()).
 
@@ -221,11 +222,7 @@ def measure(folder, raw=True):
                 pi.append((round(s0 - t0, 2), round(s1 - t0, 2)))
         else:
             wifi.setdefault(n, []).append((round(a - t0, 2), round(b - t0, 2)))
-    pics = {}
-    for t, d in dl:
-        pics.setdefault(round(t - t0, 2), []).append(d)
-    out["timeline"] = dict(span_s=round(t1 - t0, 1), pics=[(k, round(sorted(v)[len(v) // 2], 3))
-                                                         for k, v in sorted(pics.items())],
+    out["timeline"] = dict(span_s=round(t1 - t0, 1), pics=picture_timeline(folder, dl, t0),
                            pi_stalls=pi, wifi=wifi)
     steps = _csv(folder, "step.csv")
     wd = [r for r in steps if r["state"] == "failed" and r.get("info", "").startswith("watchdog")]
@@ -421,6 +418,42 @@ def measure_raw(folder, names, seen, hours):
     rh = hours * max(1, len(names))
     return dict(slips=dict(per_robot_h=round(slips / rh, 2), length_s=quant(slip_len)),
                 tilt=dict(per_robot_h=round(tilts / rh, 2), max_deg=quant(tilt_max)))
+
+
+def picture_timeline(folder, dl, t0):
+    """(e19, the audit: "the replayed timeline is built from every robot's named fix, keyed by its own stamp: 1.97
+    pictures a second against the bridge's 1.6, and 2,750 of 28,350 arrive before an earlier one, which a real queue
+    cannot do") One entry per PICTURE the bridge handled (bridge/track.csv's distinct times), its delay the median of
+    the named fixes from that picture (camera_track.csv stamps within half the median picture gap; else the nearest
+    within 0.5 s; else none: the picture is skipped), and arrivals never overtaking: a picture arrives no earlier than
+    the one before it (the bridge's queue is first in, first out). [(t - t0, delay)]."""
+    import bisect
+    br = _csv(folder, os.path.join("bridge", "track.csv"))
+    bp = sorted({float(r["t"]) for r in br})
+    if not bp:
+        pics = {}
+        for t, d in dl:
+            pics.setdefault(round(t - t0, 2), []).append(d)
+        return [(k, round(sorted(v)[len(v) // 2], 3)) for k, v in sorted(pics.items())]
+    gaps = sorted(b - a for a, b in zip(bp, bp[1:]) if b > a)
+    half = 0.5 * (gaps[len(gaps) // 2] if gaps else 0.5)
+    ds = sorted(dl)
+    ts = [q[0] for q in ds]
+    out, last_arr = [], -1e18
+    for p in bp:
+        i0, i1 = bisect.bisect_left(ts, p - half), bisect.bisect_right(ts, p + half)
+        v = [ds[i][1] for i in range(i0, i1)]
+        if not v:
+            j = bisect.bisect_left(ts, p)
+            near = [k for k in (j - 1, j) if 0 <= k < len(ts) and abs(ts[k] - p) <= 0.5]
+            if not near:
+                continue
+            v = [ds[min(near, key=lambda k: abs(ts[k] - p))][1]]
+        d = sorted(v)[len(v) // 2]
+        arr = max(p + d, last_arr)
+        last_arr = arr
+        out.append((round(p - t0, 2), round(arr - p, 3)))
+    return out
 
 
 def main(argv=None):
