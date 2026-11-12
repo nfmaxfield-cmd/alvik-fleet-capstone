@@ -447,3 +447,70 @@ def test_mission_control_starts_the_monitor_beside_its_runs():
     assert "pi_monitor.py watch --newest 'logs/*-freeroam'" in sh
     assert "self.mfeed.tick(work, self)" in open(os.path.join(FLEET, "freeroam.py")).read()
     assert "self.mfeed.tick(None)" in open(os.path.join(FLEET, "run_plan.py")).read()
+
+
+# ------------------------------------------------------------------------------------------- Part 2: the new page
+def test_the_new_page_is_the_default_and_the_old_one_is_kept_behind_a_setting(tmp_path, monkeypatch):
+    monkeypatch.delenv("MIRLT_MC_PAGE", raising=False)
+    assert MC.page_for("/") == MC.TABLE_PAGE and MC.page_for("/classic") == MC.PAGE
+    assert MC.page_for("/", env={"MIRLT_MC_PAGE": "classic"}) == MC.PAGE
+    S = type("S", (), {"start": type("St", (), {"adv": {"classic_page": True}})()})()
+    assert MC.page_for("/", S, env={}) == MC.PAGE and MC.page_for("/table", S, env={}) == MC.TABLE_PAGE
+    import start_job as SJB
+    assert SJB.ADV_DEFAULTS["classic_page"] is False
+
+
+def test_the_new_page_has_what_nick_asked_for():
+    h = open(os.path.join(FLEET, "mission_control_table.html")).read()
+    for must in ('id="soundbtn"', "AudioContext", 'href="/classic"', 'id="safepill"', "data-saf=", "/api/pi_health",
+                 "/api/live", "/api/place/click", 'class="ref"', "Stopping", "uploadPill", "@media (max-width:600px)"):
+        assert must in h, must
+    assert "localStorage" in h and "try {" in h          # the sound choice is a per-viewer convenience, guarded
+
+
+# ------------------------------------------------------------------------------------------- the core-share bench
+def test_the_bench_finds_parked_robots_and_picks_the_largest_share_inside_the_spread(tmp_path):
+    import detector_share_bench as B
+    D = type("D", (), {})
+
+    def det(x, y):
+        d = D()
+        d.x, d.y = x, y
+        return d
+    t = [0.0]
+    calls = []
+
+    def src(name, now, why, region):
+        calls.append(why)
+        return [det(30.2, 40.1), det(90.0, 20.0)] if int(now) % 3 == 0 else []
+    f = B.Finder(src, clock=lambda: t[0])
+    for k in range(12):
+        t[0] = float(k)
+        f.step()
+    sp = f.spots_from_seen()
+    assert len(sp) == 2
+    f.spots = sp
+    for k in range(12, 40):
+        t[0] = float(k)
+        f.step()
+    assert f.finds and max(f.finds) <= 3.0
+
+    def mk(share, lag, loop, thr=""):
+        d = tmp_path / ("share-%02d" % share)
+        d.mkdir()
+        with open(d / "pi_monitor.csv", "w") as fh:
+            fh.write("t,lag_overhead_s,loop_work_ms_p95,core1,temp_c,throttle_now\n")
+            for i in range(40):
+                fh.write("%d,%.3f,%.2f,40,60,%s\n" % (i, lag + 0.01 * (i % 10), loop + 0.2 * (i % 10), thr))
+        (d / "finds.json").write_text(json.dumps({"finds_s": [1.0 + share / 50.0] * 5 if share else []}))
+    mk(0, 0.10, 6.0)
+    mk(10, 0.11, 6.4)
+    mk(25, 0.12, 6.6)
+    mk(50, 0.25, 12.0)
+    p, pick = B.report(str(tmp_path))
+    assert pick == 25
+    txt = open(p).read()
+    assert "PASS" in txt and "fail: picture lag" in txt and "baseline (detector off)" in txt
+    saved = B.apply(25, path=str(tmp_path / "share.json"))
+    import tagfree as TF
+    assert TF.duty_setting(env={}, path=saved)[0] == 0.25

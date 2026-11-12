@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control</title>
+<!-- Mission Control, "the table" (map-first): Nick's choice of 12 Nov (docs/design/mission-control/proposal.md,
+     option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
+     went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
+     again with Settings > "Open the old page by default" (keep features, switch them off).
+     Changelog: 2026-11-12a first version (Mission Control build). -->
+<style>
+:root{--bg:#F6F7F9;--panel:#FFFFFF;--line:#E4E7EC;--ink:#101828;--muted:#5B6474;--accent:#2952CC;--accent-ink:#FFFFFF;
+--green:#12805C;--green-bg:#E7F6EF;--amber:#B54708;--amber-bg:#FEF3E2;--red:#B42318;--red-bg:#FDECEA;
+--table:#EEE9DF;--table-edge:#9C8F7A;--sticker:#8A8F99;--shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.muted{color:var(--muted)}.small{font-size:13px}.tiny{font-size:11.5px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-size:12.5px;white-space:nowrap;background:var(--panel)}
+.pill.ok{color:var(--green);border-color:var(--green);background:var(--green-bg)}
+.pill.warn,.pill.amber{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
+.pill.bad,.pill.red{color:var(--red);border-color:var(--red);background:var(--red-bg)}
+.stop{background:var(--red);color:#fff;border:0;border-radius:10px;padding:10px 22px;font-weight:700;letter-spacing:.04em}
+.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:10px 18px;font-weight:600}
+.ghost{background:transparent;border:1px solid var(--line);border-radius:10px;padding:7px 13px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:baseline}
+.top{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top .brand{font-weight:700;font-size:16px;margin-right:4px}
+.grow{flex:1}
+.wrap{max-width:1480px;margin:0 auto;padding:16px 20px 130px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
+.rail{display:flex;flex-direction:column;gap:12px;min-width:0}
+svg.map{width:100%;height:auto;display:block;max-height:calc(100vh - 260px)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.sw{display:inline-block;width:14px;height:10px;border-radius:2px;border:1px solid var(--line);vertical-align:middle;margin-right:4px}
+.caption{font-size:13px;margin:8px 0 0}
+.source{font-size:11.5px;color:var(--muted);margin-top:2px}
+.runbar{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--panel);border-top:1px solid var(--line);padding:10px 20px;box-shadow:0 -2px 8px rgba(16,24,40,.06)}
+.runbar .in{max-width:1480px;margin:0 auto;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap}
+.kinds{display:inline-flex;gap:6px;flex-wrap:wrap}
+.kinds button{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 13px}
+.kinds button.on{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--panel)}
+.chips{display:flex;gap:4px;flex-wrap:wrap;max-width:460px}
+.chip{font-size:12px;border-radius:6px;padding:1px 6px;border:1px solid var(--line);background:var(--bg)}
+.meter{height:8px;border-radius:4px;background:var(--line);overflow:hidden;width:180px}
+.meter i{display:block;height:100%;background:var(--accent)}
+.robot{padding:10px 12px}.robot.hand{border:2px solid var(--red)}
+.robot .nick{font-size:16px;font-weight:700}
+.robot .ref{font-size:11.5px;color:var(--muted);margin-left:6px}
+.alert{border:2px solid var(--red);background:var(--red-bg);border-radius:12px;padding:12px 14px}
+.alert h3{margin:0 0 4px;color:var(--red);font-size:16px}
+.health{padding:10px 12px}
+.hrow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:3px 0;font-size:13px;border-top:1px solid var(--line)}
+.hrow:first-of-type{border-top:0}
+.lv{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--line)}
+.lv.ok{background:var(--green)}.lv.amber{background:var(--amber)}.lv.red{background:var(--red)}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:9;overflow:auto;padding:18px;transform:translateX(100%);transition:transform .2s;box-shadow:-4px 0 16px rgba(16,24,40,.08)}
+.drawer.open{transform:none}
+.drawer h3{margin:0 0 6px;font-size:15px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;font-size:13.5px}
+.kv input[type=number]{width:80px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+.srow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-top:1px solid var(--line)}
+.srow select{font-size:12px;padding:2px 4px}
+details>summary{cursor:pointer}
+.hidden{display:none!important}
+.err{color:var(--red);font-size:13px;min-height:18px}
+@keyframes pulse{50%{opacity:.3}}.handring{animation:pulse 1.2s ease-in-out infinite}
+@media (max-width:980px){.wrap{grid-template-columns:1fr;padding-bottom:190px}}
+@media (max-width:600px){.top{padding:8px 12px}.wrap{padding:12px 12px 220px}.runbar{padding:8px 12px}.top .hide-s{display:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Mission Control</span>
+  <span class="pill hide-s" id="place" style="max-width:360px;overflow:hidden;text-overflow:ellipsis">...</span>
+  <span class="pill" id="mode">...</span>
+  <span class="grow"></span>
+  <span id="runword" class="small"></span>
+  <button class="pill" id="soundbtn" title="Play a sound when a robot needs a hand">Sound: off</button>
+  <button class="pill ok" id="safepill" title="Open the Safety group">Safety: auto</button>
+  <button class="ghost" id="gear">Settings</button>
+  <button class="stop" id="stoptop" title="Stops every robot at once">STOP</button>
+</header>
+<main class="wrap">
+  <section class="card" style="padding:14px;min-width:0">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
+    <div id="codebanner"></div>
+    <div id="map" style="margin-top:8px"></div>
+    <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span>ring = the robot's body plus its 95 % error (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
+    <p class="caption" id="mapcap"></p>
+    <div class="source" id="mapsrc"></div>
+  </section>
+  <aside class="rail">
+    <div id="handslot"></div>
+    <div id="cards" class="rail"></div>
+    <div class="card health" id="health"></div>
+    <div class="err" id="err"></div>
+  </aside>
+</main>
+<div class="runbar"><div class="in" id="runbar"></div></div>
+<div class="drawer" id="drawer" aria-label="Settings"></div>
+
+<script>
+"use strict";
+let S = null, T = null, LIVE = null, PH = null, PLACE = null, kind = null, order = [], keepUnreadable = true;
+let soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const fmt = t => { t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+function flash(t, bad) { $("err").textContent = t; $("err").style.color = bad ? "var(--red)" : "var(--green)"; }
+const isTags = () => !!(S && S.site && S.site.tracking === "tags");
+let dismissed = null;      // "New run" after a run: its card is put away on this page (the server keeps it)
+const st = () => { const s = (T && T.status) || {}; return (s.kind && !s.running && !s.stopping && dismissed && s.folder === dismissed) ? {} : s; };
+const going = () => !!(st().running || st().stopping);
+function nickRef(name) { const r = (LIVE && LIVE.robots || []).find(x => x.name === name); return r && r.ref ? r.ref : ""; }
+
+// ------------------------------------------------------------------ sound (browsers allow it only after a click)
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+function soundLabel() { const b = $("soundbtn"); const wanted = store("mc_sound") === "on";
+  b.textContent = soundOn ? "Sound: on" : wanted ? "Sound: click to enable" : "Sound: off"; b.className = "pill" + (soundOn ? " ok" : wanted ? " warn" : ""); }
+$("soundbtn").onclick = () => {
+  if (soundOn) { soundOn = false; store("mc_sound", "off"); soundLabel(); return; }
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); soundOn = true; store("mc_sound", "on"); beep(1); } catch (e) { flash("This browser cannot play sound", true); }
+  soundLabel(); };
+function beep(n) {
+  if (!soundOn || !audio) return;
+  for (let i = 0; i < (n || 3); i++) { const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + i * 0.28;
+    o.frequency.value = i % 2 ? 660 : 880; o.type = "sine"; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.24); } }
+function handCheck() {   // a robot needs a hand: a sound now, and again every 20 s while it still does (chosen: often enough to be heard from the next room, rare enough to bear)
+  const n = ((LIVE && LIVE.robots) || []).filter(r => r.needs_hand).length + ((PLACE && PLACE.requests) || []).length + (st().needs_hand || []).length;
+  if (n && Date.now() - lastBeep > 20000) { lastBeep = Date.now(); beep(3); } if (!n) lastBeep = 0; }
+
+// ------------------------------------------------------------------ the table
+function mapSVG() {
+  const L0 = LIVE && !st().kind ? Object.assign({}, LIVE, {robots: []}) : LIVE;
+  const L = L0 || {table: (S && S.map && S.map.floor) || {x_min: 0, y_min: 0, x_max: 122, y_max: 122}, points: {}, robots: []};
+  const f = L.table, pad = 8, asp = (f.x_max - f.x_min) / Math.max(1, f.y_max - f.y_min), W = asp >= 1.8 ? 1000 : 600;   // a square board is drawn smaller so its names stay readable
+  const k = W / (f.x_max - f.x_min + 2 * pad), H = (f.y_max - f.y_min + 2 * pad) * k + 16;
+  const X = x => ((x - f.x_min + pad) * k).toFixed(1), Y = y => ((f.y_max + pad - y) * k).toFixed(1);
+  const pick = !going() && kind === "visit" && isTags();
+  let o = `<svg class="map" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="The table from above with the robots">`;
+  o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="var(--table-edge)" stroke-width="1.5" rx="4"/>`;
+  const pts = L.points || {};
+  if (order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
+  for (const [lab, p] of Object.entries(pts)) { const n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []);
+    o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? "var(--accent)" : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
+  for (const r of (L.robots || [])) {
+    if (r.x == null || r.y == null) continue;
+    const R = (7 + (r.pm_cm || 0)) * k, c = r.colour || "#5B6474", h = r.th == null ? null : -r.th;
+    if (r.needs_hand) o += `<circle class="handring" cx="${X(r.x)}" cy="${Y(r.y)}" r="${(R + 8).toFixed(1)}" fill="none" stroke="var(--red)" stroke-width="4"/>`;
+    o += `<circle cx="${X(r.x)}" cy="${Y(r.y)}" r="${R.toFixed(1)}" fill="${c}" fill-opacity=".10" stroke="${c}" stroke-width="2" ${r.seen ? "" : 'stroke-dasharray="7 5"'}/>`;
+    o += `<g transform="translate(${X(r.x)} ${Y(r.y)})${h == null ? "" : ` rotate(${h.toFixed(1)})`}"><rect x="${(-4.7 * k).toFixed(1)}" y="${(-4.7 * k).toFixed(1)}" width="${(9.4 * k).toFixed(1)}" height="${(9.4 * k).toFixed(1)}" rx="${(1.6 * k).toFixed(1)}" fill="${c}"/>${h == null ? "" : `<path d="M${(2 * k).toFixed(1)} ${(-2.6 * k).toFixed(1)} L${(4.6 * k).toFixed(1)} 0 L${(2 * k).toFixed(1)} ${(2.6 * k).toFixed(1)}" fill="none" stroke="#fff" stroke-width="2.5"/>`}</g>`;
+    o += `<text x="${X(r.x)}" y="${(+Y(r.y) - R - 7).toFixed(1)}" font-size="17" font-weight="700" fill="${r.needs_hand ? "var(--red)" : c}" text-anchor="middle" stroke="#fff" stroke-width="4" paint-order="stroke">${esc(r.name)}${r.needs_hand ? " · NEEDS A HAND" : ""}<title>${esc(r.name)}${r.ref ? " (" + esc(r.ref) + ")" : ""}</title></text>`;
+  }
+  o += `<text x="${(W / 2).toFixed(0)}" y="${(H - 3).toFixed(0)}" font-size="12" fill="var(--muted)" text-anchor="middle">${(f.x_max - f.x_min).toFixed(0)} x ${(f.y_max - f.y_min).toFixed(0)} cm · 0, 0 at the bottom left</text>`;
+  return o + "</svg>";
+}
+function drawMap() {
+  const s = st(), phase = going() ? "running" : s.kind ? "after" : "before";
+  $("map").innerHTML = mapSVG();
+  $("maptitle").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Plan: click stickers in the order to visit" : "The table") : phase === "after" ? "The table after the run" : "The table now";
+  $("mapnote").textContent = LIVE && LIVE.robots && LIVE.robots.length ? `${LIVE.robots.filter(r => r.x != null).length} robot${LIVE.robots.length === 1 ? "" : "s"} on the map` : "";
+  $("mapcap").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Clicked stickers join the order in the bar below; leave it empty and the points are shared out." : "The robots appear here once a run has found them (each by its wiggle or its lights).")
+    : "Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is.";
+  $("mapsrc").textContent = "Measured: each robot's position and its 95 % error" + (LIVE && LIVE.source ? ", from " + LIVE.source : "") + ". Stickers: the site's sticker sheet.";
+  $("stickerlegend").classList.toggle("hidden", !isTags());
+  document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; order.push(g.dataset.p); render(); });
+}
+
+// ------------------------------------------------------------------ the rail: needs a hand, robots, Pi health
+function handHTML() {
+  const rq = (PLACE && PLACE.requests) || [], words = st().needs_hand || [];
+  if (!rq.length && !words.length) return "";
+  const cams = Object.entries((PLACE && PLACE.cams) || {});
+  let o = rq.map(q => `<div class="alert" data-robot="${esc(q.robot)}"><h3>NEEDS A HAND · ${esc(q.robot)} <span class="tiny muted">${esc(nickRef(q.robot))}</span></h3>
+    <div class="small">${q.stage === "heading" ? `It drove ${esc(q.drive_cm)} cm straight. <b>Click it again</b>: the line between your clicks is its heading.` : `${esc(q.why || "Its possible error could reach an edge")}. <b>Click the middle of its roof in the picture.</b>`}</div>
+    ${q.suggest ? `<div class="small" style="margin-top:6px">${esc(q.suggest.src)} saw it at ${q.suggest.x}, ${q.suggest.y} cm. <button class="ghost small pacc">Yes, that is it</button></div>` : ""}
+    ${cams.map(([c, m]) => `<div style="position:relative;margin-top:8px;line-height:0"><img class="pimg" data-cam="${esc(c)}" data-w="${m.size[0]}" data-h="${m.size[1]}" src="/api/frame?cam=${esc(c)}&t=${Date.now()}" alt="${esc(c)} live picture: click ${esc(q.robot)}" style="width:100%;border-radius:8px;cursor:crosshair"></div><div class="tiny muted" style="margin-top:2px">${esc(c)} camera, live</div>`).join("") || `<p class="small">No camera model here: put it on a sticker and pick that point below.</p>`}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="small muted">No camera shows it?</span><select class="ppoint"><option value="">point...</option>${Object.keys((PLACE && PLACE.points) || {}).map(k => `<option>${esc(k)}</option>`).join("")}</select><button class="ghost small pgo">It is on that point</button></div></div>`).join("");
+  if (!rq.length) o += `<div class="alert"><h3>A robot needs a hand</h3>${words.map(w => `<div class="small">${esc(w)}</div>`).join("")}<div class="small" style="margin-top:4px">Move it a hand's width onto the table; it rejoins by itself.</div></div>`;
+  return o;
+}
+function wireHand() {
+  document.querySelectorAll("#handslot .alert[data-robot]").forEach(card => { const robot = card.dataset.robot;
+    const acc = card.querySelector(".pacc"); if (acc) acc.onclick = async () => { try { await api("/api/place/click", {robot, accept: true}); flash(robot + ": the offered spot confirmed"); placeLoad(); } catch (e) { flash(e.message, true); } };
+    card.querySelectorAll("img.pimg").forEach(im => im.onclick = async ev => { const b = im.getBoundingClientRect();
+      try { const r = await api("/api/place/click", {robot, cam: im.dataset.cam, u: (ev.clientX - b.left) / b.width * (+im.dataset.w), v: (ev.clientY - b.top) / b.height * (+im.dataset.h)}); flash(`${robot} set at ${r.x}, ${r.y} cm: it moves again`); placeLoad(); } catch (e) { flash(e.message, true); } });
+    const go = card.querySelector(".pgo"); if (go) go.onclick = async () => { const pt = card.querySelector(".ppoint").value; if (!pt) return; try { await api("/api/place/click", {robot, point: pt}); flash(`${robot} set on ${pt}`); placeLoad(); } catch (e) { flash(e.message, true); } };
+  });
+}
+function cardsHTML() {
+  const rs = st().kind ? ((LIVE && LIVE.robots) || []) : [];
+  if (!rs.length) { const names = (T && T.robots && T.robots.names) || (S && S.site && S.site.robots) || [];
+    return `<div class="card robot"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
+  return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
+    <div class="small" style="margin-top:4px">${r.x != null ? `Where: ${Math.round(r.x)}, ${Math.round(r.y)} cm` : "Where: not known yet"}${r.pm_cm != null ? ` <b>± ${r.pm_cm.toFixed(1)} cm</b>` : ""}${r.battery != null ? ` · battery ${esc(r.battery)} %` : ""}</div>
+    <div class="tiny muted">${going() ? (r.seen ? "Seen by " : "") : "When the run ended: "}${esc(r.source)}</div></div>`).join("");
+}
+function sparkline(vals, lim, w, h) {
+  const v = vals.map(x => x === "" || x == null ? null : +x); const ok = v.filter(x => x != null && isFinite(x));
+  if (ok.length < 2) return "";
+  const mx = Math.max(lim || 0, ...ok) * 1.05 || 1;
+  const pts = v.map((x, i) => x == null ? null : `${(i / (v.length - 1) * w).toFixed(1)},${(h - x / mx * h).toFixed(1)}`).filter(Boolean).join(" ");
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle">${lim ? `<line x1="0" x2="${w}" y1="${(h - lim / mx * h).toFixed(1)}" y2="${(h - lim / mx * h).toFixed(1)}" stroke="var(--red)" stroke-dasharray="2 2" stroke-width="1"/>` : ""}<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.4"/></svg>`;
+}
+const SPARK = {core0: null, core1: null, core2: null, core3: null, temp_c: 80, lag_overhead: 1, lag_side: 1, loop: 50, detector: null};
+const SERIES_KEY = {lag_overhead: "lag_overhead_s", lag_side: "lag_side_s", loop: "loop_work_ms_p95", detector: "det_share_pct"};
+function healthHTML() {
+  if (!PH) return `<b>Pi health</b><div class="small muted">Reading...</div>`;
+  const H = PH.health || {}, items = H.items || [], ser = PH.series || [];
+  const lvw = {ok: "ok", amber: "watch", red: "over its limit", none: "not measured here"};
+  const rows = items.map(i => { const key = SERIES_KEY[i.key] || i.key; const sp = ser.length > 2 && i.level !== "none" && (i.key in SPARK) ? sparkline(ser.map(r => r[key]), SPARK[i.key], 70, 18) : "";
+    const v = i.value == null || i.value === "" ? "-" : typeof i.value === "number" ? (Math.abs(i.value) < 10 ? i.value.toFixed(2) : i.value.toFixed(0)) + (i.unit ? " " + i.unit : "") : esc(i.value);
+    return `<div class="hrow" title="${esc(i.why || "")}"><span><span class="lv ${i.level}"></span>${esc(i.label)}</span><span>${sp} <b>${v}</b></span>${i.level === "amber" || i.level === "red" ? `<span class="tiny" style="grid-column:1/3;color:${i.level === "red" ? "var(--red)" : "var(--amber)"}">${lvw[i.level]}: ${esc(i.why)}</span>` : ""}</div>`; }).join("");
+  const pill = H.level === "red" ? "bad" : H.level === "amber" ? "warn" : "ok";
+  return `<div style="display:flex;justify-content:space-between;align-items:center"><b>Pi health</b><span class="pill ${pill}">${H.level === "red" ? "over a limit" : H.level === "amber" ? "watch" : "all inside limits"}</span></div>
+    <div style="margin-top:6px">${rows}</div>
+    <p class="caption" style="margin-top:6px">How hard the Pi is working right now; a dot turns amber above this run's usual and red past a documented limit (hover a line for its limit).</p>
+    <div class="source">Measured: each core, the temperature and throttle flags, picture lag per camera, the planner's loop and the detector's share of its core, every 2 s by tools/pi/pi_monitor.py. Source: ${esc(PH.source)}.</div>`;
+}
+
+// ------------------------------------------------------------------ the run bar
+function runbarHTML() {
+  const s = st(), b = (T && T.buttons) || [];
+  if (s.stopping) return `<b style="color:var(--amber)">Stopping…</b><span class="small">${(s.stop.robots || []).map(r => `<span class="pill ${r.state === "confirmed" ? "ok" : "warn"}">${esc(r.name)}: ${esc(r.state)}</span>`).join(" ")}</span><span class="small muted">${esc(s.stop.words)}</span><span class="grow"></span><button class="stop" id="stopbar">STOP again</button>`;
+  if (s.running) { const pts = s.points != null ? ` · ${s.points} points` : "";
+    return `<b>${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span>${uploadPill(s.upload)}<span class="small muted" style="max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((s.lines || []).slice(-1)[0] || "")}</span><span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP every robot</button>`; }
+  if (s.kind) return `<b>${esc(s.words || s.title)}</b>${uploadPill(s.upload)}${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun">New run</button><button class="primary" id="again">Run again</button>`;
+  const visit = kind === "visit" && isTags();
+  return `<span class="kinds">${b.map(x => `<button data-k="${x.kind}" class="${kind === x.kind ? "on" : ""}" ${x.ok ? "" : "disabled"} title="${esc(x.ok ? x.sub : x.why)}">${esc(x.title)}</button>`).join("")}</span>
+    ${visit ? `<div><div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map(p => `<span class="chip">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div></div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
+    ${uploadPill(T && T.upload)}<span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"}>Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</button>`;
+}
+function uploadPill(u) { if (!u) return ""; const c = {uploaded: "ok", failed: "bad", uploading: "warn", "will upload": "ok", off: "warn", practice: ""}[u.state] ?? "";
+  return `<span class="pill ${c}" title="Settings > This run">${esc(u.words)}</span>`; }
+function wireRunbar() {
+  document.querySelectorAll("[data-k]").forEach(x => x.onclick = () => { kind = x.dataset.k; store("mc_kind", kind); render(); });
+  if ($("undo")) $("undo").onclick = () => { order.pop(); render(); };
+  if ($("clear")) $("clear").onclick = () => { order = []; render(); };
+  if ($("start")) $("start").onclick = startRun;
+  if ($("again")) $("again").onclick = () => { kind = st().kind || kind; startRun(); };
+  if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; order = []; render(); };
+  if ($("stopbar")) $("stopbar").onclick = stopAll;
+  if ($("logbtn")) $("logbtn").onclick = () => alert((st().lines || []).join("\n") + "\n\nFolder: " + (st().folder || ""));
+}
+async function startRun() {
+  if (!kind) return;
+  const pr = T.practice; let attended = false;
+  const title = ((T.buttons || []).find(x => x.kind === kind) || {}).title || kind;
+  if (!pr) {
+    if (!confirm(`Start ${title} on every robot on the table?`)) return;
+    if (T.attended_only) { attended = confirm("At school the robots drive only while Jay-Sun is in the room. Is he here?"); if (!attended) return; }
+    else if (T.prefs && T.prefs.values.watching !== "ask") attended = T.prefs.values.watching === "yes";
+    else attended = confirm("Will you stay with the robots? (OK: the run may ask you here about a robot it is not sure about near an edge. Cancel: it decides alone.)");
+  }
+  let clear_space = !!pr;
+  if (!pr && T.clear_space && T.clear_space.words) clear_space = confirm(T.clear_space.words);
+  const body = {kind, attended, clear_space};
+  if (kind === "visit" && order.length) { body.order = order.join(","); body.keep_unreadable = keepUnreadable; }
+  dismissed = null;
+  try { await api("/api/start/run", body); flash(pr ? "Practice started (the simulator)" : "Started"); LIVE = null; await startLoad(); } catch (e) { flash(e.message, true); }
+}
+async function stopAll() { try { const r = await api("/api/start/stop", {}); flash("STOP sent: " + r.stopped.join(", ")); await startLoad(); } catch (e) { flash(e.message, true); } }
+$("stoptop").onclick = stopAll;
+
+// ------------------------------------------------------------------ settings drawer
+const RUN_ROWS = [["upload", "Upload the run's logs when it ends (robots)", "run"], ["sleep_when_done", "Robots sleep as soon as a run ends", "adv"],
+  ["roam_min", "Free roam minutes (school)", "advn"], ["visit_speed_cms", "Visit points: speed (cm/s)", "advn"], ["visit_dwell_s", "Visit points: stop at each point (s)", "advn"],
+  ["practice_robots", "Practice robots", "advn"]];
+function drawerHTML() {
+  const a = (T && T.advanced) || {}, run = (S && S.settings && S.settings.run) || {}, saf = (S && S.settings && S.settings.safety) || {}, info = (S && S.safety_info) || [];
+  const byHand = Object.entries(saf).filter(([k, v]) => v !== "auto");
+  return `<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-size:18px">Settings</h2><span><button class="ghost" id="close">Close</button> <button class="stop" id="stopdrawer">STOP</button></span></div>
+  <p class="small muted">Only what changes a run is here. Everything the system decides by itself lives under Safety and the old page, out of the way.</p>
+  <div class="card" style="padding:12px;margin-top:10px"><h3>This run</h3><div class="kv">${RUN_ROWS.map(([k, t, g]) => g === "run" ? `<span>${t}</span><input type="checkbox" data-run="${k}" ${run[k] ? "checked" : ""}>`
+    : g === "adv" ? `<span>${t}</span><input type="checkbox" data-advb="${k}" ${a[k] ? "checked" : ""}>` : `<span>${t}</span><input type="number" data-advn="${k}" value="${esc(a[k])}">`).join("")}
+    ${isTags() ? `<span>Visit points: try stickers the camera cannot read</span><input type="checkbox" id="keepun" ${keepUnreadable ? "checked" : ""}>` : ""}</div>
+    ${T && T.upload_migrated ? `<p class="tiny" style="color:var(--amber)">${esc(T.upload_migrated)}</p>` : ""}</div>
+  <div class="card" style="padding:12px;margin-top:10px"><details id="safetybox" ${safetyOpen ? "open" : ""}><summary style="list-style:none"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><b>Safety</b> <span class="muted small">${info.length} switches</span></div>${byHand.length ? `<span class="pill warn">${byHand.length} set by hand</span>` : `<span class="pill ok">all decided automatically</span>`}</div>
+    <div class="tiny muted" style="margin-top:3px">Nothing to set for a normal run. Each switch keeps the old way one choice away. A change here goes to every run on this Pi (safety.json) until it is back on auto.</div></summary>
+    <input id="ssearch" placeholder="Find a switch (blind, edge, never still...)" style="width:100%;margin:10px 0 2px;padding:7px 10px;border-radius:8px;border:1px solid var(--line)">
+    ${info.map(q => `<div class="srow" data-k="${esc((q.env + " " + q.what).toLowerCase())}"><div><div class="small">${esc(q.what)}</div><div class="mono muted">${esc(q.env)}</div></div><div><select data-saf="${esc(q.env)}"><option value="auto" ${saf[q.env] === "auto" || saf[q.env] == null ? "selected" : ""}>auto (${esc(q.default)})</option><option value="${esc(q.old)}" ${saf[q.env] === q.old ? "selected" : ""}>old way (${esc(q.old)})</option>${saf[q.env] && saf[q.env] !== "auto" && saf[q.env] !== q.old ? `<option selected>${esc(saf[q.env])}</option>` : ""}</select></div></div>`).join("")}</details></div>
+  <div class="card" style="padding:12px;margin-top:10px"><h3>The old page</h3><div class="small muted">Setup, Cameras &amp; table, Measure, Preferences and every typed value: the page as it was, kept.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center"><a class="ghost" href="/classic" style="text-decoration:none">Open the old page</a><label class="small"><input type="checkbox" id="classicdef" ${a.classic_page ? "checked" : ""}> Open the old page by default</label></div></div>`;
+}
+function wireDrawer() {
+  $("close").onclick = () => { drawerOpen = false; $("drawer").classList.remove("open"); };
+  $("stopdrawer").onclick = stopAll;
+  document.querySelectorAll("[data-run]").forEach(e => e.onchange = async () => { try { S = await api("/api/settings", {run: {[e.dataset.run]: e.checked}}); await startLoad(); flash("Saved"); } catch (x) { flash(x.message, true); } });
+  document.querySelectorAll("[data-advb]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advb]: e.checked}));
+  document.querySelectorAll("[data-advn]").forEach(e => e.onchange = () => saveAdv({[e.dataset.advn]: +e.value}));
+  if ($("keepun")) $("keepun").onchange = () => { keepUnreadable = $("keepun").checked; };
+  $("classicdef").onchange = () => saveAdv({classic_page: $("classicdef").checked});
+  const box = $("safetybox"); box.ontoggle = () => { safetyOpen = box.open; };
+  $("ssearch").oninput = () => { const v = $("ssearch").value.toLowerCase(); document.querySelectorAll(".srow").forEach(r => r.classList.toggle("hidden", !!v && !r.dataset.k.includes(v))); };
+  document.querySelectorAll("[data-saf]").forEach(e => e.onchange = async () => { try { S = await api("/api/settings", {safety: {[e.dataset.saf]: e.value}}); flash("Safety saved: " + e.dataset.saf + " = " + e.value); render(); } catch (x) { flash(x.message, true); } });
+}
+async function saveAdv(d) { try { T = await api("/api/start/advanced", d); flash("Saved"); render(); } catch (e) { flash(e.message, true); } }
+function openDrawer(safety) { drawerOpen = true; if (safety) safetyOpen = true; $("drawer").innerHTML = drawerHTML(); wireDrawer(); $("drawer").classList.add("open"); }
+$("gear").onclick = () => openDrawer(false);
+$("safepill").onclick = () => openDrawer(true);
+
+// ------------------------------------------------------------------ render + polling
+function render() {
+  if (!S || !T) return;
+  $("place").textContent = (S.site && S.site.title) || "Home";
+  $("mode").textContent = T.practice ? "Practice (simulator)" : "Robots (real)";
+  $("mode").className = "pill " + (T.practice ? "" : "bad");
+  const s = st();
+  $("runword").textContent = s.stopping ? "Stopping…" : s.running ? `${s.title}${s.practice ? " (practice)" : ""} · ${fmt(s.elapsed_s)}` : (T.robots && T.robots.words || "").split(";")[0];
+  const saf = (S.settings && S.settings.safety) || {}, nh = Object.values(saf).filter(v => v !== "auto").length;
+  $("safepill").textContent = nh ? `Safety: ${nh} set by hand` : "Safety: auto"; $("safepill").className = "pill " + (nh ? "warn" : "ok");
+  const cd = T.code || {};
+  $("codebanner").innerHTML = cd.changed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg);margin-top:8px"><b>New code on the Pi.</b> <span class="small">${esc(cd.words || "")}</span> <button class="primary" id="restartmc" ${going() || cd.running ? "disabled" : ""}>Restart Mission Control</button></div>` : "";
+  if ($("restartmc")) $("restartmc").onclick = async () => { try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } };
+  drawMap();
+  const hs = handHTML(); if ($("handslot").dataset.h !== hs.replace(/t=\d+/g, "")) { $("handslot").innerHTML = hs; $("handslot").dataset.h = hs.replace(/t=\d+/g, ""); wireHand(); }
+  $("cards").innerHTML = cardsHTML();
+  $("health").innerHTML = healthHTML();
+  if (!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".runbar"))) { $("runbar").innerHTML = runbarHTML(); wireRunbar(); }
+  if (drawerOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest("#drawer"))) { $("drawer").innerHTML = drawerHTML(); wireDrawer(); }
+  soundLabel(); handCheck();
+}
+async function stateLoad() { try { S = await api("/api/state"); } catch (e) { flash("Mission Control is not answering: " + e.message, true); } }
+async function startLoad() { try { T = await api("/api/start"); } catch (e) { return; } render(); }
+async function liveLoad() { try { LIVE = await api("/api/live"); } catch (e) { return; } render(); }
+async function healthLoad() { try { PH = await api("/api/pi_health"); } catch (e) { return; } render(); }
+async function placeLoad() { try { const r = await fetch("/api/place"); if (r.ok) PLACE = await r.json(); } catch (e) { return; } render(); }
+(async () => {
+  kind = store("mc_kind"); await stateLoad(); await startLoad();
+  if (!kind || !(T.buttons || []).some(b => b.kind === kind && b.ok)) kind = ((T.buttons || []).find(b => b.ok) || {}).kind || null;
+  if (S && S.site && !S.site.colours) S.site.colours = {};
+  await liveLoad(); healthLoad(); placeLoad();
+  setInterval(startLoad, 2000); setInterval(liveLoad, 1500); setInterval(healthLoad, 4000); setInterval(placeLoad, 2000); setInterval(stateLoad, 10000);
+})();
+</script>
+</body>
+</html>

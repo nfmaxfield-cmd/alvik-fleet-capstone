@@ -65,6 +65,8 @@ ADV_DEFAULTS = {
                                    # stop and turn on the spot), at home and at school
     "battery_floor": "",           # (e14) the battery floor for every run at this site, % ("" = the default: 25, free
                                    # roam 10); read by every run (engine_checks.battery_floor_used), tmux ones too
+    "classic_page": False,         # (Mission Control build, Nick 12 Nov) the old page at / instead of the new map-first
+                                   # page (kept, off; always at /classic). MIRLT_MC_PAGE=classic does the same
     "calib_curves": "auto",        # (e12, Nick 10 Nov) the calibration's curve phase: auto (robots on firmware 2026-11-05c+
                                    # when free roam drives curves), on, off (calib_run --arc-phase)
 }

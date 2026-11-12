@@ -46,7 +46,23 @@ import workspace as WS    # noqa: E402
 import setup_job as SJ    # noqa: E402
 import safety_group as SG  # noqa: E402  (e18: the Safety group, one box on the Run screen)
 
-PAGE = os.path.join(HERE, "mission_control.html")
+PAGE = os.path.join(HERE, "mission_control.html")              # the old page (kept: /classic)
+TABLE_PAGE = os.path.join(HERE, "mission_control_table.html")  # (12 Nov) the map-first page, the default at /
+
+
+def page_for(path, S=None, env=None):
+    """Which page a path serves: /classic the old one, /table the new one, / the new one unless the old is chosen."""
+    env = os.environ if env is None else env
+    if path == "/classic":
+        return PAGE
+    if path == "/table":
+        return TABLE_PAGE
+    classic = (env.get("MIRLT_MC_PAGE") or "").strip().lower() == "classic"
+    try:
+        classic = classic or bool(S.start.adv.get("classic_page"))
+    except AttributeError:
+        pass
+    return PAGE if classic or not os.path.exists(TABLE_PAGE) else TABLE_PAGE
 PORT = 8095
 PREVIEW_STEP_S = 0.25     # the preview's sampling of the plan (the slider's resolution). No DOE: display only
 MONDAY_DEMO = os.environ.get("MIRLT_MONDAY_DEMO", "0") == "1"   # (e08, A10) the 2 Nov Monday demo's mission machinery
@@ -1395,8 +1411,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         S = self.session
         try:
-            if path in ("/", "/index.html"):
-                with open(PAGE, "rb") as f:
+            if path in ("/", "/index.html", "/classic", "/table"):
+                # (Mission Control build, Nick 12 Nov) the new map-first page ("the table") at /; the old page kept at
+                # /classic, and at / again when Settings > "Open the old page by default" (or MIRLT_MC_PAGE=classic)
+                with open(page_for(path, S), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if path == "/api/state":
                 with S.lock:
@@ -1708,7 +1726,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-12mc-3"   # (Part 3) the Pi efficiency monitor beside every run this page starts (monitor_for), /api/pi_health. 1c: "2026-11-12mc-c"   # (1c) /api/live: the live table (live_view.py). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) RUN_DEFAULTS upload on; an old unchosen false follows it (upload_default_migrate; settings "by_hand"). 1a: Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-12mc-2"   # (Part 2) the map-first page (mission_control_table.html) at /; the old page at /classic (page_for; Settings > "Open the old page by default", MIRLT_MC_PAGE=classic). Part 3: "2026-11-12mc-3"   # (Part 3) the Pi efficiency monitor beside every run this page starts (monitor_for), /api/pi_health. 1c: "2026-11-12mc-c"   # (1c) /api/live: the live table (live_view.py). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) RUN_DEFAULTS upload on; an old unchosen false follows it (upload_default_migrate; settings "by_hand"). 1a: Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

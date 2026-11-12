@@ -104,6 +104,8 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
         with open(os.path.join(folder, "edge_parked.json")) as f:
             ep = json.load(f)
         needs = list(needs) + [str(q.get("words") if isinstance(q, dict) else q) for q in (ep.get("needs_hand") or [])]
+        needs += [str(q.get("robot") or q.get("name") or "") for q in (ep.get("needs_hand_robots") or [])
+                  if isinstance(q, dict)]
     except (OSError, ValueError, AttributeError):
         pass
     out = []
