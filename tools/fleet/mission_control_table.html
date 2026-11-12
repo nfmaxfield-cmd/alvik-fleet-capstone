@@ -8,7 +8,9 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-12a first version (Mission Control build). -->
+     Changelog: 2026-11-12a first version (Mission Control build).
+     2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
+     evidence, in plain words. -->
 <style>
 :root{--bg:#F6F7F9;--panel:#FFFFFF;--line:#E4E7EC;--ink:#101828;--muted:#5B6474;--accent:#2952CC;--accent-ink:#FFFFFF;
 --green:#12805C;--green-bg:#E7F6EF;--amber:#B54708;--amber-bg:#FEF3E2;--red:#B42318;--red-bg:#FDECEA;
@@ -57,6 +59,9 @@ svg.map{width:100%;height:auto;display:block;max-height:calc(100vh - 260px)}
 .hrow:first-of-type{border-top:0}
 .lv{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--line)}
 .lv.ok{background:var(--green)}.lv.amber{background:var(--amber)}.lv.red{background:var(--red)}
+.ctcam{border-top:1px solid var(--line);padding:8px 0 4px}.ctcam:first-of-type{border-top:0}
+.ctgrid{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.ctjob{font-size:11.5px;color:var(--muted);text-align:center}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:9;overflow:auto;padding:18px;transform:translateX(100%);transition:transform .2s;box-shadow:-4px 0 16px rgba(16,24,40,.08)}
 .drawer.open{transform:none}
 .drawer h3{margin:0 0 6px;font-size:15px}
@@ -98,6 +103,7 @@ details>summary{cursor:pointer}
     <div id="cards" class="rail"></div>
     <div class="card health hidden" id="logcard" style="padding:10px 12px"></div>
     <div class="card health" id="health"></div>
+    <div class="card health" id="camtrust"></div>
     <div class="err" id="err"></div>
   </aside>
 </main>
@@ -106,6 +112,7 @@ details>summary{cursor:pointer}
 
 <script>
 "use strict";
+let CTR = null;      // (e20) the Camera trust view
 let S = null, T = null, LIVE = null, PH = null, PLACE = null, kind = null, order = [], keepUnreadable = true;
 let logOpen = false, soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
 const $ = id => document.getElementById(id);
@@ -237,6 +244,39 @@ function healthHTML() {
     <div class="source">Measured: each core, the temperature and throttle flags, picture lag per camera, the planner's loop and the detector's share of its core, every 2 s by tools/pi/pi_monitor.py. Source: ${esc(PH.source)}.</div>`;
 }
 
+// ------------------------------------------------------------------ (e20) camera trust: per camera, per job, per square
+const CT_COL = {trusted: "var(--green)", unproven: "var(--line)", distrusted: "var(--red)"};
+const CT_JOBS = [["position", "position", ["motion", "lights", "lock", "ml", "tags"]], ["heading", "heading", ["motion-heading", "ml", "tags"]], ["identity", "telling robots apart", ["motion", "ml", "tags", "lights", "lock"]]];
+function ctPick(m, job, methods) {   // the method with the most checks for this job on this camera
+  let best = null; for (const k of methods) { const d = (m[k] || {})[job]; if (d && d.whole && (!best || d.whole.checks > best.d.whole.checks)) best = {k, d}; } return best; }
+function ctBoard(areas, board) {     // one little board: a square per board area, coloured by the camera's state there
+  const n = Math.max(4, ...Object.keys(areas || {}).map(k => Math.max(...k.split(",").map(v => +v + 1))));
+  const z = 13, w = n * z;
+  let r = `<svg width="${w}" height="${w}" viewBox="0 0 ${w} ${w}" role="img" aria-label="trust by board square"><rect width="${w}" height="${w}" fill="var(--table)"/>`;
+  for (const [k, v] of Object.entries(areas || {})) { const [i, j] = k.split(",").map(Number); if (i < 0 || j < 0) continue;
+    r += `<rect x="${i * z + 1}" y="${(n - 1 - j) * z + 1}" width="${z - 2}" height="${z - 2}" rx="2" fill="${CT_COL[v.state] || "var(--line)"}" opacity="${Math.min(1, 0.35 + (v.checks || 0) / 40)}"><title>square ${esc(k)}: ${esc(v.state)}, ${v.checks} checks${v.agree != null ? ", agreed " + Math.round(100 * v.agree) + " %" : ""}</title></rect>`; }
+  return r + `</svg>`;
+}
+function camTrustHTML() {
+  if (!CTR) return `<b>Camera trust</b><div class="small muted">Reading...</div>`;
+  const cams = (CTR.summary && CTR.summary.cameras) || {};
+  const names = Object.keys(cams).sort();
+  if (!names.length) return `<b>Camera trust</b><div class="small muted">No checks yet at this site: every camera starts unproven and earns trust from the robots' own wheels and gyro.</div><div class="source">Source: ${esc(CTR.source)}.</div>`;
+  const word = {trusted: "trusted", unproven: "not proven yet", distrusted: "not trusted"};
+  const rows = names.map(c => { const m = cams[c];
+    const jobs = CT_JOBS.map(([job, label, methods]) => { const p = ctPick(m, job, methods); if (!p) return "";
+      const w = p.d.whole; return `<div><div class="ctjob">${esc(label)}</div>${ctBoard(p.d.areas)}<div class="ctjob"><span class="lv ${w.state === "trusted" ? "ok" : w.state === "distrusted" ? "red" : ""}"></span>${esc(word[w.state] || w.state)}<br>${w.checks} checks</div></div>`; }).join("");
+    return `<div class="ctcam"><b>${esc(c)}</b>${jobs ? `<div class="ctgrid">${jobs}</div>` : `<div class="tiny muted">no checks yet</div>`}</div>`; }).join("");
+  const calls = (CTR.summary && CTR.summary.calls) || {};
+  const ck = Object.entries(calls).map(([k, v]) => `${esc(k.replace("|", " for "))}: ${v}`).join(", ");
+  return `<b>Camera trust</b>
+    <div style="margin-top:4px">${rows}</div>
+    <p class="caption" style="margin-top:6px">Each little board is the table seen by one camera for one job: green where that camera has earned trust there, grey where it has too few checks, red where its answers disagree with the evidence.</p>
+    ${ck ? `<div class="tiny muted">Detector calls routed to each camera: ${ck}.</div>` : ""}
+    <details class="tiny"><summary>In words</summary>${(CTR.words || []).map(w => `<div>${esc(w)}</div>`).join("")}</details>
+    <div class="source">Measured: how often each camera's answers agreed with the robots' own wheels and gyro, with other cameras and with each robot's own heading (a square is darker the more checks it rests on). Source: ${esc(CTR.source)}.</div>`;
+}
+
 // ------------------------------------------------------------------ the run bar
 function runbarHTML() {
   const s = st(), b = (T && T.buttons) || [];
@@ -336,6 +376,7 @@ function render() {
   const hs = handHTML(); if ($("handslot").dataset.h !== hs.replace(/t=\d+/g, "")) { $("handslot").innerHTML = hs; $("handslot").dataset.h = hs.replace(/t=\d+/g, ""); wireHand(); }
   $("cards").innerHTML = cardsHTML();
   $("health").innerHTML = healthHTML();
+  $("camtrust").innerHTML = camTrustHTML();
   $("logcard").classList.toggle("hidden", !logOpen);
   if (logOpen) $("logcard").innerHTML = `<div style="display:flex;justify-content:space-between"><b>The run's last lines</b><button class="ghost tiny" id="logclose" style="padding:1px 8px">Close</button></div><pre class="mono" style="white-space:pre-wrap;max-height:260px;overflow:auto;margin:6px 0 0">${esc((st().lines || []).join("\n"))}</pre><div class="tiny muted">Folder: ${esc(st().folder || "")}</div>`;
   if ($("logclose")) $("logclose").onclick = () => { logOpen = false; render(); };
@@ -347,12 +388,14 @@ async function stateLoad() { try { S = await api("/api/state"); } catch (e) { fl
 async function startLoad() { try { T = await api("/api/start"); } catch (e) { return; } render(); }
 async function liveLoad() { try { LIVE = await api("/api/live"); } catch (e) { return; } render(); }
 async function healthLoad() { try { PH = await api("/api/pi_health"); } catch (e) { return; } render(); }
+async function camTrustLoad() { try { CTR = await api("/api/camera_trust"); } catch (e) { return; } render(); }
 async function placeLoad() { try { const r = await fetch("/api/place"); if (r.ok) PLACE = await r.json(); } catch (e) { return; } render(); }
 (async () => {
   kind = store("mc_kind"); await stateLoad(); await startLoad();
   if (!kind || !(T.buttons || []).some(b => b.kind === kind && b.ok)) kind = ((T.buttons || []).find(b => b.ok) || {}).kind || null;
   if (S && S.site && !S.site.colours) S.site.colours = {};
-  await liveLoad(); healthLoad(); placeLoad();
+  await liveLoad(); healthLoad(); placeLoad(); camTrustLoad();
+  setInterval(camTrustLoad, 10000);
   setInterval(startLoad, 2000); setInterval(liveLoad, 1500); setInterval(healthLoad, 4000); setInterval(placeLoad, 2000); setInterval(stateLoad, 10000);
 })();
 </script>

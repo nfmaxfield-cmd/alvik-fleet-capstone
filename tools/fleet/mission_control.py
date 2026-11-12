@@ -285,6 +285,36 @@ def pi_health_state(S):
             "series": [{k: r.get(k) for k in keys} for r in rows[-90:]], "version": PM.VERSION}
 
 
+def camera_trust_state(S):
+    """(e20) The "Camera trust" view: the newest run's camera_trust.json (written by free roam at every checkpoint and
+    end), else the site's own store (<conf>/camera_trust/<site>.json). {"source", "file", "summary", "words"}."""
+    import camera_trust as CT
+    folders = []
+    st = getattr(S, "start", None)
+    if st is not None and getattr(st, "job", None) is not None:
+        import live_view as LV
+        folders += [st.job.folder, LV.freeroam_folder(st) or ""]
+    if getattr(S, "run", None) is not None:
+        folders += [S.run.folder]
+    best = None
+    for f in folders:
+        p = os.path.join(f or "", "camera_trust.json")
+        if f and os.path.exists(p) and (best is None or os.path.getmtime(p) > os.path.getmtime(best)):
+            best = p
+    if best:
+        try:
+            with open(best) as fh:
+                d = json.load(fh)
+            return {"source": "this run's camera_trust.json (saved every minute and at the end)", "file": best,
+                    "summary": d, "words": d.get("words") or [], "version": CT.VERSION}
+        except (OSError, ValueError):
+            pass
+    site = ((getattr(S, "site", None) or {}).get("name")) or "home"
+    b = CT.for_site(site)
+    return {"source": "the site's saved scores (%s)" % CT.store_path(site), "file": CT.store_path(site),
+            "summary": b.summary(), "words": b.plain_words(), "version": CT.VERSION}
+
+
 def upload_default_migrate(settings):
     """(Mission Control build, 12 Nov, 1b) Uploads are on by default. settings.json is saved whole, so a file saved
     before this build holds "upload": false whether or not anyone chose it. Unless the page recorded upload as set by
@@ -1425,6 +1455,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, clean(S.start.state()))
             if path == "/api/pi_health":               # (12 Nov, Part 3) the Pi health panel
                 return self._send(200, clean(pi_health_state(S)))
+            if path == "/api/camera_trust":            # (e20) the Camera trust view: what each camera is trusted for, where
+                return self._send(200, clean(camera_trust_state(S)))
             if path == "/api/live":                    # (12 Nov, 1c) the live table: robots, their doubt, the points
                 import live_view as LV
                 return self._send(200, clean(LV.snapshot(S.start)))
