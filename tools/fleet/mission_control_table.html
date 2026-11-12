@@ -254,7 +254,7 @@ function ctBoard(areas, board) {     // one little board: a square per board are
   const z = 13, w = n * z;
   let r = `<svg width="${w}" height="${w}" viewBox="0 0 ${w} ${w}" role="img" aria-label="trust by board square"><rect width="${w}" height="${w}" fill="var(--table)"/>`;
   for (const [k, v] of Object.entries(areas || {})) { const [i, j] = k.split(",").map(Number); if (i < 0 || j < 0) continue;
-    r += `<rect x="${i * z + 1}" y="${(n - 1 - j) * z + 1}" width="${z - 2}" height="${z - 2}" rx="2" fill="${CT_COL[v.state] || "var(--line)"}" opacity="${Math.min(1, 0.35 + (v.checks || 0) / 40)}"><title>square ${esc(k)}: ${esc(v.state)}, ${v.checks} checks${v.agree != null ? ", agreed " + Math.round(100 * v.agree) + " %" : ""}</title></rect>`; }
+    r += `<rect x="${i * z + 1}" y="${(n - 1 - j) * z + 1}" width="${z - 2}" height="${z - 2}" rx="2" fill="${CT_COL[v.state] || "var(--line)"}" opacity="${Math.min(1, 0.35 + (v.checks || 0) / 40)}"><title>square ${esc(k)}: ${esc(v.state)}, ${v.checks} check${v.checks === 1 ? "" : "s"}${v.agree != null ? ", agreed " + Math.round(100 * v.agree) + " %" : ""}</title></rect>`; }
   return r + `</svg>`;
 }
 function camTrustHTML() {
@@ -265,13 +265,13 @@ function camTrustHTML() {
   const word = {trusted: "trusted", unproven: "not proven yet", distrusted: "not trusted"};
   const rows = names.map(c => { const m = cams[c];
     const jobs = CT_JOBS.map(([job, label, methods]) => { const p = ctPick(m, job, methods); if (!p) return "";
-      const w = p.d.whole; return `<div><div class="ctjob">${esc(label)}</div>${ctBoard(p.d.areas)}<div class="ctjob"><span class="lv ${w.state === "trusted" ? "ok" : w.state === "distrusted" ? "red" : ""}"></span>${esc(word[w.state] || w.state)}<br>${w.checks} checks</div></div>`; }).join("");
+      const w = p.d.whole; return `<div><div class="ctjob">${esc(label)}</div>${ctBoard(p.d.areas)}<div class="ctjob"><span class="lv ${w.state === "trusted" ? "ok" : w.state === "distrusted" ? "red" : ""}"></span>${esc(word[w.state] || w.state)}<br>${w.checks} check${w.checks === 1 ? "" : "s"}</div></div>`; }).join("");
     return `<div class="ctcam"><b>${esc(c)}</b>${jobs ? `<div class="ctgrid">${jobs}</div>` : `<div class="tiny muted">no checks yet</div>`}</div>`; }).join("");
   const calls = (CTR.summary && CTR.summary.calls) || {};
   const ck = Object.entries(calls).map(([k, v]) => `${esc(k.replace("|", " for "))}: ${v}`).join(", ");
   return `<b>Camera trust</b>
     <div style="margin-top:4px">${rows}</div>
-    <p class="caption" style="margin-top:6px">Each little board is the table seen by one camera for one job: green where that camera has earned trust there, grey where it has too few checks, red where its answers disagree with the evidence.</p>
+    <p class="caption" style="margin-top:6px">Each little board is the table seen by one camera for one job: green where that camera has earned trust there, grey where it has too few checks, red where its answers disagree with the evidence, and blank where it has not been checked.</p>
     ${ck ? `<div class="tiny muted">Detector calls routed to each camera: ${ck}.</div>` : ""}
     <details class="tiny"><summary>In words</summary>${(CTR.words || []).map(w => `<div>${esc(w)}</div>`).join("")}</details>
     <div class="source">Measured: how often each camera's answers agreed with the robots' own wheels and gyro, with other cameras and with each robot's own heading (a square is darker the more checks it rests on). Source: ${esc(CTR.source)}.</div>`;
