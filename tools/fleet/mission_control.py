@@ -72,7 +72,10 @@ RUN_DEFAULTS = {
     "sim_true_floor": "",             # simulator through the cameras, tags: the real table "x0,y0,x1,y1" when the map's
                                       # outline is wrong (feel out the table's tests); "" = the map's
     "farm": False,                    # robots: each camera tracked in its own process (trackfarm.py)
-    "upload": False,                  # robots: upload the run's logs (a release with a tag of its own)
+    "upload": True,                   # robots: upload the run's logs (a release with a tag of its own). (Mission Control
+                                      # build, Nick 12 Nov, 1b) ON by default (F2: runs from the Start screen never
+                                      # uploaded); a settings.json saved before with false is moved to true unless the
+                                      # page recorded it as set by hand (settings "by_hand")
     "turn_pause": True,               # after each turn on the spot, stand until the cameras agree with the robot's own
                                       # pose, then drive (run_plan --turn-pause, 2026-10-29)
     "straighten": True,               # a robot off its start pose is turned on the spot or driven to its spot, then
@@ -212,6 +215,28 @@ def conn_default(dry=None, probe=_port_answers):
                                   "simulator"}
 
 
+def upload_default_migrate(settings):
+    """(Mission Control build, 12 Nov, 1b) Uploads are on by default. settings.json is saved whole, so a file saved
+    before this build holds "upload": false whether or not anyone chose it. Unless the page recorded upload as set by
+    hand, it follows the new default. Returns words when it moved it, else ""."""
+    run = settings.setdefault("run", {})
+    if run.get("upload") is False and "run.upload" not in (settings.get("by_hand") or {}):
+        run["upload"] = RUN_DEFAULTS["upload"]
+        w = ("Uploads are now on by default (12 Nov): this site's saved 'upload: false' was never set by hand, so runs "
+             "on the robots upload their logs when they end. Turn it off in Settings > This run.")
+        print(w, flush=True)
+        return w
+    return ""
+
+
+def mark_by_hand(settings, d):
+    """The run settings a person changed on the page (only those whose value really changed)."""
+    bh = settings.setdefault("by_hand", {})
+    for k, v in ((d or {}).get("run") or {}).items():
+        if k == "upload" and settings.get("run", {}).get(k) != v:
+            bh["run.upload"] = round(time.time(), 1)
+
+
 class Session:
     def __init__(self, folder, map_path=None, port=PORT):
         self.dir = os.path.abspath(folder)
@@ -231,7 +256,8 @@ class Session:
             self.save_map()
         self.settings = {"planner": {}, "mission": {}, "run": dict(RUN_DEFAULTS),
                          "warmup": {k: getattr(WU, k) for k in WARMUP_KNOBS},
-                         "safety": SG.settings_defaults()}       # (e18) every safety switch, "auto" by default
+                         "safety": SG.settings_defaults(),       # (e18) every safety switch, "auto" by default
+                         "by_hand": {}}         # (12 Nov) run settings a person changed on the page: {"run.upload": t}
         sp = os.path.join(self.dir, "settings.json")
         if os.path.exists(sp):
             try:
@@ -241,6 +267,7 @@ class Session:
                     self.settings[k].update(saved.get(k) or {})
             except ValueError:
                 pass
+        self.upload_migrated = upload_default_migrate(self.settings)
         self.gap_notices = []
         self.lock_gaps("the saved settings.json")
         self.mission = None          # the mission map (tasks) last made
@@ -1471,6 +1498,7 @@ class Handler(BaseHTTPRequestHandler):
                     S.set_map(d)
                     return self._send(200, S.state())
                 if path == "/api/settings":
+                    mark_by_hand(S.settings, d)          # (12 Nov, 1b) upload set by hand is kept as set
                     for k in S.settings:
                         S.settings[k].update((d.get(k) or {}))
                     S.save_settings()
@@ -1619,7 +1647,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-12mc-a"   # (Mission Control build, 12 Nov, 1a) Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) RUN_DEFAULTS upload on; an old unchosen false follows it (upload_default_migrate; settings "by_hand"). 1a: Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

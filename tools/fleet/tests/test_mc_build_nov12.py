@@ -202,3 +202,79 @@ def test_the_start_screen_says_stopping_then_stopped_never_ended(tmp_path, leade
             os.killpg(st.job.p.pid, signal.SIGKILL)
         except OSError:
             pass
+
+
+# ------------------------------------------------------------------------------------------- (b) uploads on by default
+def test_uploads_are_on_by_default_and_an_old_unchosen_false_follows_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MIRLT_SITE", "home")
+    assert MC.RUN_DEFAULTS["upload"] is True
+    d = tmp_path / "mc"
+    d.mkdir()
+    (d / "settings.json").write_text(json.dumps({"run": dict(MC.RUN_DEFAULTS, upload=False)}))   # saved whole, before
+    S = MC.Session(str(d))
+    assert S.settings["run"]["upload"] is True and S.upload_migrated
+    # set by hand on the page: kept as set
+    MC.mark_by_hand(S.settings, {"run": {"upload": False}})
+    S.settings["run"]["upload"] = False
+    S.save_settings()
+    S2 = MC.Session(str(d))
+    assert S2.settings["run"]["upload"] is False and not S2.upload_migrated
+    # saving the whole run table unchanged is not "by hand"
+    bh = {}
+    MC.mark_by_hand({"run": {"upload": True}, "by_hand": bh}, {"run": {"upload": True, "timeout_s": 900}})
+    assert bh == {}
+
+
+def test_robot_runs_get_upload_and_home_free_roam_uploads_after_it_ends(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MIRLT_SITE", "home")
+    import start_job as SJB
+    S = MC.Session(str(tmp_path / "mc"))
+    st = SJB.Starter(S, where={"site": "home", "kind": "home", "words": "x"}, practice=False)
+    got = {}
+
+    class FakeJob:
+        def __init__(self, kind, cmd, folder, env=None, practice=False):
+            got["cmd"] = cmd
+    monkeypatch.setattr(SJB, "ProcJob", FakeJob)
+    st.start_home("freeroam", False)
+    assert got["cmd"][:2] == ["bash", "-c"] and "freeroam-run" in got["cmd"][2] and "freeroam-upload" in got["cmd"][2]
+    S.settings["run"]["upload"] = False
+    st.start_home("freeroam", False)
+    assert "freeroam-upload" not in " ".join(got["cmd"])
+    assert st.upload_state(None, False, False)["state"] == "off"
+    S.settings["run"]["upload"] = True
+    f = tmp_path / "r"
+    f.mkdir()
+    assert st.upload_state(str(f), True, False)["state"] == "will upload"
+    (f / "stdout.txt").write_text("...\nUploading x and recording y to release t\n")
+    assert st.upload_state(str(f), False, False)["state"] == "uploading"
+    (f / "stdout.txt").write_text("Uploading x\nAll up: https://github.com/o/r/releases/tag/t\n")
+    u = st.upload_state(str(f), False, False)
+    assert u["state"] == "uploaded" and u["link"].endswith("/tag/t")
+    assert st.upload_state(str(f), False, True)["state"] == "practice"
+
+
+def test_a_school_run_on_the_robots_passes_upload(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MIRLT_SITE", "school-conference")
+    S = MC.Session(str(tmp_path / "mc"))
+    S.others_driving = lambda: ""
+    got = {}
+
+    class FakeRun:
+        def __init__(self, kind, folder, cmd, env=None):
+            got["cmd"] = cmd
+            self.folder = folder
+
+        def status(self):
+            return {}
+
+        def alive(self):
+            return False
+    monkeypatch.setattr(MC, "Run", FakeRun)
+    S.start_cam_run("visit", "robots", {"extra": []})
+    assert "--upload" in got["cmd"]
+    S.start_cam_run("visit", "sim-cameras", {"extra": []})
+    assert "--upload" not in got["cmd"]                 # practice: nothing uploads

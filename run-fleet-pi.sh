@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# (2026-11-12 Mission Control build) `freeroam-upload`: Mission Control's free roam on the robots uploads its logs and
+# frames when it ends (uploads on by default), the recorder left running for Mission Control's camera.
 # (2026-11-11 e16, the Pi audit; Nick: "If it's not useful for executing the program, we can drop it") the recorder
 # saves NO video by default: it serves its pictures (tracking, the setup, Mission Control) and the runs save their own
 # frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both|layouts]`
@@ -476,6 +478,15 @@ case "$WHAT" in
     [ "${MIRLT_REPLAY_CLIPS:-1}" != 0 ] && { setsid nohup timeout 50000 nice -n 15 python3 tools/analysis/replay_clips.py auto "$D" --video "$FR" --upload > "$D-replay.log" 2>&1 < /dev/null & }
     python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "freeroam-$(basename "$D")" --unique-tag \
       --exclude frames --recording-dir "$FR" || echo "Upload failed: the files stay in $D and $FR (run ./run-fleet-pi.sh freeroam-finish again)" ;;
+  freeroam-upload)  # (Mission Control build, 12 Nov) Mission Control's free roam on the robots: the newest free roam's logs
+                    # and its own frames uploaded, the recorder left running (Mission Control's camera); as freeroam-finish
+    D="$(ls -td logs/*-freeroam 2>/dev/null | head -1)"
+    [ "$DRY" = 1 ] && { echo "(dry run: nothing uploaded)"; exit 0; }
+    [ -z "$D" ] && { echo "No free-roam folder found."; exit 1; }
+    OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
+    FR="$(python3 tools/fleet/diskguard.py where "$D")"
+    python3 tools/pi/upload_session.py --recordings "$OUT" --session "$D" --tag "freeroam-$(basename "$D")" --unique-tag \
+      --exclude frames --recording-dir "$FR" || echo "Upload failed: the files stay in $D and $FR (run ./run-fleet-pi.sh freeroam-upload again)" ;;
   freeroam-status)
     D=""; [ "$DRY" = 1 ] && D="--dry"
     python3 tools/fleet/freeroam.py status $D

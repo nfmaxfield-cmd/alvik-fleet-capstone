@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-12mc-a"   # (Mission Control build, 12 Nov, 1a) STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -794,9 +794,46 @@ class Starter:
             else:
                 cmd = ["bash", sh, "freeroam-run", hrs] + (["--attended"] if getattr(self, "attended", False) else []) + \
                     ["--motion", self.adv.get("roam_motion", "curves")] + prefs_args(self.prefs)
+                if self.upload_on():
+                    # (12 Nov, 1b) as the SSH way's freeroam-finish, but the recorder keeps running for Mission
+                    # Control's camera: the run's logs and its own frames folder go up when it ends (a Stop included)
+                    import shlex
+                    cmd = ["bash", "-c", "%s; bash %s freeroam-upload" % (shlex.join(cmd), shlex.quote(sh))]
         env.update(prefs_env(self.prefs))
         self.job = ProcJob(kind, cmd, folder, env=env, practice=pr)
         return {"started": kind, "folder": folder}
+
+    def upload_on(self):
+        """(12 Nov, 1b) Upload when a run on the robots ends: the run settings' upload (on by default)."""
+        return bool(((self.S.settings or {}).get("run") or {}).get("upload", True))
+
+    def upload_state(self, folder=None, running=False, practice=None):
+        """{"on", "state", "words", "link"}: will upload / uploading / uploaded / failed / off / practice, from the run's
+        own output (upload_session.py's lines)."""
+        pr = self.practice() if practice is None else practice
+        on = self.upload_on()
+        if pr:
+            return {"on": on, "state": "practice", "words": "Practice: nothing is uploaded", "link": None}
+        if not on:
+            return {"on": False, "state": "off", "words": "Upload when it ends: off", "link": None}
+        txt = ""
+        for name in ("stdout.txt", "run_plan_stdout.txt", "mission_stdout.txt"):
+            for d in (folder, os.path.dirname(folder or "")):
+                try:
+                    with open(os.path.join(d or "", name), errors="replace") as f:
+                        txt += f.read()[-20000:]
+                except OSError:
+                    continue
+        link = None
+        if "All up: " in txt:
+            link = txt.rsplit("All up: ", 1)[1].split()[0] if txt.rsplit("All up: ", 1)[1].split() else None
+            return {"on": True, "state": "uploaded", "words": "Uploaded", "link": link}
+        if "Upload failed" in txt or "upload failed" in txt:
+            return {"on": True, "state": "failed", "words": "Upload failed: the files stay on the Pi (see the run's "
+                                                            "log)", "link": None}
+        if "Uploading " in txt or "uploading: " in txt:
+            return {"on": True, "state": "uploading", "words": "Uploading the run's logs ...", "link": None}
+        return {"on": True, "state": "will upload", "words": "Upload when it ends: on", "link": None}
 
     def stop_all(self):
         """The red Stop: every run this page started stops (its own Ctrl+C: `stop` to each of its robots), and on the
@@ -937,6 +974,7 @@ class Starter:
             w_ = self.start_failure_words(out.get("folder"))
             if w_:
                 out["words"], out["refused"] = w_, True
+        out["upload"] = self.upload_state(out.get("folder"), running, self.active_practice)   # (12 Nov, 1b)
         sw = getattr(self, "stopwatch", None)
         if sw is not None and getattr(sw, "kind", None) == kind and sw.t0 >= getattr(self, "started_t", 0) - 1:
             # (12 Nov, F1) STOP was pressed on this run: "stopping..." until every robot confirmed, then "stopped"
@@ -1193,6 +1231,8 @@ class Starter:
                 "attended_only": bool((self.S.site or {}).get("attended_only")),
                 "typed": self.typed_values(), "sites": self.site_choices(),
                 "corners_needed": self.corners_needed(), "code": self.code_state(),
+                "upload": self.upload_state(None, False, pr),           # (12 Nov, 1b) said before a run starts
+                "upload_migrated": getattr(self.S, "upload_migrated", ""),
                 "clear_space": self.clear_space_words()}
 
     def clear_space_words(self):
