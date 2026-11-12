@@ -64,6 +64,7 @@ VERSION_C = "freeroam-runner-2026-11-07c"   # 11-07c (e10 Phase C): the start's 
                                           # --silent-out, --no-tilt-recovery, --stop-lead; attended runs ask questions
                                           # (Mission Control's card); a failed heading crawl joins held, not out
                                           # 11-05d: --motion curves|stopturn, arc calibration save
+VERSION_TAGFREE = "freeroam-runner-2026-11-12tf"   # tag-free (12 Nov): tagfree.attach on the tracking layer (the detector on demand from the recorder's newest pictures, in a worker on the planner's core; overhead heading fused with each robot's own; MIRLT_TAGFREE auto/1/0), its summary in run.json, a fix's heading sigma passed on (kept apart from VERSION so the parallel e18 build's bump does not collide)
 HOME_BOARD = (0.0, 0.0, 122.24, 121.92)    # roam.py's board (the home plywood in the floor calibration's cm)
 FOLLOW_LOOK_CM = 8.0    # the robots' own front stop while driving: roam.py's 8 (the plywood reads ~10 cm ahead, 12
                         # stopped drives). Another robot's face at the planned gap is 7.9 cm or more away; the reflex
@@ -222,6 +223,15 @@ class Runner:
         self.pose_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if pose_to else None
         self.pose_to = pose_to
         self.frames, self.guard = frames, guard
+        # (tag-free, 12 Nov) the trained detector on demand where no roof tag names a robot: tagfree.py, MIRLT_TAGFREE
+        # auto (default: on when the model file is there) / 1 / 0; a missing model is said and the layer runs without it
+        self.tagfree = None
+        try:
+            import tagfree as TF
+            src_, mp_ = TF.for_runner(self, say=say)
+            self.tagfree = TF.attach(self.layer, src_, ctrl=self.ctrl, model_path=mp_, say=say)
+        except Exception as e:  # noqa: BLE001  (the run goes on without it)
+            say("(tag-free mode not started: %s)" % e)
         self.t0 = None
         self.joined = set()
 
@@ -682,7 +692,7 @@ class Runner:
                     self.layer.own(n, tp, oa[0], oa[1], oa[2], r.own[4] == "idle")
             for f in self.layer.feed(tp, [self.det_of(ev) for ev in batch[tp]]):
                 named.append(dict(type="fix", robot=f["robot"], t=f["t"], x=f["x"], y=f["y"], th=f["th"],
-                                  sigma=f["sigma"], src=f["src"], sigma_th=3.0, how=f.get("how")))
+                                  sigma=f["sigma"], src=f["src"], sigma_th=f.get("sigma_th", 3.0), how=f.get("how")))
         c.camera_proven = self.layer.proven
         for rv in self.layer.take_revoked():         # (e17) an elimination the robot's own drive disproved
             c.on_elim_revoked(rv)
@@ -897,10 +907,11 @@ class Runner:
 
     def write_state(self, why):
         c = self.ctrl
-        st = dict(version=VERSION, core=FC.VERSION, t0=self.t0, now=self.AC.now(), ended=why, seed=self.a.seed,
+        st = dict(version=VERSION, version_tagfree=VERSION_TAGFREE, core=FC.VERSION, t0=self.t0, now=self.AC.now(), ended=why, seed=self.a.seed,
                   robots={n: dict(mode=r.mode, out=r.out_why, battery=r.battery, moves=r.n_moves, fw=self.fw.get(n),
                                   lost=r.lost is not None) for n, r in c.R.items()},
                   counts=c.counts, tracking=self.layer.summary(),
+                  tagfree=self.tagfree.summary() if self.tagfree is not None else None,
                   filters={n: (r.fp.summary() if r.fp is not None else None) for n, r in c.R.items()})
         ep = list(getattr(c, "edge_parked", None) or [])
         st["edge_parked"] = [q["words"] for q in ep]       # (e12) robots parked at an edge: someone must move them
@@ -954,8 +965,8 @@ def ml_detector_fn():
     if not path or not os.path.exists(path):
         say("(MIRLT_ML_ON_DEMAND=1 but no detector model at MIRLT_ML_MODEL: the layer runs without it)")
         return None
-    say("(MIRLT_ML_ON_DEMAND=1: model %s found, but the bridge hook that runs it on a picture is not built yet (e17 "
-        "stub): the layer runs without it)" % path)
+    say("(MIRLT_ML_ON_DEMAND=1: model %s found; the detector is hooked in by tag-free mode (tagfree.py, "
+        "MIRLT_TAGFREE), not here)" % path)
     return None
 
 
