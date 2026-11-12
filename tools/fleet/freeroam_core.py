@@ -1434,6 +1434,11 @@ class Controller:
         if not ok or r.adj is not None:
             if late is not None and (mv is None or r.mode != "move"):
                 r.late = None
+            elif late is not None and not ok and r.adj is None:
+                # the drive it slowed is over (a coast, a turn, a halt): its next part runs at its own speed
+                r.late = None
+                r.scale = 1.0
+                self.control(r, "fspd 1.00", "fspd")
             return
         p = self.pos(r)
         if p is None:
@@ -1466,9 +1471,9 @@ class Controller:
         scale = max(0.0, min(1.0, allowed / max(1e-6, v * delay)))
         if scale < LATE_SLOW_MIN:
             scale = 0.0
-            if self.never_still and late is not None and late["scale"] == 0.0 and \
-                    self.t - late.get("t0", late["t"]) >= self.still_pause(r):
-                scale = LATE_SLOW_MIN          # (e17, Nick 12 Nov) a pause, not a stop: on at its slowest
+        if self.never_still and late is not None and self.t - late.get("t0", late["t"]) >= self.still_pause(r):
+            # (e17, Nick 12 Nov) a pause, not a stop: on at its slowest (never under the firmware's 2 cm/s floor)
+            scale = max(scale, LATE_SLOW_MIN, min(1.0, CREEP_V_MIN / v))
         if late is not None and abs(scale - late["scale"]) < 0.1:
             return
         if late is None:
@@ -1572,6 +1577,7 @@ class Controller:
                 p[0], p[1], tr.end[0], tr.end[1], wrap180(h + turn), v, 1 if back else 0))
             r.move, r.traj, r.mode, r.queue = mv, tr, "move", []
             r.n_moves += 1
+            r.creep_n = r.__dict__.get("creep_n", 0) + 1
             self.counts["creeps"] = self.counts.get("creeps", 0) + 1
             last = r.__dict__.get("creep_said", -1e9)
             if self.t - last >= 30.0:
@@ -4906,7 +4912,8 @@ class Controller:
                     p_ = self.pos(r)
                     clear_ = p_ is not None and edge_dist(self.rect, *p_) >= self.end_need(r)
                     # (e17) a move it made itself since it asked (a creep, never-still) counts as its own way out too
-                    own_ = (bool(rec.get("self_moved")) or r.n_moves > rec.get("n_moves", r.n_moves)) and clear_
+                    own_ = (bool(rec.get("self_moved")) or (self.never_still and r.__dict__.get("creep_n", 0) >
+                                                             rec.get("creep_n", 0))) and clear_
                     held_fx = [f for f in rec.get("fixes", []) if f[2] <= rec["t0"] + 2.0] or rec.get("fixes", [])[:5]
                     new_fx = [f for f in rec.get("fixes", []) if f[2] > rec["t0"] + 2.0]
                     import observe as OB
@@ -4953,7 +4960,8 @@ class Controller:
                      "onto the board and it rejoins by itself. The others carry on." % (
                          r.name, (" at %.0f, %.0f (%.0f cm from %s)" % (p[0], p[1], d, side)) if p is not None else "",
                          why))
-            rec = dict(robot=r.name, x=round(p[0], 1) if p else None, y=round(p[1], 1) if p else None,
+            rec = dict(creep_n=r.__dict__.get("creep_n", 0), robot=r.name, x=round(p[0], 1) if p else None,
+                       y=round(p[1], 1) if p else None,
                        edge_cm=round(d, 1) if d is not None else None, side=side, why=why, t0=round(self.t, 1),
                        said=self.t, words=words, n_moves=r.n_moves)
             nh[r.name] = rec
