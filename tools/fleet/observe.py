@@ -29,7 +29,7 @@ import json
 import math
 import os
 
-VERSION = "2026-11-12e19"   # e19 (audit H6): FailMemory.same(since=): a failure counts from a round's start, not for ever. Before: "2026-11-11e16"   # e16 (home 11 Nov 08:45, Nick: "it can still back up but it's not, it's just still"): track_back_target, a reverse along the robot's own recorded track (curved too: straight chords that stay on the track) as far as the edge rule needs, derived; moved_in_evidence (a held robot counts as moved in only on a lift / tilt or a sustained camera move beyond its own measured noise). Before: "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
+VERSION = "2026-11-12e19"   # e19 (audit 14): pick_cameras never takes the side camera (by its name) as the overhead. (audit H6): FailMemory.same(since=): a failure counts from a round's start, not for ever. Before: "2026-11-11e16"   # e16 (home 11 Nov 08:45, Nick: "it can still back up but it's not, it's just still"): track_back_target, a reverse along the robot's own recorded track (curved too: straight chords that stay on the track) as far as the edge rule needs, derived; moved_in_evidence (a held robot counts as moved in only on a lift / tilt or a sustained camera move beyond its own measured noise). Before: "2026-11-10a"   # 11-10a (e12): blind_cells (the spots learned blind, for the site's blind_areas.json). 11-07a (e08): tilt limits from safety_rules (re-picked from the 5 / 6 Nov logs), trip
                           # keep-outs marked confirmed (the one keep-out rule)
 import sys as _sys
 if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
@@ -471,6 +471,18 @@ def pick_cameras(devices, want=None):
     words = []
     if not devices:
         return {}, ["no camera is plugged in"]
+    w_o, w_s = (want.get("overhead") or "").lower(), (want.get("side") or "").lower()
+
+    def is_side(n):
+        """(e19, audit finding 14) the camera whose name is the SIDE camera's (and not also the overhead's) is never
+        taken as the overhead: an overhead that is unplugged is said, not guessed from the side camera."""
+        n = (n or "").lower()
+        return bool(w_s) and w_s in n and not (w_o and w_o in n)
+    if len(devices) == 1 and is_side(devices[0][1]):
+        p, n = devices[0]
+        words.append("only the side camera (%s) is plugged in: the overhead camera is not plugged in, and the side "
+                     "camera is NOT used as the overhead" % n)
+        return {"side": p}, words
     if len(devices) == 1:
         p, n = devices[0]
         w = want.get("overhead") or ""
@@ -489,7 +501,7 @@ def pick_cameras(devices, want=None):
             continue                       # switched off ("")
         hit = next(((p, n) for p, n in devices if w and w in (n or "").lower() and p not in used), None)
         if hit is None:
-            hit = next(((p, n) for p, n in devices if p not in used), None)
+            hit = next(((p, n) for p, n in devices if p not in used and not (role == "overhead" and is_side(n))), None)
             if hit and w:
                 words.append("no camera named '%s' for the %s: using %s (observed, not typed)" % (w, role, hit[1]))
         if hit:

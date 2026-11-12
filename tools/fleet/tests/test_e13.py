@@ -583,7 +583,8 @@ def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_
     and its body allow, a second click gives its heading (+- atan(sigma sqrt 2 / drive)); it moves again; clicks and
     the residual at the next camera fix are logged."""
     monkeypatch.setattr(FC, "NEVER_STILL", False)      # (e17) held and waiting for the clicks: the switch's old way
-    import freeroam_fastsim as S
+    monkeypatch.setattr(FC, "BLIND_BUBBLE", "fixed")   # (e19) the e13 bubble this click test was written on (the record's
+    import freeroam_fastsim as S                       # bubble from calibration data is tested in test_e19_audit_fixes)
     import place_click as PC
     import tag_cam as TCAM
     monkeypatch.setenv("MIRLT_QUESTIONS_DIR", str(tmp_path))

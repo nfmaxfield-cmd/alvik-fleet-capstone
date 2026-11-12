@@ -48,6 +48,8 @@ class Rig:
                                       wiggle=(self.wiggle if wiggle else None), board=BOARD, eliminate=eliminate,
                                       gate_record=gate_record, camera_watch=False, **(layer_kw or {}))
         self.c.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
+        # (e19) wired as the runner wires it (freeroam.Runner): the robot's stated doubt for the motion-proof rule
+        self.layer.proof_fn = (lambda n, sg: self.c.proof_limit(self.c.R[n], sg)) if FC.MOTION_PROOF else None
         self.c.never_still = never_still
         self.delay, self.noise, self.lights_off, self.fps = delay, noise, lights_off_cm, fps
         self.q = []

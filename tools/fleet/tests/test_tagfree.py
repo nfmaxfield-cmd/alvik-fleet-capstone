@@ -277,7 +277,9 @@ def test_the_rig_corrects_a_tagless_standing_robot_30_cm_off_from_the_detector_a
     R.run(12.0)
     assert R.first("CORRECTED", "Left") is not None
     x, y, _ = R.own("Left")
-    assert math.hypot(x - 31.0, y - 64.0) < 5.0
+    # (e19) its own pose against where it truly is now: since e19 the correction needs motion proof (a wiggle), and
+    # its first move after it confirms it, so it no longer stands at (31, 64) to the end
+    assert math.hypot(x - R.truth["Left"][0], y - R.truth["Left"][1]) < 5.0
     assert R.layer.counts["ml_calls"] > 0 and st.summary()["fuser"]["counts"]["doubts"] == 0
 
 

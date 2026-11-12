@@ -145,22 +145,23 @@ def _follow_restart(seed, t_restart=60.0, dur=10.0, minutes=4.0):
     return s, rec
 
 
-@pytest.mark.xfail(reason="hard simulator 12 Nov (seed 2): a robot that restarts (its gyro's heading starts anywhere) "
-                          "drives on for about a minute with its own heading 40-70 deg off and its own pose up to 55 cm "
-                          "from the truth; nothing asks for a heading check after a restart. Open.", strict=False)
 def test_restart_heading_is_checked_before_it_wanders():
+    """(e19: fixed, was xfail) hard simulator 12 Nov (seed 2): a robot that restarts (its gyro's heading starts anywhere)
+    drove on for about a minute with its own heading 40-70 deg off and its own pose up to 55 cm from the truth. Now its
+    pose is sent after the boot and a heading check is asked (freeroam_core.on_restart / boot_watch)."""
     s, rec = _follow_restart(2)
     assert rec and max(d for _, _, d in rec) < 20.0
 
 
-@pytest.mark.xfail(reason="hard simulator 12 Nov, main with e18 (seed 8): with a wrong camera name for 5 minutes "
-                          "(its sightings mirrored) each robot says 'camera disagrees ... not believed' and drives on "
-                          "dead reckoning, but nothing concludes the camera itself is wrong; the bodies touched 3 times "
-                          "(seeds 1-7: robots hung at an edge 140-430 robot-s). Open.", strict=False)
+@pytest.mark.xfail(reason="(e19, partly fixed) hard simulator seed 8: with a wrong camera name for 5 minutes (its "
+                          "sightings mirrored) e18 never concluded the camera was wrong (3 contacts). e19's whole-camera "
+                          "watch concludes it, but on this seed only after 72 s (robots rarely drove two at once), and "
+                          "one robot fell before that. Seeds 1-3: concluded within 5-6 s, no contact, no fall.",
+                   strict=False)
 def test_wrong_camera_name_mid_run_no_contact():
     s = _sim(seed=8, hours=6 / 60.0, faults={"wrong_names": True})
     s.wrong = (30.0, 330.0)
     s.run()
     kinds = {e["kind"] for e in s.kept.get("events", [])}
-    assert "camera disagrees" in kinds                     # each robot notices (this part holds today)
+    assert "camera disagrees" in kinds or "camera" in kinds  # each robot notices, or the whole camera is not trusted
     assert s.stats["contacts"] == 0 and s.stats.get("falls", 0) == 0

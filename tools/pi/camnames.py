@@ -242,6 +242,8 @@ def resolve(role, cams=None, conf=None):
     dev, words = _resolve_named(role, cams, conf)
     if dev is not None or conf.get("observe") is False or not cams:
         return dev, words
+    if "the same name in" in words:
+        return dev, words                    # (e19) the settings contradict themselves: a person fixes them, no guess
     if role == "side" and not (conf.get("side") or {}).get("name"):
         return dev, words                    # camera 2 switched off ("" name): stays off
     import os as _os
@@ -254,10 +256,12 @@ def resolve(role, cams=None, conf=None):
     if not real:
         return dev, words + " (and nothing else plugged in is a USB capture camera)"
     m, w = OB.pick_cameras([(c["dev"], c["name"]) for c in real], want)
+    if role == "overhead" and "overhead" not in m and "side" in m:
+        return dev, words + " (the side camera is not used as the overhead)"     # (e19, audit 14)
     if role in m:
         c = next(c for c in cams if c["dev"] == m[role])
-        return c["dev"], "%s camera: %s at /dev/video%d (picked from what is plugged in: %s)" % (
-            role, c["name"], c["dev"], "; ".join(w) or "names did not match")
+        return c["dev"], "%s camera: %s at /dev/video%d (picked from what is plugged in: %s; why: %s)" % (
+            role, c["name"], c["dev"], "; ".join(w) or "names did not match", words)
     return dev, words
 
 

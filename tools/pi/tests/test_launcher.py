@@ -67,7 +67,10 @@ def test_two_cameras_with_the_same_name_need_a_port(tmp_path):
     cams = C.scan(fake_sysfs(str(tmp_path / "s"), [(0, "USB 2.0 Camera", 0, "1.3"), (2, "USB 2.0 Camera", 0, "1.4")]))
     conf = dict(overhead=dict(name="USB 2.0 Camera", port=""), side=dict(name="EMEET", port=""))
     dev, words = C.resolve("overhead", cams, conf)
-    assert dev is None and "two cameras" in words
+    # (e19, the audit's finding 14: this test was red since 11-05h) two cameras of the same name: the run degrades
+    # instead of stopping (CLAUDE.md "observe, then trust" 4): the first is taken, the reason said (add the port), and
+    # the run's whole-camera check (tracking_layer, e19) stops trusting it if its sightings disagree with every robot
+    assert dev == 0 and "two cameras" in words and "port" in words
     conf["overhead"]["port"] = "1.4"
     assert C.resolve("overhead", cams, conf)[0] == 2
 

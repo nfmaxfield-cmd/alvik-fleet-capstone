@@ -59,6 +59,12 @@ class CameraSources:
                                       wiggle=self.wiggle if not old else None, **layer_kw)
         if hasattr(sim.ctrl, "record_fn"):        # (e17) the controller's corrections widen that robot's gate
             sim.ctrl.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
+        # (e19) as the runner (freeroam.Runner): the robot's stated doubt for the layer's motion-proof rule and the
+        # whole-camera watch, and the watch's verdict as an event
+        if hasattr(sim.ctrl, "proof_limit") and getattr(sim.ctrl, "R", None):
+            import freeroam_core as _FC
+            self.layer.proof_fn = (lambda n, sg: sim.ctrl.proof_limit(sim.ctrl.R[n], sg)) if _FC.MOTION_PROOF else None
+            self.layer.say_fn = lambda w: sim.ctrl.event(None, "camera", w)
         self.locks = {}             # name -> dict(body, last_ok)
         self.next_t = 0.0
         self.q = []                 # (due, tf, fixes)
@@ -234,6 +240,8 @@ class CameraSources:
             still = not moving.get(n, (0, 0, 0))[0] and not moving.get(n, (0, 0, 0))[1]
             self.layer.own(n, t, o[0], o[1], o[2], still)
         fixes = self.layer.feed(t, dets)
+        if getattr(self.layer, "cam_test_want", None) and hasattr(c, "camera_test_step"):
+            c.camera_test_step(self.layer.cam_test_want)      # (e19) the camera not trusted: a short test drive
         if hasattr(c, "camera_proven"):
             c.camera_proven = self.layer.proven
         tb = {id(d): truth.get(id(d)) for d in dets}

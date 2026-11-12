@@ -88,6 +88,11 @@ SWITCHES = [
     ("MIRLT_RESEED_TURN", "1", "0", "F", "A re-seed is projected to now and never lands mid-turn", "e17"),
     ("MIRLT_REJOIN_EVIDENCE", "1", "0", "F", "'Moved in' (REJOINED) only on evidence", "e16"),
     ("MIRLT_CAMERA_WATCH", "1", "0", "T", "The camera's turn directions checked against the robots' own", "e10"),
+    ("MIRLT_WHOLE_CAMERA_WATCH", "1", "0", "T",
+     "(audit finding 10) When most of the camera's sightings fall outside EVERY robot's gate in each picture for a few "
+     "seconds (a wrong camera name, a bumped camera), the camera as a whole is not trusted: no fixes or eliminations from "
+     "it, said on screen; trusted again when its sightings agree again. 0: e18 (each robot alone says 'camera "
+     "disagrees')", "e19"),
     ("MIRLT_POSE_RULE", "widen", "wait2s", "F M", "Own pose vs camera disagreement widens the doubt at once", "e08"),
     # -- edges ---------------------------------------------------------------------------------------------------------
     ("MIRLT_EDGE_RULE", "derived", "fixed", "F M C",
@@ -112,11 +117,22 @@ SWITCHES = [
      "leg; a blind excursion is allowed only where that prediction keeps the margin from edges and robots with a way "
      "back; checked against the error found when it is seen again. 0: the fixed 29 Oct numbers (2 cm + 0.07 cm per cm) "
      "and no planned blind legs", "e18"),
-    ("MIRLT_BLIND_BUBBLE", "fixed", "record", "F M",
-     "An UNPLANNED loss of the camera grows the robot's error bubble by the fixed 29 Oct numbers (as e13-e17), its own "
-     "record's prediction logged beside it and checked when it is seen again; on a blind leg its record allowed, the "
-     "record's own prediction. record: every loss by its own record (the e18 stress re-run: robots with 1 s late fixes and "
-     "heading faults then stood up to 20 min)", "e18"),
+    ("MIRLT_BLIND_BUBBLE", "record", "fixed", "F M",
+     "(e19, the audit's finding 13a: lost robots used 2 + 0.07 cm per cm while the record said otherwise) Every loss of "
+     "the camera, planned or not, grows the robot's doubt by the SAME model: its fleet record, started from calibration-"
+     "run data (MIRLT_TRUST_PRIOR) and widened by its own checks. fixed: an unplanned loss by the fixed 29 Oct numbers "
+     "(e18; with e18's cautious 0.28 cm/cm prior the record made robots with 1 s late fixes stand up to 20 min)",
+     "e18, default changed e19"),
+    ("MIRLT_TRUST_PRIOR", "calibration", "replay", "F M",
+     "(Nick 12 Nov) The odometry trust record starts from calibration-run data: dead reckoning on the calibrated scales "
+     "against both cameras, 22,000 stretches (29 Oct): 2.0 cm + 0.07 cm per cm at the 95th percentile. replay: e18b's "
+     "cautious 2.3 + 0.28 (free-roam stretches, mostly curves)", "e19"),
+    ("MIRLT_MOTION_PROOF", "1", "0", "F T",
+     "(audit H4) A camera correction that would move a robot's pose further than its own stated doubt (its 95 % doubt "
+     "and the camera's measured noise together) is applied only with motion proof: a wiggle or out-and-back the camera "
+     "saw; an elimination or a 'named far' beyond it asks for that drive first. Until a correction is confirmed by the "
+     "robot's own move it permits no reverse toward an edge and does not widen the camera's gate. 0: e17/e18 (applied at "
+     "once, any distance)", "e19"),
     ("MIRLT_NOPIC_RULE", "risk", "off", "F M", "No pictures: each robot's risk-based limit", "e13"),
     ("MIRLT_FIX_GAP_RULE", "derived", "fixed", "F M", "How old a fix may be, from each robot's measured fix gap", "e14"),
     ("MIRLT_STAND_TRUST", "1", "0", "F", "A standing robot keeps its fix (not lost while it stands)", "e13"),

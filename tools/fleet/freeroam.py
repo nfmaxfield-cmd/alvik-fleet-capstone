@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2, H4, 10, 11): the layer gets the robots' stated doubt (proof_fn) and says the whole-camera verdict; a restart re-establishes pose and heading, the follow run always started again (no 20-restart cap); camera test drives while the camera is not trusted. (H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -200,6 +200,9 @@ class Runner:
                                           self.ctrl.R[n], why, spots=getattr(self.layer, "wiggle_spots", None),
                                           req=getattr(self.layer, "wiggle_req", None))),
                                       board=tuple(rect)[:4], ml_fn=ml_detector_fn())
+        self.layer.say_fn = say                 # (e19, audit 10) the whole-camera verdict on screen
+        # (e19, audit H4) an elimination beyond the robot's own stated doubt asks for motion proof first
+        self.layer.proof_fn = (lambda n, sg: self.ctrl.proof_limit(self.ctrl.R[n], sg)) if FC.MOTION_PROOF else None
         # (e17, 1c / 6) the controller's measured corrections widen the layer's gate for that robot
         self.ctrl.record_fn = lambda n, t, d, trav: self.layer.record(n, t, d, trav)
         self.ctrl.fix_fn = self.fix_to_robot
@@ -503,8 +506,10 @@ class Runner:
                         r = c.R[name]
                         if r.move is not None:
                             c.end_move(r)
-                        if self.restarts[name] <= 20:
-                            self.send(name, "run follow")
+                        # (e19, never give up) always started again (before: not after 20 restarts)
+                        self.send(name, "run follow")
+                        if hasattr(c, "follow_again"):
+                            c.follow_again(r)          # (e19) its pose goes out once the run is up
                 elif rtype == "FSPD":
                     c.on_fspd(name)
                 elif rtype == "RAW":
@@ -538,6 +543,10 @@ class Runner:
         r = c.R[name]
         if r.move is not None:
             c.end_move(r)
+        try:
+            c.on_restart(r)                    # (e19) its pose and heading are re-established after the follow run
+        except AttributeError:
+            pass
         for cmd in safe_cmds(self.safe_edge_used) + ["set follow_look_cm %.1f" % FOLLOW_LOOK_CM] + \
                 border_cmds(self.rect):
             self.send(name, cmd)
@@ -696,6 +705,8 @@ class Runner:
                 named.append(dict(type="fix", robot=f["robot"], t=f["t"], x=f["x"], y=f["y"], th=f["th"],
                                   sigma=f["sigma"], src=f["src"], sigma_th=f.get("sigma_th", 3.0), how=f.get("how")))
         c.camera_proven = self.layer.proven
+        if getattr(self.layer, "cam_test_want", None) and hasattr(c, "camera_test_step"):
+            c.camera_test_step(self.layer.cam_test_want)     # (e19) the camera not trusted: a short test drive
         for rv in self.layer.take_revoked():         # (e17) an elimination the robot's own drive disproved
             c.on_elim_revoked(rv)
         for pe in self.layer.take_parked():

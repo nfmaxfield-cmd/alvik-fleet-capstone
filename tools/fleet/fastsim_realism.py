@@ -53,7 +53,7 @@ _AN = os.path.join(os.path.dirname(HERE), "analysis")
 if _AN not in sys.path:
     sys.path.insert(0, _AN)
 
-VERSION = "fastsim-realism-2026-11-12a"
+VERSION = "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
 PROFILE_DIR = os.path.join(HERE, "sim_profiles")
 DEFAULT_MEASURED = "measured-home-2026-11-11-0858.json"
 PROFILES = ("easy", "measured", "harsh")
@@ -463,6 +463,10 @@ def make_class(F):
                 r = self.ctrl.R[b.name]
                 if r.move is not None:
                     self.ctrl.end_move(r)
+                if hasattr(self.ctrl, "on_restart"):
+                    # (e19) as the runner's on_boot / follow restart now do: its pose re-established, a heading check
+                    self.ctrl.on_restart(r)
+                    self.ctrl.follow_again(r)
                 self.ctrl.event(r, "restarted (sim)", "own heading %.0f deg off" % F.wrap180(b.oth - b.th))
                 R["hdg_off"] = round(F.wrap180(b.oth - b.th), 1)
 

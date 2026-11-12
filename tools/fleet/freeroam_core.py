@@ -51,7 +51,7 @@ import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic 
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 
-VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -293,6 +293,10 @@ SAVE_CAL_AT_END = SG.flag("MIRLT_SAVE_CAL_AT_END")    # (6) every calibration co
 HANG_GROW = SG.value("MIRLT_HANG_RECOVERY") != "e08"   # (e19, audit H6) a hung robot: the opposite of what tilted it
                         # first, forward tries when its nose points inward, growing rounds one derived pause apart, the
                         # fail memory per round ("e08": the fixed tries, then 20 s holds, failures remembered for ever)
+MOTION_PROOF = SG.flag("MIRLT_MOTION_PROOF")   # (e19, audit H4) a correction beyond the robot's stated doubt needs
+                        # motion proof; until confirmed by its own move: no reverse toward an edge, no gate widening
+PROOF_K = 2.0           # (e19) the camera's measured sigma counted as a 95 % bound (2 sigmas), as the robot's doubt is
+                        # a 95 % bound. Statistical, not tuned; DOE: no
 FAR_NAMED_CORRECT = SG.flag("MIRLT_FAR_NAMED_CORRECT")   # (replay) named all along but beyond its fix gate: corrected
 RESEED_HEADING_KEEP = SG.flag("MIRLT_RESEED_HEADING_KEEP")   # (replay) a standing re-seed keeps its own heading
 CURVE_SCALE_SAVE = SG.flag("MIRLT_CURVE_SCALE_SAVE")    # (replay; Nick to decide) curve scales logged, not saved
@@ -859,10 +863,23 @@ class Controller:
         ages = r.__dict__.setdefault("fix_ages", [])        # (e17, 2) this robot's measured fix age at arrival
         ages.append(max(0.0, arr - t))
         del ages[:-100]
+        if r.__dict__.get("proof") is not None:
+            self.proof_watch(r, t, x, y)                      # (e19, H4) its out-and-back proof, watched
         if how and CAMERA_CORRECT and str(how).startswith(("elimination", "wiggle")):
+            if MOTION_PROOF and str(how).startswith("elimination") and not self.within_doubt(r, t, x, y, sigma):
+                # (e19, H4) the layer should have asked for motion proof first (its proof_limit_fn); refused here too
+                self.counts["corrections_refused_far"] = self.counts.get("corrections_refused_far", 0) + 1
+                self.event(r, "correction held", "an elimination would move its pose %.0f cm, beyond its own doubt "
+                           "(%.1f cm): not applied without motion proof" % (self.own_dist(r, t, x, y),
+                                                                            self.proof_limit(r, sigma)))
+                return None
             return self.correct_from_camera(r, t, x, y, th, arr, how, src)
         oa = self.own_at(r, t)
         if FAR_NAMED_CORRECT and CAMERA_CORRECT and oa is not None and self.far_named(r, t, x, y, oa, src):
+            if MOTION_PROOF and not self.within_doubt(r, t, x, y, sigma):
+                # (e19, audit H4: "named far" made 3 of the 7 falls' wrong corrections, 24-91 cm) beyond its doubt: it
+                # proves the sighting is its own with a short out-and-back the camera must see, before any correction
+                return self.proof_start(r, t, x, y, sigma)
             return self.correct_from_camera(r, t, x, y, th, arr, "named far", src)
         if oa is not None and math.hypot(x - oa[0], y - oa[1]) <= REACQUIRE_CM:
             r.agree_t = t                                     # (e17, 6) own and camera agree here (drift record)
@@ -1416,6 +1433,173 @@ class Controller:
             self.send_fpose(r, pend["t_pic"], pend["x"], pend["y"], pend["th"], pend["sig"], pend["sig_th"],
                             pend["why"])
 
+    # -- (e19, audit H4) no far jump without motion proof ------------------------------------------------------------
+    def stated_doubt(self, r):
+        """(e19) The robot's own 95 % doubt about its position (cm): its lost bubble (the fleet record's prediction, the
+        same model whether the loss was planned or not), else its fused uncertainty, and never less than what its record
+        predicts for the distance it drove since its own pose and the camera last agreed."""
+        d = r.bubble if r.lost is not None else self.unc(r)
+        try:
+            trav = self.own_path(r, r.__dict__.get("agree_t", self.t - 60.0), self.t)
+            d = max(d, self.trust[r.name].radius(trav))
+        except Exception:  # noqa: BLE001
+            pass
+        return float(d)
+
+    def proof_limit(self, r, sigma=None):
+        """(e19) How far a correction may move r's pose without motion proof: its stated doubt and the camera's measured
+        noise (PROOF_K sigmas) together."""
+        sg = float(sigma) if sigma else 1.0
+        return math.hypot(self.stated_doubt(r), PROOF_K * sg)
+
+    def own_dist(self, r, t, x, y):
+        oa = self.own_at(r, t)
+        if oa is None and r.own is not None:
+            oa = r.own[1:4]
+        return math.hypot(x - oa[0], y - oa[1]) if oa else 0.0
+
+    def within_doubt(self, r, t, x, y, sigma=None):
+        return self.own_dist(r, t, x, y) <= self.proof_limit(r, sigma)
+
+    def proof_start(self, r, t, x, y, sigma):
+        """(e19, H4) A named sighting beyond its doubt: r drives a short straight out-and-back (its length from the
+        camera's noise, never guessed) and the controller watches whether THAT sighting goes out and comes back with it
+        (proof_watch). Asked again after a pause when it is unclear or not safe; nothing is corrected meanwhile."""
+        if r.move is not None or self.t < r.__dict__.get("proof_next", -1e9):
+            return None
+        sg = max(0.3, float(sigma) if sigma else 1.0)
+        L = max(2.0, 4.0 * sg * math.sqrt(2.0 / 3.0) / 0.75)      # as the layer's out-and-back: 4 sigmas over 3 pictures
+        v = max(2.0, min(5.0, L / 1.5))
+        req = dict(kind="outback", L=L, v=v, spots=[(x, y)], sig=sg, win=2.0 * L / v + 4.0)
+        d = self.own_dist(r, t, x, y)
+        ok = self.outback(r, "its named sighting is %.0f cm from its own pose, beyond its doubt (%.1f cm): motion proof "
+                          "before any correction" % (d, self.proof_limit(r, sigma)), req)
+        r.proof_next = self.t + 5.0 * (1 + r.__dict__.get("proof_tries", 0))
+        r.proof_tries = r.__dict__.get("proof_tries", 0) + 1
+        self.counts["proofs_asked"] = self.counts.get("proofs_asked", 0) + 1
+        if ok:
+            r.proof = dict(t0=self.t, x=x, y=y, sig=sg, L=float(r.move.get("ob_L", L)) if r.move else L,
+                           win=float(req["win"]) + self.fix_delay(r), pts=[])
+        return None
+
+    def proof_watch(self, r, t, x, y):
+        pf = r.__dict__.get("proof")
+        if pf is None:
+            return
+        if t >= pf["t0"]:
+            pf["pts"].append((t, x, y))
+        if self.t - pf["t0"] < pf["win"]:
+            return
+        r.proof = None
+        pts = pf["pts"]
+        # (e19, robust: not the farthest few) WHEN it was out comes from its own pose (the time its own track was
+        # farthest from where it started); the camera's sightings around that time (a quarter of the drive's time either
+        # side) must be out by half the drive and 3 camera sigmas over their count (median), and the sightings after it
+        # came back must be back (median within half the drive)
+        own = [q for q in r.own_hist if q[0] >= pf["t0"] - 0.5]
+        if own:
+            o0 = own[0]
+            t_far = max(own, key=lambda q: math.hypot(q[1] - o0[1], q[2] - o0[2]))[0]
+        else:
+            t_far = pf["t0"] + pf["L"] / 3.0
+        half = max(0.4, 0.25 * pf["win"] / 2.0)
+        mid = sorted(math.hypot(q[1] - pf["x"], q[2] - pf["y"]) for q in pts if abs(q[0] - t_far) <= half)
+        end = sorted(math.hypot(q[1] - pf["x"], q[2] - pf["y"]) for q in pts if q[0] >= t_far + 2.0 * half)
+        thr = max(0.5 * pf["L"], 3.0 * pf["sig"] / math.sqrt(max(1, len(mid))))
+        out_ok = bool(mid) and mid[len(mid) // 2] >= thr
+        back_ok = bool(end) and end[len(end) // 2] <= 0.5 * pf["L"] + 2.0 * pf["sig"]
+        if out_ok and back_ok:
+            last = pts[-3:]
+            mx, my = sum(q[1] for q in last) / len(last), sum(q[2] for q in last) / len(last)
+            self.counts["proofs_passed"] = self.counts.get("proofs_passed", 0) + 1
+            r.proof_tries = 0
+            self.correct_from_camera(r, t, mx, my, None, self.t, "wiggle (named far, proven by its out-and-back)")
+        else:
+            self.counts["proofs_failed"] = self.counts.get("proofs_failed", 0) + 1
+            self.event(r, "proof unclear", "its named sighting did not go out and back with its drive (middle %.1f cm, "
+                       "end %.1f cm, need %.1f): no correction" % (mid[len(mid) // 2] if mid else 0.0,
+                                                                     end[len(end) // 2] if end else 0.0, thr))
+
+    # -- (e19, audit finding 11 / hard simulator #8) a restart re-establishes the pose and asks for a heading check -----
+    BOOT_POSE_AFTER_S = 1.0  # (e19) its pose is sent this long after its follow run starts again (the run must be up to
+                             # take an fpose). Chosen; DOE: no (any delay past the run's start works)
+
+    def on_restart(self, r):
+        """(e19) The runner saw its boot id change: whatever it knew is gone (its pose and heading come from a fresh
+        gyro). Its best position now (a fresh camera fix, else where the run last had it) and its last heading are kept
+        for boot_watch; its heading is treated as unknown (a heading check is asked, and e18's "keep its own heading"
+        rule no longer rates it as good evidence)."""
+        p = (r.cam[1], r.cam[2]) if (r.cam is not None and self.fresh(r) and r.lost is None) else self.pos(r)
+        r.boot_pose = dict(t=self.t, p=p, h=self.heading(r), due=None)
+        r.turn_since_head = 1e3
+        r.hd_confirm = dict(t=self.t, why="it restarted: its heading after the boot is not known", tries=0, stage=None)
+        self.counts["restarts_seen"] = self.counts.get("restarts_seen", 0) + 1
+
+    def follow_again(self, r):
+        """(e19) Its follow run started again after a restart: its pose goes out BOOT_POSE_AFTER_S later."""
+        bp = r.__dict__.get("boot_pose")
+        if bp is not None:
+            bp["due"] = self.t + self.BOOT_POSE_AFTER_S
+
+    def boot_watch(self, r):
+        bp = r.__dict__.get("boot_pose")
+        if bp is None or bp.get("due") is None or self.t < bp["due"] or bp.get("p") is None:
+            return
+        r.boot_pose = None
+        p = (r.cam[1], r.cam[2]) if (r.cam is not None and self.fresh(r) and r.lost is None) else bp["p"]
+        self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (p[0], p[1], bp["h"], max(1.0, self.unc(r)), 90.0))
+        r.fpose_t = self.t
+        if r.own is not None:
+            r.own = (r.own[0], p[0], p[1], bp["h"]) + tuple(r.own[4:])
+        if r.__dict__.get("hd_confirm") is None:
+            r.hd_confirm = dict(t=self.t, why="it restarted: its heading after the boot is not known", tries=0,
+                                stage=None)
+        self.counts["boot_poses"] = self.counts.get("boot_poses", 0) + 1
+        self.event(r, "pose after restart", "its pose is set to %.1f, %.1f (%s) with its last heading %.0f deg, marked "
+                   "unknown: a heading check (a short crawl the camera measures) comes next" % (
+                       p[0], p[1], "the camera" if p is not bp["p"] else "where the run last had it", bp["h"]))
+
+    def camera_test_step(self, want):
+        """(e19, audit 10) The camera as a whole is not trusted and these robots have shown nothing since: one of them
+        (idle, level, heard, with room by its own pose and doubt) drives a short straight out-and-back so the camera's
+        motion can be checked against its own (tracking_layer._whole_watch). One at a time, at most every derived pause.
+        Never still while the camera is in doubt: this is also how the run finds out it is right again."""
+        if not want or self.t < self.__dict__.get("cam_test_next", -1e9):
+            return False
+        busy = [o for o in self.R.values() if o.move is not None and o.move.get("kind") == "outback"]
+        if busy:
+            return False
+        L = 2.0 * 3.0 * 1.0 + 1.0           # twice WHOLE_MOVE_CM (3 sigmas of the lights' 1 cm), and a margin: 7 cm
+        for n in want:
+            r = self.R.get(n)
+            if r is None or r.mode != "idle" or r.move is not None or r.silent or r.own is None or self.stuck(r):
+                continue
+            p, h = (r.own[1], r.own[2]), r.own[3]
+            room = edge_dist(self.rect, p[0] + L * math.cos(math.radians(h)), p[1] + L * math.sin(math.radians(h)))
+            if room < HALF + self.stated_doubt(r):
+                continue
+            if any(self.pos(o) is not None and math.dist(self.pos(o), p) < 2 * HALF + L + REFLEX_GAP + self.unc(o)
+                   for o in self.R.values() if o is not r and o.mode != "gone"):
+                continue
+            req = dict(kind="outback", L=L, v=3.0, spots=[p], sig=1.0, win=2.0 * L / 3.0 + 2.0)
+            if self.outback(r, "camera test: the camera is not trusted; its motion is checked against this drive", req):
+                self.cam_test_next = self.t + 2.0 * L / 3.0 + self.still_pause(r)
+                self.counts["camera_tests"] = self.counts.get("camera_tests", 0) + 1
+                return True
+        self.cam_test_next = self.t + 1.0
+        return False
+
+    def correction_confirmed(self, r, why):
+        """(e19, H4) Its own move, seen by the camera, agrees with the corrected pose: reverses toward an edge are
+        allowed again and the correction's measured drift is recorded (it may widen the gate now)."""
+        cu = r.__dict__.get("corr_unconf")
+        if cu is None:
+            return
+        r.corr_unconf = None
+        if cu.get("drift") is not None:
+            self.drift_add(r, *cu["drift"])
+        self.event(r, "correction confirmed", why)
+
     def correct_from_camera(self, r, t, x, y, th, arr, how, src=None):
         """(e17, 1d/1e; home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing) The tracking layer
         named this sighting by elimination (a steady sighting nobody else can claim, this robot standing and
@@ -1429,7 +1613,13 @@ class Controller:
         travel = self.own_path(r, r.__dict__.get("agree_t", t - 60.0), t)
         if r.lost is not None:
             travel = max(travel, r.lost.get("drive", 0.0))
-        self.drift_add(r, d, travel, "camera correction (%s)" % how)
+        proven = "wiggle" in str(how) or "out-and-back" in str(how)
+        if MOTION_PROOF and not proven:
+            # (e19, H4) not motion-proven: no reverse toward an edge and no gate widening until its own move confirms it
+            r.corr_unconf = dict(t=self.t, how=how, d=d, drift=(d, travel, "camera correction (%s)" % how))
+        else:
+            r.corr_unconf = None
+            self.drift_add(r, d, travel, "camera correction (%s)" % how)
         self.send_fpose(r, t, x, y, None, 1.0, 3.0, "correction")
         if r.own is not None:                   # its own track from now on is in the new frame: shift the history
             q = self.projected(r, t, x, y, None) or (x, y, None)
@@ -1744,12 +1934,18 @@ class Controller:
                             o0.name, ql[0], ql[1])
                         dmode = "cautious"
                         self.counts["doubt_cautious"] = self.counts.get("doubt_cautious", 0) + 1
+        unconf = MOTION_PROOF and r.__dict__.get("corr_unconf") is not None
         for base, off in tries:
             b_ = wrap180(base + (off or 0.0))
             back = abs(wrap180(b_ - (h + 180.0))) <= 60.0
             turn = 0.0 if back else wrap180(b_ - h)
             hd = wrap180(h + 180.0) if back else wrap180(h + turn)
             tr = Traj.move(self.t + 0.2 + (turn_s(turn) if turn else 0.0), p, hd, 0.0, L, v, m0=self.margin0(r))
+            if back and unconf and edge_dist(self.rect, *tr.end) < edge_dist(self.rect, *p):
+                # (e19, audit H4: 5 of the 7 falls were "creep back" after a wrong correction) its pose is not
+                # confirmed: no reverse toward an edge (no rear sensor); it turns first instead
+                self.counts["unconf_back_refused"] = self.counts.get("unconf_back_refused", 0) + 1
+                continue
             if off is None:
                 # its start is already inside another robot's reservation (every bearing "blocked"): moving away
                 # widens the gap to every robot, so it goes (the reflex still watches)
@@ -2170,7 +2366,7 @@ class Controller:
         ex, ey = x + L * math.cos(math.radians(h)), y + L * math.sin(math.radians(h))
         p = self.pos(r) or (x, y)
         mv = dict(kind="outback", cell=None, turn=0.0, L=0.0, v=v, t0=self.t, p0=p, h0=h, h1=h, end=p, phase="drive",
-                  n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=False)
+                  n=r.n_moves + 1, drive_id=None, turn_id=None, t_drive=None, adj_scale=1.0, rev=False, ob_L=L)
         mv["turn_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (x, y, ex, ey, h, v))
         mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 1 -" % (ex, ey, x, y, h, v))
         r.move, r.mode = mv, "move"
@@ -3669,6 +3865,8 @@ class Controller:
                 self.grow_bubble(r)
             r.fast_n = 0
             r.nomove_n = 0                      # (e19, H5) moving again: not stuck
+            if r.__dict__.get("corr_unconf") is not None and "camera" in (out.get("used") or []):
+                self.correction_confirmed(r, "its %.0f cm %s moved where the camera saw it go" % (mv["L"], mv["kind"]))
             return False
         r.nomove_n = r.__dict__.get("nomove_n", 0) + 1
         self.counts["fast_done"] = self.counts.get("fast_done", 0) + 1
@@ -3762,6 +3960,8 @@ class Controller:
                                                                               else 0.0)[0])
             back_in = SR.inward_agreed(self.rect, own, cam if cam is not None else (own if trail_ok else None), h,
                                        reverse=True)
+            if MOTION_PROOF and r.__dict__.get("corr_unconf") is not None:
+                back_in = False         # (e19, H4) "backing goes inward" rests on an unconfirmed correction: not trusted
             inward = SR.inward_heading(self.rect, *(cam or own or p))
             n_ = (rc or {}).get("n", 0) + 1
             if HANG_GROW:
@@ -5823,6 +6023,7 @@ class Controller:
         for r in self.R.values():
             if r.__dict__.get("fpose_pending") is not None:
                 self.fpose_pending_watch(r)            # (e17, 1e) a re-seed waiting for the turn to end
+            self.boot_watch(r)                         # (e19) after a restart: its pose sent, its heading checked
             self.late_fix_watch(r)                     # (e17, 2) late fixes: slow or wait
             self.gap_forward(r)                        # (e09, B2) the filter's position to the robot in camera gaps
             self.gyro_watch(r)                         # (e09, B3) switch, off by default

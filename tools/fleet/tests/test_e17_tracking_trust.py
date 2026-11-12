@@ -24,7 +24,9 @@ THREE = {"Left": (31.0, 64.0, 0.0), "Center": (90.0, 30.0, 90.0), "Right": (90.0
 
 # -- 1a / 1d / 1e: a standing robot whose own pose is far off, the camera steady ----------------------------------------
 @pytest.mark.parametrize("d", [10.0, 20.0, 30.0, 48.0])
-def test_a_standing_robot_far_from_its_own_pose_is_corrected_from_the_camera_within_seconds(d):
+def test_a_standing_robot_far_from_its_own_pose_is_corrected_from_the_camera_within_seconds(d, monkeypatch):
+    monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
+    # with motion proof (the default since e19): test_e19_audit_fixes.py
     R = H.Rig(THREE, own_off={"Left": (d * 0.6, d * 0.8, 0.0)})
     R.run(10.0)
     c = R.first("CORRECTED", "Left")
@@ -43,7 +45,9 @@ def test_the_old_way_never_takes_it(d):
     assert R.first("CORRECTED", "Left") is None and R.gap("Left") > d - 3.0
 
 
-def test_left_at_1139_lost_with_its_own_pose_48_cm_off_is_corrected_not_held():
+def test_left_at_1139_lost_with_its_own_pose_48_cm_off_is_corrected_not_held(monkeypatch):
+    monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
+    # with motion proof (the default since e19): test_e19_audit_fixes.py
     """Left, 11:39:16: the camera saw it standing at (31, 64); its own pose said (66, 98), 24 cm from the y = 122 edge."""
     R = H.Rig({"Left": (31.2, 64.2, -115.0), "Center": (95.0, 30.0, 90.0), "Right": (95.0, 70.0, 180.0)},
               own_off={"Left": (66.1 - 31.2, 97.9 - 64.2, 60.0)})
@@ -60,7 +64,9 @@ def test_left_at_1139_lost_with_its_own_pose_48_cm_off_is_corrected_not_held():
     assert corr and abs(corr[0]["d_cm"] - 48.6) < 3.0
 
 
-def test_a_held_robot_that_needed_a_hand_is_CORRECTED_never_REJOINED():
+def test_a_held_robot_that_needed_a_hand_is_CORRECTED_never_REJOINED(monkeypatch):
+    monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
+    # with motion proof (the default since e19): test_e19_audit_fixes.py
     c = FC.Controller(["Left"], H.BOARD, lambda n, s: None, lambda *a: None, pose_source="blend")
     c.never_still = False
     r = c.R["Left"]

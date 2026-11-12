@@ -330,3 +330,186 @@ def test_a_robot_hung_after_backing_over_the_edge_is_freed_in_the_simulator(seed
     b = s.bots["Center"]
     assert not getattr(b, "hung", False) and s.stats["falls"] == 0
     assert s.ctrl.counts.get("recovered", 0) >= 1
+
+
+# ------------------------------------------- 3 (audit H4): no far jump without motion proof, from the robot's own doubt
+def _far_rig19(proof, monkeypatch, secs=12.0):
+    import e17_harness as H
+    import freeroam_core as FC
+    monkeypatch.setattr(FC, "MOTION_PROOF", proof)
+    R = H.Rig({"Left": (30.0, 30.0, 0.0), "Center": (60.0, 90.0, 90.0), "Right": (95.0, 30.0, 180.0)}, seed=2)
+    R.run(3.0)
+    R.off["Center"] = [31.0 * 0.6, -31.0 * 0.8, 0.0]       # its own pose 31 cm off, the robot standing (11 Nov 08:26)
+    R.run(secs)
+    return R
+
+
+def test_named_far_beyond_its_doubt_is_proven_by_an_out_and_back_before_any_correction(monkeypatch):
+    """Audit H4: "named far" had no upper limit and no motion proof (3 of the 7 falls: 24-91 cm wrong). Now, beyond the
+    robot's stated doubt (5 cm here), it drives a short out-and-back first; the 11 Nov 08:26 case still ends corrected."""
+    R = _far_rig19(True, monkeypatch)
+    ev = [e for e in R.events if e[1] == "Center"]
+    assert not any(e[2] == "CORRECTED" and "named it all along" in e[3] for e in ev)      # never at once
+    asked = [e for e in ev if e[2] == "identity drive" and "motion proof" in e[3]]
+    assert asked and R.c.counts.get("proofs_asked", 0) >= 1
+    assert R.own_gap("Center") < 3.5
+
+
+def _proof_ctrl():
+    import freeroam_core as FC
+    c = FC.Controller(["A", "B"], BOARD, lambda n, s: None, lambda *a: None)
+    r = c.R["A"]
+    c.t = 10.0
+    r.own_hist = [(10.0 + 0.1 * k, 40.0 + min(k, 30 - k) * 0.2, 60.0, 0.0) for k in range(31)]   # 3 cm out and back
+    r.proof = dict(t0=10.0, x=80.0, y=60.0, sig=0.8, L=3.0, win=3.0, pts=[])
+    return c, r
+
+
+def test_the_proof_passes_only_when_the_named_sighting_goes_out_and_back_with_the_drive():
+    c, r = _proof_ctrl()
+    done = []
+    c.correct_from_camera = lambda *a, **k: done.append(a)
+    for k in range(31):                               # the named sighting moves with the robot's own drive
+        c.t = 10.0 + 0.1 * k
+        c.proof_watch(r, c.t, 80.0 + min(k, 30 - k) * 0.2, 60.0)
+    c.t = 13.1
+    c.proof_watch(r, 13.1, 80.0, 60.0)
+    assert done and "proven" in done[0][-1]
+    c, r = _proof_ctrl()                              # a sighting that stays put (another object, a mirrored spot)
+    done = []
+    c.correct_from_camera = lambda *a, **k: done.append(a)
+    for k in range(32):
+        c.t = 10.0 + 0.1 * k
+        c.proof_watch(r, c.t, 80.0, 60.0)
+    assert not done and c.counts.get("proofs_failed") == 1
+
+
+def test_an_unconfirmed_correction_permits_no_reverse_creep_toward_an_edge():
+    """Audit H4: 5 of the 7 falls were a "creep back" after a wrong correction (no rear sensor). Until the robot's own
+    move confirms the corrected pose, a creep never reverses toward an edge."""
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(["A", "B"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    c.t = 50.0
+    r = c.R["A"]
+    r.mode = "idle"
+    r.own = (c.t, 14.0, 60.0, 0.0)                 # nose +x, its back to the x = 0 edge 14 cm away
+    r.own_hist = [(c.t - 1.0, 14.0, 60.0, 0.0), (c.t, 14.0, 60.0, 0.0)]
+    c.R["B"].mode = "gone"
+    c.creep_target = lambda r_, p: ((4.0, 60.0), "behind it")
+    r.corr_unconf = dict(t=c.t, how="named far", d=40.0, drift=None)
+    c.creep_step(r, "test")
+    assert r.move is not None and not r.move["rev"]                 # it turns and drives forward instead
+    assert c.counts.get("unconf_back_refused", 0) >= 1
+    r.corr_unconf = None
+    r.move = None
+    c.creep_step(r, "test")
+    assert r.move is not None and r.move["rev"]                     # confirmed: it may reverse (as before)
+
+
+def test_an_elimination_beyond_the_robots_doubt_asks_for_motion_proof_in_the_layer():
+    """Audit H4 (elimination, 1 of the 7 falls: 87 cm wrong): the layer names by elimination alone only within the
+    robot's stated doubt; beyond it the same wiggle / out-and-back as an ambiguous case decides."""
+    import tracking_layer as TL
+    asked = []
+    L = TL.TrackingLayer(["Left", "Right"], ("motion", "lights"), board=BOARD, camera_watch=False,
+                         wiggle=lambda n, why: asked.append(n) or True)
+    L.proof_fn = lambda n, sg: 5.0
+    named = []
+    for k in range(80):
+        t = 0.2 * k
+        L.own("Left", t, 30.0, 30.0, 0.0, True)
+        L.own("Right", t, 100.0, 100.0, 0.0, True)
+        L.set_unaccounted("Left", "lost")
+        dets = [TL.Det("lights", t, 100.0 + 0.1 * (k % 3), 100.0, None, None, 0.4),
+                TL.Det("lights", t, 60.0 + 0.1 * (k % 2), 70.0, None, None, 0.4)]
+        out = L.feed(t, dets)
+        named += [(n, h) for n, (d, h) in (out or {}).items() if h] if isinstance(out, dict) else []
+    assert asked and not any(h == "elimination" for n, h in named)
+    assert L.counts.get("elim_needs_proof", 0) >= 1
+
+
+# ------------------------------------------- 7 (audit 11): after a restart, its pose is sent and a heading check asked
+def test_after_a_restart_its_pose_is_sent_and_a_heading_check_is_asked():
+    """Audit finding 11 / hard simulator #8: on_boot set the safety layers and the follow run again, sent no pose and
+    asked no heading check; e18's "keep its own heading" then rated the boot heading as good evidence."""
+    import freeroam_core as FC
+    sent = []
+    c = FC.Controller(["A", "B"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)
+    c.t = 20.0
+    r = c.R["A"]
+    r.mode = "idle"
+    r.own = (c.t, 40.0, 50.0, 30.0)
+    r.own_hist = [(c.t, 40.0, 50.0, 30.0)]
+    c.on_restart(r)
+    assert c.heading_doubt(r) == FC.DOUBT_DEG_UNKNOWN and c.head_sd(r) > 10.0   # its heading counts as unknown
+    c.follow_again(r)
+    c.t += 1.5
+    c.boot_watch(r)
+    fp = [s for n, s in sent if s.startswith("fpose")]
+    assert fp and fp[-1].split()[1:4] == ["40.00", "50.00", "30.00"]
+
+
+# ------------------------------------------- 6 (audit 10, 14): a wrong or bumped camera; the side camera never the overhead
+def _drive_scene(mirror_from, mirror_to, secs=20.0):
+    import tracking_layer as TL
+    said = []
+    L = TL.TrackingLayer(["Left", "Center", "Right"], ("motion", "lights"), board=BOARD, camera_watch=False,
+                         eliminate=False)
+    L.say_fn = said.append
+    L.proof_fn = lambda n, sg: 4.0
+    W = BOARD[2]
+    starts = {"Left": (20.0, 30.0), "Center": (30.0, 70.0), "Right": (25.0, 100.0)}
+    out_n = {}
+    for k in range(int(secs / 0.5)):
+        t = 0.5 * k
+        dets = []
+        for n, (x0, y0) in starts.items():
+            x = x0 + 3.0 * (t % 20.0)                       # each drives +x at 3 cm/s
+            L.own(n, t, x, y0, 0.0, False)
+            sx = (W - x) if mirror_from <= t < mirror_to else x
+            dets.append(TL.Det("lights", t, sx, y0, None, None, 0.5))
+        fixes = L.feed(t, dets)
+        out_n[t] = len(fixes)
+    return L, said, out_n
+
+
+def test_a_mirrored_camera_is_not_trusted_as_a_whole_and_trusted_again_when_it_agrees():
+    """Audit finding 10: the camera watch voted only on sightings already named to a robot; mirrored sightings fell
+    outside every gate, so a wrong camera mid-run was never concluded. Now: every robot that drives sees its sighting
+    move the wrong way -> CAMERA NOT TRUSTED (said, logged), no fixes from it; trusted again once they agree."""
+    L, said, out_n = _drive_scene(4.0, 12.0, secs=19.5)
+    assert any("CAMERA NOT TRUSTED" in w for w in said), said
+    t_dis = min(t for t, n in out_n.items() if t > 4.0 and n == 0)
+    assert t_dis <= 10.0                                     # within the window after the mirror starts
+    assert any("trusted again" in w for w in said)
+    assert out_n[max(out_n)] > 0                              # fixes again at the end
+
+
+def test_robots_whose_own_poses_alone_are_off_do_not_make_the_camera_untrusted():
+    """The false alarm the watch must not raise: one or two robots' own poses far off (what the elimination is for) while
+    the camera is right. Their motion still matches their sightings."""
+    import tracking_layer as TL
+    L = TL.TrackingLayer(["Left", "Center", "Right"], ("motion", "lights"), board=BOARD, camera_watch=False,
+                         eliminate=False)
+    L.proof_fn = lambda n, sg: 4.0
+    for k in range(60):
+        t = 0.5 * k
+        dets = []
+        for n, (x0, y0), off in (("Left", (20.0, 30.0), 30.0), ("Center", (30.0, 70.0), 25.0),
+                                 ("Right", (25.0, 100.0), 0.0)):
+            x = x0 + 2.0 * (t % 20.0)
+            L.own(n, t, x + off, y0, 0.0, False)              # its own pose 25-30 cm off, moving the right way
+            dets.append(TL.Det("lights", t, x, y0, None, None, 0.5))
+        L.feed(t, dets)
+    assert L.cam_distrust is None and not L.counts.get("whole_camera_distrust")
+
+
+def test_with_the_overhead_unplugged_the_side_camera_is_not_taken_as_the_overhead():
+    """Audit finding 14: one camera plugged in became the overhead whatever its name, even the side camera's."""
+    import observe as OB
+    m, w = OB.pick_cameras([("/dev/video2", "EMEET SmartCam C950")], {"overhead": "USB 2.0 Camera", "side": "EMEET"})
+    assert "overhead" not in m and m.get("side") == "/dev/video2" and any("NOT used as the overhead" in x for x in w)
+    m2, _ = OB.pick_cameras([("/dev/video0", "Some Camera"), ("/dev/video2", "EMEET SmartCam C950")],
+                            {"overhead": "USB 2.0 Camera", "side": "EMEET"})
+    assert m2["overhead"] == "/dev/video0" and m2["side"] == "/dev/video2"

@@ -116,7 +116,9 @@ def test_two_robots_unaccounted_standing_near_each_other_are_told_apart_by_the_o
     assert R.first("identity wiggle", "Left") is not None                  # the wiggle first ...
     assert any(l.get("what") == "wiggle showed nothing" for l in R.logs)     # ... the lights cannot see a turn
     assert R.first("identity drive", "Left") is not None                   # ... then the out-and-back
-    assert R.layer.counts["outback_named"] == 1
+    # (e19) 2: Right, then the only one left, was 58 cm from its own pose: beyond its doubt, so it is named by its own
+    # out-and-back too (motion proof), not by elimination
+    assert R.layer.counts["outback_named"] == (2 if FC.MOTION_PROOF else 1)
     assert R.gap("Left") < 3.0 and R.gap("Right") < 3.0                     # each named on its own spot: no swap
     assert "correction revoked" not in R.kinds()
     out = [s for s in R.sent if s[1] == "Left" and s[2].startswith("fs ") and " D " in s[2]]
@@ -297,7 +299,8 @@ def test_missions_give_a_robot_with_no_readable_points_the_right_of_way():
 # ------------------------------------------------------------------------- 5: the odometry trust and blind legs
 def test_the_trust_model_starts_at_the_replays_numbers_and_follows_a_robots_own_record():
     t = OT.Trust("A")
-    assert abs(t.radius(40.0) - (2.3 + 0.28 * 40)) < 1.0                     # the measured prior (the replay)
+    assert abs(t.radius(40.0) - (OT.PRIOR_BASE_CM + OT.PRIOR_PER_CM * 40)) < 1.0   # the measured prior (e19: from
+    assert (OT.PRIOR_BASE_CM, OT.PRIOR_PER_CM) == (2.0, 0.07)                     # calibration-run data, Nick)
     good, poor = OT.Trust("G"), OT.Trust("P")
     for k in range(60):
         L = (10.0, 20.0, 40.0)[k % 3]
@@ -479,6 +482,7 @@ def test_the_elimination_never_gives_a_robot_a_spot_on_another_robots_own_pose()
 
 def _far_rig(on, monkeypatch):
     monkeypatch.setattr(FC, "FAR_NAMED_CORRECT", on)
+    monkeypatch.setattr(FC, "MOTION_PROOF", False)     # (e19) e18's way; with motion proof: test_e19_audit_fixes.py
     R = H.Rig({"Left": (30.0, 30.0, 0.0), "Center": (60.0, 90.0, 90.0), "Right": (95.0, 30.0, 180.0)}, seed=2)
     R.run(3.0)
     R.off["Center"] = [31.0 * 0.6, -31.0 * 0.8, 0.0]       # its own pose 31 cm off, the robot standing (11 Nov 08:26)
@@ -531,7 +535,7 @@ def test_a_standing_reseed_keeps_its_own_heading_unless_the_camera_knows_better(
 def test_the_trust_record_is_the_fleets_until_a_robot_differs(monkeypatch):
     monkeypatch.setattr(OT, "FLEET", True)
     t = OT.Trust("A")
-    assert abs(t.radius(40.0) - (2.3 + 0.28 * 40)) < 1.0                    # the replay's prior (90th pct slope)
+    assert abs(t.radius(40.0) - (OT.PRIOR_BASE_CM + OT.PRIOR_PER_CM * 40)) < 1.0   # the prior (e19: calibration data)
     import random
     rng = random.Random(3)
     fl = OT.link({n: OT.Trust(n) for n in ("Left", "Center", "Right")})

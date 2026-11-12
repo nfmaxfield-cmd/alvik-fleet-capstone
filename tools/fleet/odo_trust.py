@@ -39,12 +39,13 @@ MIRLT_TRUST_FLEET=0: each robot's own record alone, every run's curves (the firs
 Changelog
   2026-11-12e18  first version.
   2026-11-12e18b the fleet record and session-only curves (the replay); the prior from the replay's blind stretches.
+  2026-11-12e19  (Nick) the prior from calibration-run data: 2.0 + 0.07 cm per cm (MIRLT_TRUST_PRIOR=replay: e18b's).
 """
 import json
 import math
 import os
 
-VERSION = "odo-trust-2026-11-12e18b"
+VERSION = "odo-trust-2026-11-12e19"   # e19: the prior from calibration-run data (2.0 + 0.07 cm/cm; MIRLT_TRUST_PRIOR=replay e18b's 2.3 + 0.28)
 try:
     import safety_group as _SG
     FLEET = _SG.flag("MIRLT_TRUST_FLEET")
@@ -60,8 +61,14 @@ DIFFER_P = 0.01               # CHOSEN: a robot leaves the fleet record when its
 # turns on the spot 1.3 deg per 90 deg median, 3.6 the 90th percentile). The model is a 95th percentile, so the prior
 # takes the replay's 90th percentile slope (0.28): a cautious starting guess the fleet's own samples replace after
 # PRIOR_UNTIL samples. Claude's choice of which replay number; e18 first version: 2.0 + 0.07 (the 29 Oct straight legs)
-PRIOR_BASE_CM = 2.3
-PRIOR_PER_CM = 0.28
+# (e19, Nick 12 Nov: "start odometry trust from calibration-run data, the best, most accurate numbers available, not an
+# overly cautious prior") MIRLT_TRUST_PRIOR "calibration" (default): the 29 Oct measurement of dead reckoning on the
+# CALIBRATED wheel and gyro scales (wheel_scale 0.979, gyro_scale 1.075) against both cameras, 22,000 stretches up to
+# 40 cm: p95 2.2 cm after 5 cm, 3.8 after 25, 4.4 after 40 = 2.0 + 0.07 cm per cm (run_plan.BLIND_ERR_*). "replay":
+# e18b's cautious 2.3 + 0.28 (the replay's 90th percentile slope on mostly curved free-roam stretches).
+PRIOR_KIND = _SG.value("MIRLT_TRUST_PRIOR") if "_SG" in globals() else "calibration"
+PRIOR_BASE_CM = 2.3 if PRIOR_KIND == "replay" else 2.0
+PRIOR_PER_CM = 0.28 if PRIOR_KIND == "replay" else 0.07
 PRIOR_SPOT = 0.04          # deg of heading doubt per deg turned on the spot (3.6 per 90, the replay's 90th percentile)
 PRIOR_CURVE = 0.04         # ... per deg turned on a curve (until this session's own curves say: the replay)
 PRIOR_N = 5                # CHOSEN: the prior counts as 5 samples per stretch length ...
