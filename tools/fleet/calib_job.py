@@ -3,7 +3,10 @@ zones 1-2) from the Production screen, shows its phase, the bound robot and the 
 report and charts. One at a time, and never while a Mission Control run holds the robots' WiFi port.
 
 The simulator run goes in its own network namespace (unshare -rn) when that works, so its UDP ports never meet the
-robots' or another run's."""
+robots' or another run's.
+
+Changelog: 2026-11-12mc (Mission Control build) the Pi efficiency monitor starts beside each calibration run
+(pi_monitor.csv in its folder). No version string before."""
 import json
 import os
 import re
@@ -13,6 +16,7 @@ import subprocess
 import sys
 import time
 
+VERSION = "calib-job-2026-11-12mc"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 SAFE_FILES = ("report.md", "chart_leg_errors.png", "chart_four_points.png", "chart_tracks.png", "fit.json",
@@ -77,6 +81,11 @@ class CalibJob:
         self.out = open(os.path.join(self.folder, "calib_stdout.txt"), "w")
         self.p = subprocess.Popen(cmd, stdout=self.out, stderr=subprocess.STDOUT, cwd=REPO, start_new_session=True)
         self.t0 = time.time()
+        try:                                       # (12 Nov) the Pi efficiency monitor: pi_monitor.csv in its folder
+            import mission_control as MC
+            self.monitor = MC.monitor_for(self.folder, self.p.pid)
+        except Exception:  # noqa: BLE001
+            self.monitor = None
         return self.status()
 
     def stop(self):

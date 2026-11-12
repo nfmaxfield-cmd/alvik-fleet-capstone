@@ -215,6 +215,60 @@ def conn_default(dry=None, probe=_port_answers):
                                   "simulator"}
 
 
+def monitor_for(folder, pgid):
+    """(12 Nov, Part 3) The Pi efficiency monitor beside a run this page starts (tools/pi/pi_monitor.py): its own
+    process, low priority, ending with the run; pi_monitor.csv in the run's folder. Never stops a run."""
+    if not pgid:
+        return None                          # nothing to end with: never a monitor that runs on by itself
+    try:
+        pi = os.path.join(os.path.dirname(HERE), "pi")
+        if pi not in sys.path:
+            sys.path.insert(0, pi)
+        import pi_monitor as PM
+        return PM.start_for(folder, pgid=pgid)
+    except Exception as e:  # noqa: BLE001
+        print("(the Pi monitor did not start: %s)" % e, flush=True)
+        return None
+
+
+def pi_health_state(S):
+    """(12 Nov, Part 3) The "Pi health" panel: the run's own pi_monitor.csv while a run goes (or the last run's), else
+    a reading made here and now. {"source", "folder", "health": pi_monitor.health(...), "series": the last rows}."""
+    pi = os.path.join(os.path.dirname(HERE), "pi")
+    if pi not in sys.path:
+        sys.path.insert(0, pi)
+    import pi_monitor as PM
+    folders = []
+    st = getattr(S, "start", None)
+    if st is not None and st.job is not None:
+        import live_view as LV
+        folders += [st.job.folder, LV.freeroam_folder(st) or ""]
+    if S.run is not None:
+        folders += [S.run.folder]
+    cj = getattr(S, "calib", None)
+    if cj is not None and getattr(cj, "folder", None):
+        folders += [cj.folder]
+    busy = run_going(S)
+    best = None
+    for f in folders:
+        p = os.path.join(f or "", PM.NAME)
+        if f and os.path.exists(p) and (best is None or os.path.getmtime(p) > os.path.getmtime(best)):
+            best = p
+    if best and (busy or time.time() - os.path.getmtime(best) < 120):
+        rows = PM.rows_of(best)
+        src = "this run's pi_monitor.csv (every 2 s)"
+    else:
+        if getattr(S, "_pi_idle", None) is None:
+            S._pi_idle = PM.Idle(S.dir)
+            time.sleep(0.3)
+        rows = S._pi_idle.now()
+        best, src = None, "read now by Mission Control (no run going)"
+    keys = ("t", "core0", "core1", "core2", "core3", "temp_c", "lag_overhead_s", "lag_side_s", "loop_work_ms_p95",
+            "det_share_pct", "det_cap_pct", "throttle_now")
+    return {"source": src, "file": best, "running": busy, "health": PM.health(rows),
+            "series": [{k: r.get(k) for k in keys} for r in rows[-90:]], "version": PM.VERSION}
+
+
 def upload_default_migrate(settings):
     """(Mission Control build, 12 Nov, 1b) Uploads are on by default. settings.json is saved whole, so a file saved
     before this build holds "upload": false whether or not anyone chose it. Unless the page recorded upload as set by
@@ -649,6 +703,7 @@ class Session:
                     cmd += ["--sim-arg=--brick-camera"]
         self.run = Run(kind, folder, cmd, env=self.safety_env())
         self.last_runs[kind] = folder
+        self.run.monitor = monitor_for(folder, self.run.p.pid)          # (12 Nov) pi_monitor.csv
         return self.run.status()
 
     def run_tracking(self):
@@ -796,6 +851,7 @@ class Session:
         self.run = Run(kind, folder, cmd, env=self.safety_env())
         self.run.session = os.path.join(folder, "run")
         self.run.mode = conn
+        self.run.monitor = monitor_for(folder, self.run.p.pid)          # (12 Nov) pi_monitor.csv in the run folder
         self.last_runs[kind] = os.path.join(folder, "run")
         return self.run.status()
 
@@ -1349,6 +1405,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, S.run.status() if S.run else {})
             if path == "/api/start":
                 return self._send(200, clean(S.start.state()))
+            if path == "/api/pi_health":               # (12 Nov, Part 3) the Pi health panel
+                return self._send(200, clean(pi_health_state(S)))
             if path == "/api/live":                    # (12 Nov, 1c) the live table: robots, their doubt, the points
                 import live_view as LV
                 return self._send(200, clean(LV.snapshot(S.start)))
@@ -1650,7 +1708,7 @@ def detect_where(SD, sim_room=""):
 
 
 # ---------------------------------------------------------------------------------------------- (e12) new code after git pull
-VERSION = "2026-11-12mc-c"   # (1c) /api/live: the live table (live_view.py). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) RUN_DEFAULTS upload on; an old unchosen false follows it (upload_default_migrate; settings "by_hand"). 1a: Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
+VERSION = "2026-11-12mc-3"   # (Part 3) the Pi efficiency monitor beside every run this page starts (monitor_for), /api/pi_health. 1c: "2026-11-12mc-c"   # (1c) /api/live: the live table (live_view.py). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) RUN_DEFAULTS upload on; an old unchosen false follows it (upload_default_migrate; settings "by_hand"). 1a: Run.stop: Ctrl+C to the run's whole process group (MIRLT_STOP_GROUP=0: the leader only, as before). Before: "2026-11-12e18"   # e18: the Safety group: one box on the Run screen (More > Safety) with every safety switch, "auto" by default (decided automatically); a switch set there goes to the runs this page starts. Before: "2026-11-10e14"   # e14: the Start button's clear-space answer passed to the run. 2026-11-10e13 (e13): /api/tags/corners_confirm (the corner tags pre-fill, the person confirms); the needs-a-hand box. 2026-11-10a (e12, Nick 10 Nov): notices its own code changed after `git pull` and offers a
                           # restart on the page when no run is going (never mid-run). No version string before
 CODE_CHECK_S = 5.0        # chosen: how often the code is looked at (a git call and a few hundred stat calls). No DOE
 

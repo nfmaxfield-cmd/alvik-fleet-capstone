@@ -64,6 +64,7 @@ VERSION_C = "freeroam-runner-2026-11-07c"   # 11-07c (e10 Phase C): the start's 
                                           # --silent-out, --no-tilt-recovery, --stop-lead; attended runs ask questions
                                           # (Mission Control's card); a failed heading crawl joins held, not out
                                           # 11-05d: --motion curves|stopturn, arc calibration save
+VERSION_MONITOR = "freeroam-runner-2026-11-12mc"   # (Mission Control build, 12 Nov) the loop feeds the Pi efficiency monitor (monitor_feed.Feed: work time a pass, picture ages, the detector's numbers; read-only)
 VERSION_TAGFREE = "freeroam-runner-2026-11-12tf"   # tag-free (12 Nov): tagfree.attach on the tracking layer (the detector on demand from the recorder's newest pictures, in a worker on the planner's core; overhead heading fused with each robot's own; MIRLT_TAGFREE auto/1/0), its summary in run.json, a fix's heading sigma passed on (kept apart from VERSION so the parallel e18 build's bump does not collide)
 HOME_BOARD = (0.0, 0.0, 122.24, 121.92)    # roam.py's board (the home plywood in the floor calibration's cm)
 FOLLOW_LOOK_CM = 8.0    # the robots' own front stop while driving: roam.py's 8 (the plywood reads ~10 cm ahead, 12
@@ -920,7 +921,12 @@ class Runner:
                     "%s %s %s%% %d moves" % (n, r.mode, r.battery if r.battery is not None else "?", r.n_moves)
                     for n, r in c.R.items()))
                 self.write_state(why=None)
-            time.sleep(max(0.0, TICK_S - (self.AC.now() - now)))
+            work = self.AC.now() - now
+            if self.__dict__.get("mfeed") is None:     # (12 Nov) the Pi efficiency monitor's feed: loop time,
+                import monitor_feed as MF_            # picture ages, the detector's share (read-only, monitor_feed.py)
+                self.mfeed = MF_.Feed(self.dir)
+            self.mfeed.tick(work, self)
+            time.sleep(max(0.0, TICK_S - work))
         say("\nThe run ends: %s." % why)
         self.stop_all(why)                     # (e19, audit H1) stop FIRST, then anything is saved
         c.event(None, "end", why)
@@ -975,7 +981,7 @@ class Runner:
 
     def write_state(self, why):
         c = self.ctrl
-        st = dict(version=VERSION, version_tagfree=VERSION_TAGFREE, core=FC.VERSION, t0=self.t0, now=self.AC.now(), ended=why, seed=self.a.seed,
+        st = dict(version=VERSION, version_tagfree=VERSION_TAGFREE, version_monitor=VERSION_MONITOR, core=FC.VERSION, t0=self.t0, now=self.AC.now(), ended=why, seed=self.a.seed,
                   robots={n: dict(mode=r.mode, out=r.out_why, battery=r.battery, moves=r.n_moves, fw=self.fw.get(n),
                                   lost=r.lost is not None) for n, r in c.R.items()},
                   counts=c.counts, tracking=self.layer.summary(),

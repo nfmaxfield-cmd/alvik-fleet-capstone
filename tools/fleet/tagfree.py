@@ -35,6 +35,10 @@ MIRLT_ML_MODEL, then ~/.config/mirlt/detector/detector-v1.onnx, then ~/.config/m
 
 Changelog
   2026-11-12a  first version (build tag-free)
+  2026-11-12b  (Mission Control build: the Pi efficiency monitor) read-only stats: Budget.share_now() (the detector's
+               share of its core over the last window) and share_now in its summary. The core share is a setting for
+               the bench (docs/how-to/pi-bench-core-share.md): MIRLT_DETECTOR_DUTY (0.10 or 10 = 10 %), else
+               ~/.config/mirlt/detector/share.json {"duty": 0.25}, else DUTY (0.25, unchanged). Nothing else changes.
 """
 import math
 import os
@@ -42,7 +46,7 @@ import random
 import threading
 import time
 
-VERSION = "tagfree-2026-11-12a"
+VERSION = "tagfree-2026-11-12b"
 
 SWITCH_ENV = "MIRLT_TAGFREE"          # auto (default) | 1 | 0
 MODEL_ENVS = ("MIRLT_DETECTOR_MODEL", "MIRLT_ML_MODEL")
@@ -106,12 +110,43 @@ def switch(env=None):
 
 
 # ==================================================================================================================
+SHARE_FILE = "~/.config/mirlt/detector/share.json"
+
+
+def duty_setting(env=None, path=None):
+    """(12 Nov, the bench) The detector's core share: MIRLT_DETECTOR_DUTY (a fraction, or a percent over 1), else the
+    bench's saved choice (share.json), else DUTY. Returns (duty, where it came from)."""
+    env = os.environ if env is None else env
+    v = (env.get("MIRLT_DETECTOR_DUTY") or "").strip()
+    if v:
+        try:
+            x = float(v)
+            x = x / 100.0 if x > 1.0 else x
+            if 0.0 < x <= 1.0:
+                return x, "MIRLT_DETECTOR_DUTY"
+        except ValueError:
+            pass
+    try:
+        import json
+        with open(os.path.expanduser(path or SHARE_FILE)) as f:
+            x = float(json.load(f).get("duty"))
+        if 0.0 < x <= 1.0:
+            return x, "share.json (the bench's choice)"
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return DUTY, "the default"
+
+
 class Budget:
     """The detector's load limit: calls allowed while (time spent in the last WINDOW s) / WINDOW <= duty, never during a
     cool-down after an over-budget call. Clock-agnostic (the simulator passes its own time)."""
     WINDOW = 4.0
 
-    def __init__(self, duty=DUTY, budget_ms=CALL_BUDGET_MS):
+    def __init__(self, duty=None, budget_ms=CALL_BUDGET_MS):
+        if duty is None:
+            duty, self.duty_from = duty_setting()
+        else:
+            self.duty_from = "given"
         self.duty, self.budget_ms = float(duty), float(budget_ms)
         self.spent = []          # [(t, ms)]
         self.cool_until = -1e18
@@ -138,12 +173,16 @@ class Budget:
         else:
             self.over_run = 0
 
+    def share_now(self, t):
+        """(read-only, 12 Nov) The share of one core the detector used over the last WINDOW s (0-1)."""
+        return sum(m for a, m in list(self.spent) if t - a < self.WINDOW) / 1000.0 / self.WINDOW
+
     def summary(self):
         ms = sorted(self.ms_all)
         return dict(calls=self.n, over_budget=self.n_over, refused_for_load=self.n_refused,
                     ms_median=round(ms[len(ms) // 2], 1) if ms else None,
                     ms_p95=round(ms[int(0.95 * (len(ms) - 1))], 1) if ms else None,
-                    duty=self.duty, budget_ms=self.budget_ms)
+                    duty=self.duty, duty_from=getattr(self, "duty_from", ""), budget_ms=self.budget_ms)
 
 
 # ==================================================================================================================

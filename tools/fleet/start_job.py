@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -801,6 +801,12 @@ class Starter:
                     cmd = ["bash", "-c", "%s; bash %s freeroam-upload" % (shlex.join(cmd), shlex.quote(sh))]
         env.update(prefs_env(self.prefs))
         self.job = ProcJob(kind, cmd, folder, env=env, practice=pr)
+        if pr or kind == "calibrate":
+            # (12 Nov) the Pi efficiency monitor; a real free roam gets its own from run-fleet-pi.sh freeroam-run (the
+            # SSH way too), in free roam's own folder
+            import mission_control as MC
+            if hasattr(self.job, "p"):
+                self.job.monitor = MC.monitor_for(folder, self.job.p.pid)
         return {"started": kind, "folder": folder}
 
     def upload_on(self):

@@ -267,6 +267,7 @@ def test_a_school_run_on_the_robots_passes_upload(tmp_path, monkeypatch):
         def __init__(self, kind, folder, cmd, env=None):
             got["cmd"] = cmd
             self.folder = folder
+            self.p = type("P", (), {"pid": 0})()
 
         def status(self):
             return {}
@@ -318,3 +319,131 @@ def test_the_start_screen_draws_the_live_table():
     assert "${liveMapCard(st)}" in html and 'api("/api/live")' in html
     src = open(os.path.join(FLEET, "mission_control.py")).read()
     assert 'path == "/api/live"' in src
+
+
+# ------------------------------------------------------------------------------------------- Part 3: the Pi monitor
+def test_the_planner_feed_writes_loop_cameras_and_detector(tmp_path):
+    import monitor_feed as MF
+    import tagfree as TF
+    t = [100.0]
+    fd = MF.Feed(str(tmp_path), every_s=2.0, clock=lambda: t[0])
+
+    class Cam:
+        def __init__(self, cam, age):
+            self.cam, self.latest = cam, (100.0 - age, b"jpg")
+
+    class Src:
+        budget = TF.Budget(duty=0.25)
+
+        def summary(self):
+            return {"load": self.budget.summary(), "side_off": False}
+    Src.budget.done(101.0, 300.0)                     # one call of 300 ms at t=101
+    runner = type("R", (), {"frames": type("F", (), {"cams": [Cam("overhead", 0.2), Cam("side", 0.4)]})(),
+                            "tagfree": type("T", (), {"source": Src()})()})()
+    for k in range(41):
+        t[0] = 100.0 + 0.05 * k
+        fd.tick(0.004 if k % 10 else 0.030, runner)
+    d = json.load(open(tmp_path / "monitor_feed.json"))
+    assert d["loop"]["work_ms_max"] == 30.0 and 3.9 < d["loop"]["work_ms_p50"] < 4.1
+    assert 49 < d["loop"]["period_ms_mean"] < 51
+    assert set(d["cameras"]) == {"overhead", "side"}
+    assert d["detector"]["load"]["calls"] == 1 and abs(d["detector"]["share_now"] - 0.075) < 1e-6   # 300 ms / 4 s
+    assert TF.Budget(duty=0.25).share_now(0.0) == 0.0
+
+
+def test_the_core_share_is_a_setting_with_the_old_default(tmp_path, monkeypatch):
+    import tagfree as TF
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MIRLT_DETECTOR_DUTY", raising=False)
+    assert TF.duty_setting(path=str(tmp_path / "none.json"))[0] == TF.DUTY == 0.25
+    monkeypatch.setenv("MIRLT_DETECTOR_DUTY", "10")
+    assert TF.Budget().duty == 0.10 and TF.Budget().duty_from == "MIRLT_DETECTOR_DUTY"
+    monkeypatch.setenv("MIRLT_DETECTOR_DUTY", "0.5")
+    assert TF.Budget().duty == 0.5
+    monkeypatch.delenv("MIRLT_DETECTOR_DUTY")
+    f = tmp_path / "share.json"
+    f.write_text(json.dumps({"duty": 0.1}))
+    assert TF.duty_setting(path=str(f)) == (0.1, "share.json (the bench's choice)")
+
+
+def _rows(n, **kw):
+    out = []
+    for i in range(n):
+        r = {"t": str(1000 + 2 * i), "core0": "40", "core1": "30", "core2": "60", "core3": "55", "temp_c": "60",
+             "throttled": "0x0", "throttle_now": "", "throttle_since_boot": "", "lag_overhead_s": "0.10",
+             "lag_side_s": "0.12", "loop_work_ms_p95": "8", "det_share_pct": "5", "det_cap_pct": "25",
+             "mem_avail_mb": "3000", "mem_total_mb": "4000", "disk_free_gb": "20"}
+        r.update({k: str(v) for k, v in kw.items()}) if i == n - 1 else None
+        out.append(r)
+    return out
+
+
+def test_pi_health_levels_come_from_documented_limits_and_the_runs_own_spread():
+    import pi_monitor as PM
+    h = PM.health(_rows(5), floor_gb=1.0)
+    assert h["level"] == "ok"
+    by = lambda h: {i["key"]: i for i in h["items"]}   # noqa: E731
+    assert by(PM.health(_rows(5, temp_c=81), floor_gb=1.0))["temp_c"]["level"] == "red"           # documented 80 C
+    assert by(PM.health(_rows(5, throttle_now="throttled"), floor_gb=1.0))["throttle"]["level"] == "red"
+    assert by(PM.health(_rows(5, lag_overhead_s=1.2), floor_gb=1.0))["lag_overhead"]["level"] == "red"   # firmware 1 s
+    assert by(PM.health(_rows(5, lag_overhead_s=0.5), floor_gb=1.0))["lag_overhead"]["level"] == "ok"    # too early
+    assert by(PM.health(_rows(40, lag_overhead_s=0.5), floor_gb=1.0))["lag_overhead"]["level"] == "amber"  # own p95
+    assert by(PM.health(_rows(5, loop_work_ms_p95=55), floor_gb=1.0))["loop"]["level"] == "red"   # its 50 ms target
+    assert by(PM.health(_rows(5, det_share_pct=30), floor_gb=1.0))["detector"]["level"] == "amber"  # over its cap
+    assert by(PM.health(_rows(5, disk_free_gb=0.9), floor_gb=1.0))["disk"]["level"] == "red"       # diskguard floor
+    r = _rows(5, core1=100)
+    r[-2]["core1"] = "100"
+    assert by(PM.health(r, floor_gb=1.0))["core1"]["level"] == "red"
+    nopi = _rows(3)
+    for x in nopi:
+        x["throttled"], x["temp_c"] = "", ""
+    hh = by(PM.health(nopi, floor_gb=1.0))
+    assert hh["throttle"]["level"] == "none" and hh["temp_c"]["level"] == "none"    # not a Pi: said, not an error
+
+
+def test_picture_lag_is_read_from_the_recorders_picture_time():
+    import socket
+    import threading
+    import pi_monitor as PM
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def serve():
+        c, _ = srv.accept()
+        c.recv(1024)
+        c.sendall(b"HTTP/1.0 200 OK\r\n\r\n--frame\r\nContent-Type: image/jpeg\r\nX-Frame: 9\r\nX-Time: %.4f\r\n\r\n"
+                  % (time.time() - 0.3))
+        time.sleep(0.2)
+        c.close()
+    threading.Thread(target=serve, daemon=True).start()
+    lag = PM.picture_lag(port)
+    srv.close()
+    assert lag is not None and 0.25 < lag < 0.8
+    assert PM.picture_lag(1) is None                    # nothing answers: blank, never an error
+
+
+def test_the_monitor_writes_its_csv_and_the_report_section(tmp_path):
+    import pi_monitor as PM
+    import monitor_feed as MF
+    MF.Feed(str(tmp_path), every_s=0).tick(0.003)
+    MF.Feed(str(tmp_path), every_s=0).write(time.time())
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.6)"])
+    smp = PM.Sampler(str(tmp_path), lag_fn=lambda port: 0.12 if port == 8000 else None)
+    path = PM.watch(str(tmp_path), pid=p.pid, every_s=0.3, sampler=smp)
+    p.wait()
+    rows = PM.rows_of(path)
+    assert len(rows) >= 3 and rows[0]["lag_overhead_s"] == "0.12" and rows[0]["lag_side_s"] == ""
+    assert list(rows[0]) == PM.COLS
+    assert os.path.exists(tmp_path / "pi_monitor.png") and "## Pi health" in open(tmp_path / "pi_monitor.md").read()
+
+
+def test_mission_control_starts_the_monitor_beside_its_runs():
+    src = open(os.path.join(FLEET, "mission_control.py")).read()
+    assert src.count("monitor_for(folder, self.run.p.pid)") == 2 and 'path == "/api/pi_health"' in src
+    assert "monitor_for(self.folder, self.p.pid)" in open(os.path.join(FLEET, "calib_job.py")).read()
+    sh = open(os.path.join(os.path.dirname(TOOLS), "run-fleet-pi.sh")).read()
+    assert "pi_monitor.py watch --newest 'logs/*-freeroam'" in sh
+    assert "self.mfeed.tick(work, self)" in open(os.path.join(FLEET, "freeroam.py")).read()
+    assert "self.mfeed.tick(None)" in open(os.path.join(FLEET, "run_plan.py")).read()

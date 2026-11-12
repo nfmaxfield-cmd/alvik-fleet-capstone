@@ -6,6 +6,9 @@ Premise -> data -> conclusion -> next. Every chart says what is measured and whe
 sentence under it. Reads the run folder's CSVs (written by freeroam_core.Controller through freeroam.py):
 motion.csv (every 0.5 s, each robot: moving or not, by its own wheels and gyro), moves.csv, fallbacks.csv,
 reflex.csv, lost.csv, battery.csv, breaks.csv, events.csv, run.json.
+
+Changelog: 2026-11-12mc (Mission Control build) a "Pi health" section from pi_monitor.csv (tools/pi/pi_monitor.py),
+with its chart. No version string before.
 """
 import csv
 import json
@@ -14,6 +17,7 @@ import os
 import sys
 from collections import Counter, defaultdict
 
+VERSION = "freeroam-report-2026-11-12mc"
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -407,6 +411,14 @@ def make(folder):
     L += ["**How each robot finished**: %s. The run ended: %s." % (
         "; ".join("%s: %s" % (e["robot"], e["text"]) for e in outs) or "still roaming at the end",
         run.get("ended", "?")), ""]
+    try:                                  # (12 Nov, Mission Control build) the Pi efficiency monitor's section
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+        import pi_monitor as PM
+        sec = PM.report(folder)
+        if sec:
+            L += ["#" + x if x.startswith("## ") else x for x in sec]
+    except Exception as e:     # noqa: BLE001
+        L += ["(Pi health section not made: %s)" % e, ""]
     L += ["## Conclusion", ""]
     if ms:
         L.append("- %s robots moved at the same time for %.0f minutes (%.1f %% of the run); all three for %.0f "

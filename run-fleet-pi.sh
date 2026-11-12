@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # (2026-11-12 Mission Control build) `freeroam-upload`: Mission Control's free roam on the robots uploads its logs and
-# frames when it ends (uploads on by default), the recorder left running for Mission Control's camera.
+# frames when it ends (uploads on by default), the recorder left running for Mission Control's camera. freeroam-run starts
+# the Pi efficiency monitor beside the run (tools/pi/pi_monitor.py: pi_monitor.csv; MIRLT_PI_MONITOR=0 off).
 # (2026-11-11 e16, the Pi audit; Nick: "If it's not useful for executing the program, we can drop it") the recorder
 # saves NO video by default: it serves its pictures (tracking, the setup, Mission Control) and the runs save their own
 # frames and clips. MIRLT_VIDEO=1 (or `rec video`) keeps the whole video as before. `bench [minutes] [old|trimmed|both|layouts]`
@@ -463,6 +464,9 @@ case "$WHAT" in
       python3 tools/fleet/freeroam.py run --dry --hours "$H" "$@" ${FREEROAM_DRY_ARGS:-}
     else
       PIN=""; PIN="$(plan_pin)"
+      # (12 Nov) the Pi efficiency monitor (tools/pi/pi_monitor.py): pi_monitor.csv in this free roam's own folder, low
+      # priority, ending with this run; MIRLT_PI_MONITOR=0 switches it off
+      [ "${MIRLT_PI_MONITOR:-1}" != 0 ] && { setsid nice -n 10 python3 tools/pi/pi_monitor.py watch --newest 'logs/*-freeroam' --pid $$ > /dev/null 2>&1 < /dev/null & }
       $PIN python3 tools/fleet/freeroam.py run --hours "$H" "$@" $IPS --stream 127.0.0.1:8000 --calib "$CALIB" $SIDE_ARG
     fi ;;
   freeroam-finish)  # (inside the tmux session freeroam, after the run): recorder stopped, logs + frames uploaded
