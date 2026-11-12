@@ -38,6 +38,11 @@ validation compares like with like: hardsim_validate.py.
 
 Version / changelog:
   fastsim-realism-2026-11-12a  first version (hard simulator build).
+  fastsim-realism-2026-11-12e20  every sighting says its camera ("both" / "side", as the home bridge's cam_bridge:<camera>)
+               and "dark" in the dark patch; cams=[...]: several cameras, each seeing every robot on its own, each breaking
+               a guess of its own (a steep angle: noise stretched along its depth; a bump mid-run: its picture turned; a
+               dark patch only it has; a third camera), and cam_swap=(t0, t1, a, b): two cameras' names swapped for a spell
+               (each picture through the other's calibration: one mirrored left-right, the other top-bottom).
 """
 import bisect
 import json
@@ -53,7 +58,7 @@ _AN = os.path.join(os.path.dirname(HERE), "analysis")
 if _AN not in sys.path:
     sys.path.insert(0, _AN)
 
-VERSION = "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
+VERSION = "fastsim-realism-2026-11-12e20"   # e20: cameras named on every sighting; cams=[...] and cam_swap (the simulator breaks the camera guesses). Before: "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
 PROFILE_DIR = os.path.join(HERE, "sim_profiles")
 DEFAULT_MEASURED = "measured-home-2026-11-11-0858.json"
 PROFILES = ("easy", "measured", "harsh")
@@ -133,6 +138,8 @@ def make_class(F):
                 self._init_measures()
                 return
             self._real = True
+            self.cams_spec = kw.pop("cams", None)          # (e20) several cameras, each with its own faults
+            self.cam_swap = kw.pop("cam_swap", None)       # (e20) (t0, t1, a, b): two cameras' names swapped
             fl = dict.fromkeys(HARSH_FAULTS, True) if self.kind == "harsh" else {}
             fl.update(faults or {})
             self.faults = {k: v for k, v in fl.items() if v}
@@ -364,9 +371,74 @@ def make_class(F):
                     d = self._delay_draw()      # this picture's fixes arrive after the measured delay
                 src.q = [(self.t + d, tf, fx) if tf == self.t else (due, tf, fx) for due, tf, fx in src.q]
 
+        def _feed_cams(self, t, dets):
+            """(e20) Several cameras, each sees every robot on its own (cams=[dict(name, share, sd, aniso=(ratio,
+            axis_deg), cover=rect, dark=[rects], bump=(t0, deg), bias=(dx, dy))]); cam_swap=(t0, t1, a, b) swaps two
+            cameras' names for a spell, each picture then read through the other's calibration (mirrored left-right)."""
+            P, rng = self.prof, self.rrng
+            keep = [d for d in dets if getattr(d, "src", "") == "tags" or d.name is not None and d.src != "lock"]
+            alive = [b for b in self.bots.values() if not b.dead]
+            merged = set()
+            for i in range(len(alive)):
+                for j in range(i + 1, len(alive)):
+                    a, b = alive[i], alive[j]
+                    if math.hypot(a.x - b.x, a.y - b.y) - FC.BODY < MERGE_GAP_CM:
+                        merged.update((a.name, b.name))
+            B = self.board
+            cx, cy = 0.5 * (B[0] + B[2]), 0.5 * (B[1] + B[3])
+            sw = self.cam_swap
+            swapping = sw is not None and sw[0] <= t < sw[1]
+            out = []
+            for c in self.cams_spec:
+                name = c["name"]
+                for b in alive:
+                    if self.cam_gap(b.name, t) or not self.in_cover(b.x, b.y) or b.name in merged:
+                        continue
+                    cv = c.get("cover")
+                    if cv and not (cv[0] <= b.x <= cv[2] and cv[1] <= b.y <= cv[3]):
+                        continue
+                    p = float(c.get("share", 0.95))
+                    dark = any(r[0] <= b.x <= r[2] and r[1] <= b.y <= r[3] for r in c.get("dark") or ())
+                    if dark:
+                        p *= 0.3
+                    if rng.random() > p:
+                        continue
+                    sd = float(c.get("sd", 0.7))
+                    ex, ey = rng.gauss(0, sd), rng.gauss(0, sd)
+                    an = c.get("aniso")
+                    if an:
+                        a_ = math.radians(an[1])
+                        along = ex * an[0]
+                        ex, ey = along * math.cos(a_) - ey * math.sin(a_), along * math.sin(a_) + ey * math.cos(a_)
+                    x, y = b.x + ex, b.y + ey
+                    if c.get("bias"):
+                        x, y = x + c["bias"][0], y + c["bias"][1]
+                    bm = c.get("bump")
+                    if bm and t >= bm[0]:
+                        a_ = math.radians(bm[1])
+                        x, y = (cx + (x - cx) * math.cos(a_) - (y - cy) * math.sin(a_),
+                                cy + (x - cx) * math.sin(a_) + (y - cy) * math.cos(a_))
+                    if self.cam_fault or self.cam_correct is not None:
+                        x, y = self.cam_map(x, y)
+                    label = name
+                    if swapping and name in (sw[2], sw[3]):
+                        # each picture through the OTHER camera's calibration: two different transforms (a's mirrored
+                        # left-right, b's top-bottom), so two swapped cameras never agree with each other by accident
+                        label = sw[3] if name == sw[2] else sw[2]
+                        if name == sw[2]:
+                            x = B[0] + B[2] - x
+                        else:
+                            y = B[1] + B[3] - y
+                    out.append(TL.Det("motion", t, x, y, cam=label, light="dark" if dark else None))
+                    self.m_seen.setdefault(b.name, []).append(t)
+                    self.m_lastdet[b.name] = (t, x, y)
+            return self.src.layer._feed0(t, keep + out)
+
         def _feed(self, t, dets):
             """The bridge's sightings instead of fastsim_sources' per-source ones: one unnamed sighting a robot a
             picture, as the home bridge sends them (freeroam.det_of: "both" / "side" -> motion)."""
+            if getattr(self, "cams_spec", None):
+                return self._feed_cams(t, dets)
             P, rng = self.prof, self.rrng
             out = []
             keep = [d for d in dets if getattr(d, "src", "") == "tags" or d.name is not None and d.src != "lock"]
@@ -412,7 +484,8 @@ def make_class(F):
                     x, y = self.cam_map(x, y)
                 if wrong and cam in ("side", "both"):
                     x = B[0] + B[2] - x          # the other camera's calibration: mirrored left to right
-                d = TL.Det("motion", t, x, y)
+                dark = any(r[0] <= b.x <= r[2] and r[1] <= b.y <= r[3] for r in self.dark)
+                d = TL.Det("motion", t, x, y, cam=cam, light="dark" if dark else None)    # (e20) its camera
                 out.append(d)
                 self.m_seen.setdefault(b.name, []).append(t)
                 self.m_lastdet[b.name] = (t, x, y)

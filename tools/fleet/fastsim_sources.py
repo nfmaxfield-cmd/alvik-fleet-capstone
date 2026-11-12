@@ -65,6 +65,23 @@ class CameraSources:
             import freeroam_core as _FC
             self.layer.proof_fn = (lambda n, sg: sim.ctrl.proof_limit(sim.ctrl.R[n], sg)) if _FC.MOTION_PROOF else None
             self.layer.say_fn = lambda w: sim.ctrl.event(None, "camera", w)
+        # (e20) learned camera trust: the simulator's own book (never saved; sightings with no camera keep e19's way)
+        import camera_trust as _CT
+        if self.layer.book is None and TL.CAMERA_TRUST != "e19":
+            self.layer.book = _CT.TrustBook("sim", None, tuple(sim.board), seed=sim.seed, clock=lambda: sim.t)
+        if self.layer.book is not None and hasattr(sim.ctrl, "camtrust"):
+            sim.ctrl.camtrust = self.layer.book
+            self.layer.own_sd_fn = lambda n, d: sim.ctrl.trust[n].radius(d) / 2.45 if n in sim.ctrl.trust else \
+                (2.0 + 0.07 * d) / 2.45
+            self.layer.book.say_fn = lambda w: sim.ctrl.event(None, "camera trust", w)
+            ctl = sim.ctrl
+            if hasattr(ctl, "motion_heading") and getattr(ctl, "mheading", None) is not None:
+                # (e20, 2) every camera's sighting of a named robot, at the picture's time on the controller's clock
+                self.layer.member_fn = lambda n, d, t: ctl.motion_heading(ctl.R[n], t + sim.cam_clock - ctl.clock, d.x,
+                                                                          d.y, d.cam, d.src, d.light)
+                ctl.mh_by_layer = True
+                self.layer.cam_sigma_fn = lambda cam, m: ctl.mheading.sigma_cam(
+                    cam if m in ("motion", None) else "%s/%s" % (cam, m))
         self.locks = {}             # name -> dict(body, last_ok)
         self.next_t = 0.0
         self.q = []                 # (due, tf, fixes)
@@ -315,16 +332,22 @@ class CameraSources:
                     c.on_elim_revoked(f["revoked"])
                     continue
                 n = f["robot"]
+                kw = dict(cam=f["cam"], light=f.get("light")) if f.get("cam") is not None else {}    # (e20)
                 if f.get("how"):                     # (e17) a correction: the controller sends the robot an fpose
                     c.on_fix(n, tf + s.cam_clock, f["x"], f["y"], f["th"], arrival=s.t, sigma=f["sigma"],
-                             src=f["src"], how=f["how"])
+                             src=f["src"], how=f["how"], **kw)
                     continue
-                c.on_fix(n, tf + s.cam_clock, f["x"], f["y"], f["th"], arrival=s.t, sigma=f["sigma"], src=f["src"])
+                c.on_fix(n, tf + s.cam_clock, f["x"], f["y"], f["th"], arrival=s.t, sigma=f["sigma"], src=f["src"], **kw)
                 if s.t >= s.frozen_until and c.R[n].lost is None and getattr(c.R[n], "fix_used", True):
                     c.sent(n)
                     fx, fy = c.fix_out(n, tf + s.cam_clock, f["x"], f["y"]) if hasattr(c, "fix_out") else (f["x"],
                                                                                                            f["y"])
-                    s.down.send(s.t, s.fuse, n, fx, fy, f["th"], tf)
+                    fth = f["th"]
+                    if fth is None and hasattr(c, "mh_for_fix"):
+                        mh = c.mh_for_fix(n)          # (e20, 2) heading from a trusted camera's motion, with the fix
+                        if mh is not None:
+                            fth = mh[0]
+                    s.down.send(s.t, s.fuse, n, fx, fy, fth, tf)
 
     def summary(self):
         st = self.stats
