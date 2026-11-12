@@ -41,7 +41,8 @@
   projects sharing hardware and most of the software; each may use the other's data, as long as neither interferes with
   the other's experiments. RFID data may be an input to Nick's own runs and analyses, but only behind a switch that is
   OFF for every run made for Jay-Sun's experiments (tours, experiment routes), so his runs never use his own RFID data.
-  Raw RFID data never goes in this public repo (keep it private); Jay-Sun keeps full access to all raw data. Whether RFID
+  Raw RFID data may be public (Nick and Jay-Sun, 2026-11-12: nothing in this project needs to be private, notes and
+  RFID included); Jay-Sun keeps full access to all raw data. Whether RFID
   improves accuracy is an open question to test against camera truth, not an assumption.
 - **Derived, risk-based thresholds (Nick, 2026-11-10):** thresholds and timeouts (e.g. how long without camera pictures
   before warning, how long before acting on a robot) are derived from the data and vary with the actual risk (e.g. how

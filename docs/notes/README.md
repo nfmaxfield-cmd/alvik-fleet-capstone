@@ -17,6 +17,4 @@ One note per file, named `YYYY-MM-DD-short-topic.md`, so they sort by date.
 
 Jay-Sun needs to be added as a collaborator to save notes directly (Nick: the repo's **Settings**, then **Collaborators**, then **Add people**, then `jaysunrutledge7`). Without that, GitHub offers to save the note as a "pull request" for Nick to accept instead.
 
-## What doesn't go here
-
-Raw RFID reads stay out of this public repo until Jay-Sun says otherwise (standing rule from 10 Nov).
+Nothing in this project needs to be private (Nick and Jay-Sun, 12 Nov), RFID data included.
