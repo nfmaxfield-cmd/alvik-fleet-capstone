@@ -247,6 +247,8 @@ class CameraSources:
         if hasattr(c, "unaccounted_why"):
             for n, r in c.R.items():                # (e17) who the run cannot account for
                 self.layer.set_unaccounted(n, c.unaccounted_why(r))
+                if hasattr(self.layer, "set_focus"):
+                    self.layer.set_focus(n, getattr(c, "search_focus", {}).get(n))   # (e21) a searched robot
         lag = float(sc.get("own_lag_s", 0.3))
         for n, r in c.R.items():
             if r.own is None:

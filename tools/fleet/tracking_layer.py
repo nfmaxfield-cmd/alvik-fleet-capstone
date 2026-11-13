@@ -53,7 +53,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import safety_group as SG     # noqa: E402  (e18: the safety switches' defaults in one place)
 
-VERSION = "tracking-layer-2026-11-12e20"   # e20 (camera trust): every sighting carries its camera; each camera is checked against the robots' own motion, other cameras (a consensus) and the whole picture (camera_trust.TrustBook); a camera is refused where its own evidence says it is wrong; e19's whole-camera verdict still stands for a camera-wide fault, also counted as evidence, and a wrong-way sighting lying on another robot no longer counts toward it (its false alarm at 181 s, 11 Nov profile seed 1); a close pair that both stand apart is parted (MIRLT_PAIR_STAND_PART). MIRLT_CAMERA_TRUST=e19: the e19 layer. Before: "tracking-layer-2026-11-12e19"   # e19 (the Fable audit): the whole-camera watch (MIRLT_WHOLE_CAMERA_WATCH: most sightings outside every gate for a window -> the camera not trusted, said); an elimination beyond the robot's stated doubt needs motion proof (proof_fn, MIRLT_MOTION_PROOF). Before: "tracking-layer-2026-11-12e18b"   # e18b (the coordinator's replay of all 10 home runs, 5 Nov 14:55): the elimination counts robots in an unresolved close pass as unaccounted and refuses a spot on another robot's own pose (MIRLT_ELIM_PAIR_GUARD). e18 (Nick 12 Nov, decision 1): when two or more robots are unaccounted and a wiggle cannot tell their candidate sightings apart (none turned, both turned, or no turn on the spot is safe there), ONE robot at a time makes a short slow straight out-and-back (its length from the candidates' measured camera noise, 2-4 cm; its speed from the picture rate): the sighting that went out and came back is it (MIRLT_OUTBACK_ID=0: wiggles only, as e17). The e17 switches read through the Safety group. Before: "tracking-layer-2026-11-12e17"   # e17 (home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing): observe, then trust. (a) a STEADY sighting no other robot can claim, with exactly one standing robot unaccounted for, is that robot however far from its own pose (assigned by elimination, flagged how="elimination", then on probation: revoked if it stays when the robot drives); (b) two or more unaccounted, or two unclaimed steady sightings: a wiggle of one robot, the sighting that turns (spin flag, heading change or scatter past its own standing noise) is it; (c) the gate grows with each robot's MEASURED own-vs-camera record (drift per cm, recent correction sizes; the board caps it), the e09 numbers stay as the starting guess; (4) the ML detector on demand (off: no model yet). Switches MIRLT_ELIMINATE, MIRLT_GATE_RECORD, MIRLT_ML_ON_DEMAND
+VERSION = "tracking-layer-2026-11-12e21"   # e21 (e20's open problem): the whole-camera verdict is made per camera (MIRLT_CAMERA_VERDICT per_camera): each named camera's sightings are watched on their own, and only the camera(s) the evidence implicates are refused (their sightings left out before assignment, so another camera's sighting of the robot is used); the run's searched robots widen their gate to their error shape (set_focus) and ask the detector. Before: "tracking-layer-2026-11-12e20"   # e20 (camera trust): every sighting carries its camera; each camera is checked against the robots' own motion, other cameras (a consensus) and the whole picture (camera_trust.TrustBook); a camera is refused where its own evidence says it is wrong; e19's whole-camera verdict still stands for a camera-wide fault, also counted as evidence, and a wrong-way sighting lying on another robot no longer counts toward it (its false alarm at 181 s, 11 Nov profile seed 1); a close pair that both stand apart is parted (MIRLT_PAIR_STAND_PART). MIRLT_CAMERA_TRUST=e19: the e19 layer. Before: "tracking-layer-2026-11-12e19"   # e19 (the Fable audit): the whole-camera watch (MIRLT_WHOLE_CAMERA_WATCH: most sightings outside every gate for a window -> the camera not trusted, said); an elimination beyond the robot's stated doubt needs motion proof (proof_fn, MIRLT_MOTION_PROOF). Before: "tracking-layer-2026-11-12e18b"   # e18b (the coordinator's replay of all 10 home runs, 5 Nov 14:55): the elimination counts robots in an unresolved close pass as unaccounted and refuses a spot on another robot's own pose (MIRLT_ELIM_PAIR_GUARD). e18 (Nick 12 Nov, decision 1): when two or more robots are unaccounted and a wiggle cannot tell their candidate sightings apart (none turned, both turned, or no turn on the spot is safe there), ONE robot at a time makes a short slow straight out-and-back (its length from the candidates' measured camera noise, 2-4 cm; its speed from the picture rate): the sighting that went out and came back is it (MIRLT_OUTBACK_ID=0: wiggles only, as e17). The e17 switches read through the Safety group. Before: "tracking-layer-2026-11-12e17"   # e17 (home 11 Nov: Left held 84 min 48 cm from where the camera saw it standing): observe, then trust. (a) a STEADY sighting no other robot can claim, with exactly one standing robot unaccounted for, is that robot however far from its own pose (assigned by elimination, flagged how="elimination", then on probation: revoked if it stays when the robot drives); (b) two or more unaccounted, or two unclaimed steady sightings: a wiggle of one robot, the sighting that turns (spin flag, heading change or scatter past its own standing noise) is it; (c) the gate grows with each robot's MEASURED own-vs-camera record (drift per cm, recent correction sizes; the board caps it), the e09 numbers stay as the starting guess; (4) the ML detector on demand (off: no model yet). Switches MIRLT_ELIMINATE, MIRLT_GATE_RECORD, MIRLT_ML_ON_DEMAND
 VERSION_D = "tracking-layer-2026-11-07d"   # d (Nick 7 Nov): the camera watch ON by default (e10 method: 0 false alarms in 48 rehearsal runs); MIRLT_CAMERA_WATCH=0 turns it off
 VERSION_C = "tracking-layer-2026-11-07c"   # c (e10): camera watch rebuilt (averaged checkpoints, noise-aware votes)
 # b: camera watch off by default (Nick 7 Nov: off until its false alarms are understood)
@@ -137,6 +137,7 @@ WHOLE_MOVE_CM = 3.0     # (e19) a robot "drove" / a sighting "moved" over half t
 WHOLE_TRANSFORM_DEG = 20.0   # (e19) robots' wrong-way motions share one mirror axis / one turn within this. Chosen
 WHOLE_TURN_DEG = 20.0        # (e19) a turned camera: by more than this. Chosen; DOE: yes, both (bumped-camera faults
                              # of 5-45 deg in the hard simulator against the real logs' heading errors)
+PER_CAMERA = SG.value("MIRLT_CAMERA_VERDICT") == "per_camera"   # (e21) the verdict per camera ("whole": e19's one)
 CAMERA_TRUST = SG.value("MIRLT_CAMERA_TRUST")   # (e20) "learn": each camera's learned trust per job and area decides
                         # (camera_trust.py); "e19": the whole-camera watch's one verdict for every camera
 PAIR_STAND_PART = SG.flag("MIRLT_PAIR_STAND_PART")   # (e20) a close pair that both stand beyond CLOSE_CM is parted
@@ -273,6 +274,8 @@ class TrackingLayer:
         self.not_robot = []         # spots an elimination was revoked on: dict(x, y, t) (they stayed when it drove)
         self.whole = []             # (e19) (t, sightings, outside every gate) per picture: the whole-camera watch
         self.cam_distrust = None    # (e19) dict(t, why) while the camera as a whole is not trusted
+        self.cam_bad = set()        # (e21) the cameras the per-camera verdict refuses now (None: an unnamed camera)
+        self.focus = {}             # (e21) {robot: (x, y, reach)}: a searched robot's error shape (its gate, the detector)
         self.mot_last = {}          # (e19) robot -> (t, its last drive's motion agreed with a sighting)
         self.cam_test_want = []     # (e19) robots asked for a short test drive while the camera is not trusted
         self.say_fn = None          # (e19) the runner's say(): the whole-camera verdict on screen
@@ -433,6 +436,12 @@ class TrackingLayer:
         return min(1.0, per), p90
 
     def gate_max(self, name):
+        f = self.__dict__.get("focus", {}).get(name)
+        if f is not None:
+            return max(self._gate_max(name), float(f[2]))      # (e21) searched: its whole error shape
+        return self._gate_max(name)
+
+    def _gate_max(self, name):
         cap = BOARD_CAP * min(self.board[2] - self.board[0], self.board[3] - self.board[1]) if self.board else 61.0
         if not self.gate_record:
             return GATE_MAX_CM
@@ -527,6 +536,9 @@ class TrackingLayer:
         # 3. unnamed (and checked locks): matched to predictions (several sources' sightings of one object: one)
         if self.cluster:
             free = self._clusters(free)
+        if PER_CAMERA and self.cam_bad:
+            # (e21) a camera the verdict implicates is left out before assignment: another camera's sighting is used
+            free = [d for d in free if d.cam not in self.cam_bad]
         want = [n for n in self.names if n not in named and preds.get(n) is not None]
         claimed = set()
         if want and free:
@@ -538,13 +550,19 @@ class TrackingLayer:
         #     (e20: its verdict also counts as evidence against each camera in the picture)
         if book is not None:
             self._trust_checks(t, out, preds, refused, free, book, all_dets)
-        if WHOLE_CAMERA_WATCH and self._whole_watch(t, all_dets if book is not None else dets, preds, claimed, free):
+        if WHOLE_CAMERA_WATCH and PER_CAMERA:
+            bad = self._whole_watch_cams(t, all_dets if book is not None else dets, preds, claimed, free)
+            if bad:
+                for n in [n for n, d in out.items() if d.src != "tags" and (None in bad or d.cam in bad)]:
+                    out.pop(n)
+                self.counts["camera_refused_alone"] = self.counts.get("camera_refused_alone", 0) + 1
+        elif WHOLE_CAMERA_WATCH and self._whole_watch(t, all_dets if book is not None else dets, preds, claimed, free):
             for n in [n for n, d in out.items() if d.src != "tags"]:
                 out.pop(n)
             self.counts["whole_camera_refused"] = self.counts.get("whole_camera_refused", 0) + 1
         how = {}
-        if self.eliminate and self.cam_distrust is None:
-            rest = [d for d in free if id(d) not in claimed and d.src != "tags"]
+        if self.eliminate and (self.cam_distrust is None or (PER_CAMERA and None not in self.cam_bad)):
+            rest = [d for d in free if id(d) not in claimed and d.src != "tags" and d.cam not in self.cam_bad]
             for n, (d, hw) in self._eliminate(t, preds, rest, set(out)).items():
                 out[n] = d
                 claimed.add(id(d))
@@ -597,6 +615,52 @@ class TrackingLayer:
         if self.brick_watch:
             self._bricks(t, [d for d in free if id(d) not in claimed and d.src in ("motion", "ml")], preds)
         return fixes
+
+    def _whole_watch_cams(self, t, dets, preds, claimed, free):
+        """(e21, e20's open problem: the camera-swap scenario stood 526 s because one verdict refused the good camera too)
+        e19's whole-camera watch run for EACH camera's own sightings, with its own window and memory: the verdict refuses
+        only the camera(s) whose own sightings moved unlike the robots, and each is trusted again by its own agreeing
+        motion (or every robot within its doubt). Sightings with no camera name are one camera (None), as before.
+        Returns the set of cameras refused now."""
+        st = self.__dict__.setdefault("cam_watch", {})
+        cams = sorted({d.cam for d in dets if d.src != "ml"}, key=lambda c: str(c))
+        keep = ("whole", "whole_pics", "mot_last", "cam_distrust", "cam_test_want")
+        mine = {k: self.__dict__.get(k) for k in keep}
+        tests = set()
+        for cam in cams:
+            c = st.setdefault(cam, dict(whole=[], whole_pics=[], mot_last={}, cam_distrust=None, cam_test_want=[]))
+            for k in keep:
+                self.__dict__[k] = c[k]
+            self._watch_cam = cam
+            try:
+                self._whole_watch(t, [d for d in dets if d.cam == cam], preds, claimed, free)
+            finally:
+                for k in keep:
+                    c[k] = self.__dict__.get(k)
+                self._watch_cam = None
+        for k in keep:
+            self.__dict__[k] = mine[k]
+        bad = {cam for cam, c in st.items() if c["cam_distrust"] is not None}
+        for cam in bad:
+            tests |= set(st[cam]["cam_test_want"] or [])
+        if bad and self.cam_distrust is None:
+            first = min(st[c]["cam_distrust"]["t"] for c in bad)
+            self.cam_distrust = dict(t=first, why="; ".join("camera %s: %s" % (c, st[c]["cam_distrust"]["why"])
+                                                            for c in sorted(bad, key=str)), cams=sorted(bad, key=str))
+        elif bad:
+            self.cam_distrust["cams"] = sorted(bad, key=str)
+        elif self.cam_distrust is not None:
+            self.cam_distrust = None
+        self.cam_bad = bad
+        self.cam_test_want = sorted(tests) if bad else []
+        return bad
+
+    def set_focus(self, name, f):
+        """(e21) The run's search for a robot (its error shape's region) or None."""
+        if f:
+            self.focus[name] = f
+        else:
+            self.focus.pop(name, None)
 
     def _whole_watch(self, t, dets, preds, claimed, free):
         """(e19, audit finding 10: "the camera watch votes only on sightings already named to a robot; mirrored
@@ -727,11 +791,13 @@ class TrackingLayer:
                                      "them had a sighting that moved as it did, while the camera saw things move" % (
                                          WHOLE_WIN_S, " and ".join(sorted(uU))))
             self.counts["whole_camera_distrust"] = self.counts.get("whole_camera_distrust", 0) + 1
-            self.log("tracking", dict(t=round(t, 2), robot="-", what="CAMERA NOT TRUSTED", why=self.cam_distrust["why"]))
+            wc = self.__dict__.get("_watch_cam")
+            self.log("tracking", dict(t=round(t, 2), robot="-", what="CAMERA NOT TRUSTED" + (
+                " (%s)" % wc if wc is not None else ""), why=self.cam_distrust["why"]))
             if self.say_fn is not None:
-                self.say_fn("!! CAMERA NOT TRUSTED: %s (a wrong camera name or a bumped camera?). No camera fixes or "
+                self.say_fn("!! CAMERA %sNOT TRUSTED: %s (a wrong camera name or a bumped camera?). No camera fixes or "
                             "eliminations from it; the robots drive on their own sensors within their doubt until it "
-                            "agrees again." % self.cam_distrust["why"])
+                            "agrees again." % (("%s " % wc) if wc is not None else "", self.cam_distrust["why"]))
         elif self.cam_distrust is not None and all_good:
             self.log("tracking", dict(t=round(t, 2), robot="-", what="camera trusted again",
                                       why="most sightings agree with the robots again over %d pictures" % len(win)))
@@ -1431,7 +1497,8 @@ class TrackingLayer:
         for n in self.names:
             tr = self.T[n]
             why = self.want_ml.get(n) or (tr.unsure and "unsure: %s" % tr.unsure) or \
-                (self._unaccounted(n, t) and "unaccounted")
+                (self._unaccounted(n, t) and "unaccounted") or \
+                (n in self.__dict__.get("focus", {}) and "searched for (its error shape)")
             if not why:
                 continue
             if t - self.ml_last.get(n, -1e9) < 1.0 / ML_ROBOT_HZ or len(self.ml_calls) >= ML_TOTAL_HZ:

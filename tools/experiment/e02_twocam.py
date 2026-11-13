@@ -33,6 +33,9 @@ is trusted with a margin (MotionTracker.UNKNOWN_EXTRA, 14 grey levels), which hi
     trk.set_background(overhead_frames, robots=[(x, y), ...]); trk.set_side_background(side_frames, robots=...)
     trk.add("Left", x, y); trk.push(overhead_img, t); trk.push_side(side_img, t)
     trk.state("Left") -> dict(x, y, status, src: overhead | side | both | lights, sigma, ...)
+
+Changelog / version: VERSION below. 2026-11-12e21: state() also gives per_cam, each camera's own sighting when both
+agreed (the bridge may send them apart: MIRLT_BRIDGE_PER_CAMERA). No version string before.
 """
 import math
 import threading
@@ -44,6 +47,7 @@ import numpy as np
 import e02_camera as CAM
 import e02_multitrack as MT
 
+VERSION = "e02-twocam-2026-11-12e21"
 SIDE_Z_CM = 0.5 * CAM.ROBOT_TOP_CM   # the side outline's centre: half way up the body (e02_sidecam.SIDE_Z_CM)
 AGREE_CM = 6.0          # chosen: both cameras' spots this near (side stretch and offset taken out) = they agree. The
                         # two-camera study's held-out agreement: median 1.9 cm, 95 % within 6.0 cm. DOE note: 4 / 6 / 8 cm
@@ -421,6 +425,8 @@ class TwoCamTracker(MT.MultiTracker):
                 ws = 1.0 / (st * st)
                 pos = ((po[0] + ws * ps[0]) / (1 + ws), (po[1] + ws * ps[1]) / (1 + ws))
                 src, sigma, obs_t = "both", 1.0 / math.sqrt(1 + ws), max(o[0], s[0])
+                # (e21) each camera's own sighting kept too, so the bridge can send them apart (MIRLT_BRIDGE_PER_CAMERA)
+                tr.per_cam = [("overhead", po, 1.0, o[0]), ("side", ps, st, s[0])]
                 if self._speed(tr, t) < BIAS_STILL_CMS and abs(o[0] - s[0]) < 0.3 and len(o) > 5 \
                         and o[5] >= BIAS_AREA * self.area:
                     # the offset the side camera has against the overhead (raw side minus overhead), learned
@@ -444,6 +450,8 @@ class TwoCamTracker(MT.MultiTracker):
             pos, src, sigma, obs_t = self._carry(tr, s, t), "side", st, s[0]
         elif sl:
             pos, src, sigma, obs_t = self._carry(tr, li, t), "lights", LIGHT_SIGMA_CM, li[0]
+        if src != "both":
+            tr.per_cam = None
         if pos is not None:
             tr.x, tr.y = pos
             tr.bx, tr.by, tr.bt = pos[0], pos[1], t
@@ -481,7 +489,8 @@ class TwoCamTracker(MT.MultiTracker):
                 return None
             return dict(x=tr.x, y=tr.y, status=tr.status, why=tr.why, t_seen=tr.bt, since=tr.t_status,
                         heading=tr.heading, sure_x=tr.bx, sure_y=tr.by, src=getattr(tr, "src", None),
-                        sigma=getattr(tr, "sigma", None), obs_t=getattr(tr, "obs_t", None))
+                        sigma=getattr(tr, "sigma", None), obs_t=getattr(tr, "obs_t", None),
+                        per_cam=getattr(tr, "per_cam", None))
 
     def history(self, name, t0=0.0, t1=None, sure_only=True, body_only=False):
         """[(t, x, y)] between t0 and t1, in time order: sure sightings only (unless sure_only=False); body_only: only

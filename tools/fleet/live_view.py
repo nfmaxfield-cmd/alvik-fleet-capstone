@@ -16,6 +16,8 @@ points are.
 
 Changelog
   2026-11-12a  first version (Mission Control build)
+  2026-11-12e21  pm_cm is the robot's ONE error shape's largest reach (state.json's shape, error_shape.py) when the run
+                 writes it, not the firmware's own sd (about 6x too sure: the 12 Nov audit); shape and stage added.
 """
 import csv
 import glob
@@ -25,7 +27,7 @@ import math
 import os
 import time
 
-VERSION = "live-view-2026-11-12a"
+VERSION = "live-view-2026-11-12e21"   # e21: the one error shape and Nick's stage. Before: "live-view-2026-11-12a"
 FRESH_S = 1.0         # the robots take camera fixes up to 1 s old (params.h fix_max_age_ms): a fix older than this is
                       # not "the camera has it now". No DOE: the firmware's own limit
 K95_2D = 2.45         # the 95 % circle of a 2-D normal is 2.45 standard deviations (chi-square, 2 degrees of freedom)
@@ -132,8 +134,11 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
         st = state.get(n) or {}
         if x is None and n not in names_colours:
             continue
+        shp = st.get("shape") if isinstance(st.get("shape"), dict) else None
+        pm = (round(float(shp["extent"]), 1) if shp and shp.get("extent") is not None else
+              (round(K95_2D * sd, 1) if sd else None))
         out.append(dict(name=n, ref=refs.get(n, ""), colour=names_colours.get(n), x=x, y=y, th=wrap360(th),
-                        pm_cm=round(K95_2D * sd, 1) if sd else None, seen=fresh, source=src,
+                        pm_cm=pm, shape=shp, stage=st.get("stage"), seen=fresh, source=src,
                         since_fix_s=round(now - tc, 1) if tc else None, battery=bat.get(n) or st.get("battery"),
                         doing=st.get("mode") or "", held=bool(st.get("lost")), out=st.get("out") or "",
                         needs_hand=any(n in w for w in needs)))

@@ -27,7 +27,7 @@ Started by run-fleet-pi.sh; the dry runs start it against tools/sim/fleet_sim.py
 Writes to --out (default logs/<date-time>-bridge): track.csv (every picture: each robot's spot and status),
 events.jsonl (status changes, headings sent, obstacles), bridge_summary.json.
 """
-VERSION = "2026-11-10e14"   # e14 (school 17:46, the tag bridge's SIGTERM abort): once on the way out, SIGTERM and Ctrl+C only set a flag (orderly_exit.quiet_shutdown), never a raise inside a join or close. 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
+VERSION = "2026-11-12e21"   # e21: when both cameras see a robot and agree, each camera's sighting is sent on its own (cam_bridge:overhead / cam_bridge:side, its own noise and picture time) so each camera earns its own trust (MIRLT_BRIDGE_PER_CAMERA; 0: the merged "both" sighting). Before: "2026-11-10e14"   # e14 (school 17:46, the tag bridge's SIGTERM abort): once on the way out, SIGTERM and Ctrl+C only set a flag (orderly_exit.quiet_shutdown), never a raise inside a join or close. 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
 
 import argparse
 import csv
@@ -52,6 +52,11 @@ for p in (HERE, os.path.join(TOOLS, "experiment"), os.path.join(TOOLS, "live"), 
 import cv2              # noqa: E402
 import numpy as np      # noqa: E402
 import orderly_exit as _OX  # noqa: E402  (e14) quiet_shutdown
+try:
+    import safety_group as _SGb
+    PER_CAMERA = _SGb.flag("MIRLT_BRIDGE_PER_CAMERA")   # (e21) each camera's sighting sent on its own
+except Exception:  # noqa: BLE001
+    PER_CAMERA = False
 
 CAPTURE_S = 0.04        # the recorder stamps a picture about one picture after it was taken (25 a second; the same
                         # allowance as e02_sim.py and track_live.py's default). No DOE: measured by
@@ -406,11 +411,27 @@ class Bridge:
                 if not self.args.observe and (th is not None or self.has_pose[n] or self.moved[n]):
                     # (a robot with no pose yet takes no position-only fix: its first must carry a heading)
                     sig = FIX_SIGMA_CM * max(1.0, st.get("sigma") or 1.0)    # side: stretched; lights: 2 cm
-                    msg = {"type": "fix", "robot": n, "t": round(st["t_seen"], 4), "x": round(st["sure_x"], 2),
-                           "y": round(st["sure_y"], 2), "th": None if th is None else round(th, 2), "sigma": round(sig, 2),
-                           "sigma_th": sth or HEADING_SIGMA_DEG, "src": "cam_bridge:%s" % (st.get("src") or "overhead")}
-                    self.send(msg)
-                    c["fixes"] += 1
+                    pcs = st.get("per_cam") if (st.get("src") == "both" and PER_CAMERA) else None
+                    if pcs:
+                        # (e21, e20's open item) both cameras saw it and agreed: each camera's sighting is sent on its
+                        # own (its own camera, noise and picture time), so each camera earns its own trust; the
+                        # merged "both" sighting is the switch MIRLT_BRIDGE_PER_CAMERA=0
+                        for cam_, pp_, sg_, t_ in pcs:
+                            self.send({"type": "fix", "robot": n, "t": round(t_, 4), "x": round(pp_[0], 2),
+                                       "y": round(pp_[1], 2), "th": None if th is None else round(th, 2),
+                                       "sigma": round(FIX_SIGMA_CM * max(1.0, sg_ or 1.0), 2),
+                                       "sigma_th": sth or HEADING_SIGMA_DEG, "src": "cam_bridge:%s" % cam_})
+                            c["fixes"] += 1
+                            c["per_camera"] = c.get("per_camera", 0) + 1
+                        msg = None
+                    else:
+                        msg = {"type": "fix", "robot": n, "t": round(st["t_seen"], 4), "x": round(st["sure_x"], 2),
+                               "y": round(st["sure_y"], 2), "th": None if th is None else round(th, 2),
+                               "sigma": round(sig, 2), "sigma_th": sth or HEADING_SIGMA_DEG,
+                               "src": "cam_bridge:%s" % (st.get("src") or "overhead")}
+                    if msg is not None:
+                        self.send(msg)
+                        c["fixes"] += 1
                     if th is not None and self.has_pose[n]:
                         c["headings"] += 1
                         self.event("heading", robot=n, th=round(th, 2), how="travel")

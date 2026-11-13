@@ -9,6 +9,8 @@ per run with the realism measures and what broke. Simulator only: nothing touche
 
 Version / changelog:
   hardsim-batch-2026-11-12a  first version (hard simulator build).
+  hardsim-batch-2026-11-12e21  each run's JSON also keeps the controller's seconds in each of Nick's stages (stage_s),
+                 a few e21 counts (escapes, searches, veers, heading flips caught) and the simulated firmware's refusals.
 """
 import argparse
 import json
@@ -18,7 +20,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "hardsim-batch-2026-11-12a"
+VERSION = "hardsim-batch-2026-11-12e21"   # e21: stage_s, e21 counts and firmware refusals kept. Before: "hardsim-batch-2026-11-12a"
 
 
 def run_one(seed, hours, profile, out, code=None, faults=None, profile_path=None):
@@ -43,7 +45,12 @@ def run_one(seed, hours, profile, out, code=None, faults=None, profile_path=None
                measures=s.measure_sim(), broke=s.breakage(summ),
                summary={k: summ.get(k) for k in ("contacts", "min_gap_cm", "off_board", "watchdog_stops",
                                                   "longest_still_s", "lost_episodes", "moving_pct", "falls",
-                                                  "hangs", "edge_min_body_cm")})
+                                                  "hangs", "edge_min_body_cm")},
+               stage_s={k: round(v, 1) for k, v in (getattr(s.ctrl, "stage_s", None) or {}).items()},
+               e21={k: v for k, v in s.ctrl.counts.items() if k in (
+                   "consistent_escapes", "searches", "search_holds", "veers", "veer_steps", "heading_flips_caught",
+                   "head_unknown_confirmed", "shape_events", "creep_edge_refused", "camera_corrections", "creeps")},
+               fw_refusals={k: v for k, v in getattr(s, "stats", {}).items() if str(k).startswith("fw_")})
     with open(out, "w") as f:
         json.dump(res, f, default=str)
     return res
