@@ -47,12 +47,23 @@ MIRLT_ERROR_SHAPE: "cone" (default) | "circle" (the bubble before e21: every use
 
 Changelog
   e21-2026-11-12a  first version.
+  e22-2026-11-13a  (Pi speed) the fit is read from a cache within one controller tick (EPOCH: the controller bumps it each
+                   tick; before, every point of every planned path summed the fleet's sample counts), a due refit runs in
+                   a worker thread when the record's async_fit is set (the runner sets it on the Pi, as odo_trust's own
+                   refits since e19), and scipy's solver is imported when this module loads (its first import inside a
+                   tick took 0.37 s here, about 1.8 s on the Pi). The back reach is still refitted from each robot's
+                   record (and the fleet's) with every REFIT_N new samples: fit_summary() reports it for the run's end.
 """
 import json
 import math
 import os
 
-VERSION = "error-shape-e21-2026-11-12a"
+VERSION = "error-shape-e22-2026-11-13a"   # e22: fit cached per tick (EPOCH), refit off the loop (async_fit), solver warm. Before: "error-shape-e21-2026-11-12a"
+EPOCH = [0]      # (e22) bumped by the controller each tick: AxesFit.get() checks the record's size once per tick
+try:             # (e22) warm the solver at load, never inside a tick
+    from scipy.optimize import linprog as _warm_linprog  # noqa: F401
+except Exception:  # noqa: BLE001
+    pass
 
 try:
     import safety_group as _SG
@@ -136,6 +147,8 @@ class AxesFit:
         self.trust = trust
         self._fit = None
         self._key = None
+        self._epoch = None             # (e22) the tick the record's size was last checked in
+        self._thread = None
 
     def rows(self):
         tr = self.trust
@@ -155,10 +168,31 @@ class AxesFit:
         return min(q["s"], (ps * q.get("ws", 0.0) + pc * q.get("wc", 0.0)) * math.pi / 180.0)
 
     def get(self):
+        if self._fit is not None and self._epoch == EPOCH[0]:
+            return self._fit                       # (e22) once a tick is enough: the record grows between ticks only
+        self._epoch = EPOCH[0]
         tr = self.trust
         key = tr._fleet_n() if tr is not None else 0
         if self._fit is not None and key - (self._key or 0) < self.REFIT_N:
             return self._fit
+        if self._fit is not None and tr is not None and tr.__dict__.get("async_fit"):
+            # (e22) the loop keeps the last fit; a worker thread refits and swaps it in (odo_trust's way, e19)
+            if self._thread is None or not self._thread.is_alive():
+                import threading
+                self._thread = threading.Thread(target=self._refit_bg, daemon=True)
+                self._thread.start()
+            return self._fit
+        return self._compute()
+
+    def _refit_bg(self):
+        try:
+            self._compute()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _compute(self):
+        tr = self.trust
+        key = tr._fleet_n() if tr is not None else 0
         fs = self.rows()
         wts = [float(q.get("w", 1.0)) for q in fs]
         n_prior = PRIOR_N if sum(wts) < PRIOR_UNTIL else 0
@@ -180,7 +214,7 @@ class AxesFit:
         sf, sb = _qfit(rf, W), _qfit(rb, W)
         FIT_Q = q0
         sc = _qfit(rc, W)
-        fit = dict(PRIOR, n=len(fs), source="prior" if not fs else "record")
+        fit = dict(PRIOR, n=len(fs), source="prior" if not fs else "record", prior_b_back=PRIOR["b_back"])
         if sf is not None and fs:
             fit.update(b_fwd=sf[0], a_fwd=sf[1])
         if sb is not None and fs:
@@ -330,6 +364,14 @@ class Shape:
         return i + support_ellipse(a, b, ang, nx, ny) + off * (nx * math.cos(math.radians(ang)) +
                                                                ny * math.sin(math.radians(ang))) + \
             max(0.0, gx * nx + gy * ny)
+
+    def draw(self):
+        """(e22, 7) What Mission Control draws, every second: its own pose (the shape's centre point), the disc, the
+        ellipse (semi-axes along and across, its angle, its centre's offset along it) and the seen segment."""
+        i, a, b, ang, off, gx, gy = self.ellipse()
+        return dict(x=None if self.x is None else round(self.x, 1), y=None if self.y is None else round(self.y, 1),
+                    iso=round(i, 2), a=round(a, 2), b=round(b, 2), ang=round(ang, 1), off=round(off, 2),
+                    gx=round(gx, 2), gy=round(gy, 2), extent=round(self.extent(), 1))
 
     def summary(self):
         i, a, b, ang, off, gx, gy = self.ellipse()

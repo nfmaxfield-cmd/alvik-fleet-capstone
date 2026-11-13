@@ -8,7 +8,7 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-12a first version (Mission Control build).
+     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second.
      2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
      evidence, in plain words. -->
 <style>
@@ -94,7 +94,7 @@ details>summary{cursor:pointer}
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
     <div id="codebanner"></div>
     <div id="map" style="margin-top:8px"></div>
-    <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span>ring = the robot's body plus its 95 % error (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
+    <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span>shape = where the robot may really be: its body plus its 95 % error shape, live every second (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
     <p class="caption" id="mapcap"></p>
     <div class="source" id="mapsrc"></div>
   </section>
@@ -166,9 +166,21 @@ function mapSVG() {
     if (r.x == null || r.y == null) continue;
     const R = (7 + (r.pm_cm || 0)) * k, c = r.colour || "#5B6474", h = r.th == null ? null : -r.th;
     if (r.needs_hand) o += `<circle class="handring" cx="${X(r.x)}" cy="${Y(r.y)}" r="${(R + 8).toFixed(1)}" fill="none" stroke="var(--red)" stroke-width="4"/>`;
+    const sd = r.shape_draw;
+    let labY = +Y(r.y) - R - 7;
+    if (sd && sd.x != null && sd.y != null) {
+      // (e22) its error shape, live every second: the ellipse (along and across its own track, grown by the disc) round
+      // its own pose, moved back along its track by its offset, and the seen segment toward where the camera last had it
+      const ca = Math.cos(sd.ang * Math.PI / 180), sa = Math.sin(sd.ang * Math.PI / 180);
+      const ex = sd.x + sd.off * ca, ey = sd.y + sd.off * sa;
+      o += `<ellipse cx="${X(ex)}" cy="${Y(ey)}" rx="${((sd.a + sd.iso + 4.7) * k).toFixed(1)}" ry="${((sd.b + sd.iso + 4.7) * k).toFixed(1)}" transform="rotate(${(-sd.ang).toFixed(1)} ${X(ex)} ${Y(ey)})" fill="${c}" fill-opacity=".10" stroke="${c}" stroke-width="2" ${r.seen ? "" : 'stroke-dasharray="7 5"'}><title>${esc(r.name)}'s error shape (where it may really be, its body included): ${sd.extent.toFixed(0)} cm at its widest</title></ellipse>`;
+      const A_ = sd.a + sd.iso + 4.7, B_ = sd.b + sd.iso + 4.7;
+      labY = +Y(ey + Math.sqrt((A_ * sa) ** 2 + (B_ * ca) ** 2)) - 7;      // its name just above its shape
+      if (Math.hypot(sd.gx, sd.gy) > 0.5) o += `<line x1="${X(sd.x)}" y1="${Y(sd.y)}" x2="${X(sd.x + sd.gx)}" y2="${Y(sd.y + sd.gy)}" stroke="${c}" stroke-width="2" stroke-dasharray="3 3"/>`;
+    } else
     o += `<circle cx="${X(r.x)}" cy="${Y(r.y)}" r="${R.toFixed(1)}" fill="${c}" fill-opacity=".10" stroke="${c}" stroke-width="2" ${r.seen ? "" : 'stroke-dasharray="7 5"'}/>`;
     o += `<g transform="translate(${X(r.x)} ${Y(r.y)})${h == null ? "" : ` rotate(${h.toFixed(1)})`}"><rect x="${(-4.7 * k).toFixed(1)}" y="${(-4.7 * k).toFixed(1)}" width="${(9.4 * k).toFixed(1)}" height="${(9.4 * k).toFixed(1)}" rx="${(1.6 * k).toFixed(1)}" fill="${c}"/>${h == null ? "" : `<path d="M${(2 * k).toFixed(1)} ${(-2.6 * k).toFixed(1)} L${(4.6 * k).toFixed(1)} 0 L${(2 * k).toFixed(1)} ${(2.6 * k).toFixed(1)}" fill="none" stroke="#fff" stroke-width="2.5"/>`}</g>`;
-    o += `<text x="${X(r.x)}" y="${(+Y(r.y) - R - 7).toFixed(1)}" font-size="17" font-weight="700" fill="${r.needs_hand ? "var(--red)" : c}" text-anchor="middle" stroke="#fff" stroke-width="4" paint-order="stroke">${esc(r.name)}${r.needs_hand ? " · NEEDS A HAND" : ""}<title>${esc(r.name)}${r.ref ? " (" + esc(r.ref) + ")" : ""}</title></text>`;
+    o += `<text x="${X(r.x)}" y="${Math.max(14, labY).toFixed(1)}" font-size="17" font-weight="700" fill="${r.needs_hand ? "var(--red)" : c}" text-anchor="middle" stroke="#fff" stroke-width="4" paint-order="stroke">${esc(r.name)}${r.needs_hand ? " · NEEDS A HAND" : ""}<title>${esc(r.name)}${r.ref ? " (" + esc(r.ref) + ")" : ""}</title></text>`;
   }
   o += `<text x="${(W / 2).toFixed(0)}" y="${(H - 3).toFixed(0)}" font-size="12" fill="var(--muted)" text-anchor="middle">${(f.x_max - f.x_min).toFixed(0)} x ${(f.y_max - f.y_min).toFixed(0)} cm · 0, 0 at the bottom left</text>`;
   return o + "</svg>";
@@ -219,7 +231,7 @@ function cardsHTML() {
     return `<div class="card robot"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
   return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
     <div class="small" style="margin-top:4px">${r.x != null ? `Where: ${Math.round(r.x)}, ${Math.round(r.y)} cm` : "Where: not known yet"}${r.pm_cm != null ? ` <b>± ${r.pm_cm.toFixed(1)} cm</b>` : ""}${r.battery != null ? ` · battery ${esc(r.battery)} %` : ""}</div>
-    ${r.shape ? `<div class="small" title="Its one error shape (e21): where it may really be, a cone along its own track. It grows as it drives without a camera fix and shrinks only when a fix is accepted.">Error shape: ${r.shape.forward.toFixed(0)} cm ahead, ${r.shape.back.toFixed(0)} back along its track, ${r.shape.across.toFixed(0)} sideways, plus ${r.shape.iso.toFixed(0)} all round${r.stage ? ` · stage: <b>${esc(r.stage)}</b>` : ""}</div>` : ""}
+    ${r.shape ? `<div class="small" title="Its one error shape (e21): where it may really be, a cone along its own track. It grows as it drives without a camera fix and shrinks only when a fix is accepted.">Error shape: ${r.shape.forward.toFixed(0)} cm ahead, ${r.shape.back.toFixed(0)} back along its track, ${r.shape.across.toFixed(0)} sideways, plus ${r.shape.iso.toFixed(0)} all round${r.stage ? ` · stage: <b>${esc(r.stage)}</b>` : ""}${r.rescue ? " · rescuing itself (no action needed)" : ""}</div>` : ""}
     <div class="tiny muted">${going() ? (r.seen ? "Seen by " : "") : "When the run ended: "}${esc(r.source)}</div></div>`).join("");
 }
 function sparkline(vals, lim, w, h) {
@@ -397,7 +409,7 @@ async function placeLoad() { try { const r = await fetch("/api/place"); if (r.ok
   if (S && S.site && !S.site.colours) S.site.colours = {};
   await liveLoad(); healthLoad(); placeLoad(); camTrustLoad();
   setInterval(camTrustLoad, 10000);
-  setInterval(startLoad, 2000); setInterval(liveLoad, 1500); setInterval(healthLoad, 4000); setInterval(placeLoad, 2000); setInterval(stateLoad, 10000);
+  setInterval(startLoad, 2000); setInterval(liveLoad, 1000); setInterval(healthLoad, 4000); setInterval(placeLoad, 2000); setInterval(stateLoad, 10000);
 })();
 </script>
 </body>

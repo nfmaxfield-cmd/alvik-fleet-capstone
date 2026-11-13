@@ -78,7 +78,7 @@ Param PARAMS[] = {
   {"fix_gate",         4,   "follow: ignore a fix further than this many standard deviations (and 3 cm) from the own pose"},
   {"pose_sd_per_cm", 0.095, "own pose (2026-11-12e21): its position sd grows this much per cm driven, linearly (the measured record: sideways error 0.232 cm per cm at 95 %, / 2.45); 0 = the old pose_q_cm growth (variance per cm)"},
   {"pose_hist_ms",  3840,   "own pose (2026-11-12e21): how far back the pose history is used for a fix (at most 3840: 96 x 40 ms); 1280 = the old 32-entry history"},
-  {"fix_escape_n",     5,   "follow (2026-11-12e21): after this many fixes in a row refused as too far whose offsets agree with each other (within fix_gate camera sigmas), the own pose is wrong: it takes the camera's offset; 0 = never (the old ratchet)"},
+  {"fix_escape_n",     0,   "follow (2026-11-12e21): after this many fixes in a row refused as too far whose offsets agree with each other (within fix_gate camera sigmas), the own pose is wrong: it takes the camera's offset; 0 = never (the old ratchet). 2026-11-13e22 (Nick 13 Nov): 0 for the first flash, the Pi's escape only (the robot cannot check who the camera saw; the Pi can); 5 = e21's own escape"},
 
   // --- survey drive (camera self-calibration) ---
   {"survey_size_cm",  80,   "survey: legs 10,10,20,20,... cm; stops before a leg longer than this"},

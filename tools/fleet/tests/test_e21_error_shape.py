@@ -2,6 +2,7 @@
 firmware), the simulator's firmware filter, per-camera verdicts and the bridge's per-camera sightings. Offline only.
 
 Changelog: e21-2026-11-12a first version. e21-2026-11-13b the defaults test: the camera verdict whole, the pair and reverse rules on.
+e22-2026-11-13a the escape's statistics test pins MIRLT_ID_GUARD off (its calls bring no sightings for the guard).
 """
 import math
 import os
@@ -239,6 +240,9 @@ def test_no_creep_without_the_edge_rule(monkeypatch):
 # -- 4. the ratchet broken on the Pi ------------------------------------------------------------------------------------
 def test_consistent_sightings_beyond_its_gate_correct_its_own_pose_and_ask_its_heading(monkeypatch):
     monkeypatch.setattr(FC, "CONSISTENT_ESCAPE", True)
+    # (e22) the escape's own statistics, alone: these calls bring no sightings through on_fix, so e22's identity guard
+    # (MIRLT_ID_GUARD) has no evidence of who the camera saw; it is tested with the whole flow in test_e22_no_standing
+    monkeypatch.setattr(FC, "ID_GUARD", False)
     c, out, logs = _ctrl()
     r = _place(c, "A", 71.0, 50.0, 14.0, t=1.0)
     _place(c, "B", 20.0, 100.0, 0.0, t=1.0)
@@ -342,7 +346,7 @@ def test_firmware_pose_filter_host_test_passes():
 
 def test_firmware_version_and_old_behaviour_behind_params():
     ino = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
-    assert '#define FW_VERSION "2026-11-12e21"' in ino
+    assert '#define FW_VERSION "2026-11-13e22"' in ino      # (e22) fix_escape_n 0 by default: the Pi's escape only
     par = open(os.path.join(REPO, "firmware", "home_lab", "params.h")).read()
     for k in ("pose_sd_per_cm", "pose_hist_ms", "fix_escape_n", "fix_max_age_ms"):
         assert '"%s"' % k in par

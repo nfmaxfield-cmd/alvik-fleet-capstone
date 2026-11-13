@@ -48,7 +48,7 @@ for p in (HERE, TOOLS):
 import freeroam_core as FC   # noqa: E402
 
 PY = sys.executable
-VERSION = "freeroam-runner-2026-11-12e21"   # e21: FOLLOW's five new columns (firmware 2026-11-12e21: refused fixes by reason, escapes) and its pos_sd_cm passed to the controller (on_fw_state: the firmware's real gate for the consistency escape); each robot's error shape and stage written into state.json (Mission Control); a searched robot's shape is the tracking layer's focus. Before: "freeroam-runner-2026-11-12e20"   # e20 (camera trust): every bridge fix says its camera (det_of: cam_bridge:<camera>); the site's learned camera trust (camera_trust.TrustBook) loaded at the start from <conf>/camera_trust/<site>.json, hooked into the layer and the controller, saved with every checkpoint and at every end, written into state.json and camera_trust.json in the run folder (Mission Control's Camera trust view); a motion heading from a trusted camera goes with the next fix. Before: "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2, H4, 10, 11): the layer gets the robots' stated doubt (proof_fn) and says the whole-camera verdict; a restart re-establishes pose and heading, the follow run always started again (no 20-restart cap); camera test drives while the camera is not trusted. (H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
+VERSION = "freeroam-runner-2026-11-13e22"   # e22: shape_live.json every second (each robot's error shape, stage, lost, self-rescue) for Mission Control's map. Before: "freeroam-runner-2026-11-12e21"   # e21: FOLLOW's five new columns (firmware 2026-11-12e21: refused fixes by reason, escapes) and its pos_sd_cm passed to the controller (on_fw_state: the firmware's real gate for the consistency escape); each robot's error shape and stage written into state.json (Mission Control); a searched robot's shape is the tracking layer's focus. Before: "freeroam-runner-2026-11-12e20"   # e20 (camera trust): every bridge fix says its camera (det_of: cam_bridge:<camera>); the site's learned camera trust (camera_trust.TrustBook) loaded at the start from <conf>/camera_trust/<site>.json, hooked into the layer and the controller, saved with every checkpoint and at every end, written into state.json and camera_trust.json in the run folder (Mission Control's Camera trust view); a motion heading from a trusted camera goes with the next fix. Before: "freeroam-runner-2026-11-12e19"   # e19 (the Fable audit H1, H2, H4, 10, 11): the layer gets the robots' stated doubt (proof_fn) and says the whole-camera verdict; a restart re-establishes pose and heading, the follow run always started again (no 20-restart cap); camera test drives while the camera is not trusted. (H1, H2): a dry run has its own settings folder (dry_conf_dir); every pooled fit and workspace save records its source; a real run checks the settings for dry-run data first (dry_check.at_real_start). H1: stop to every robot FIRST at every ending (the time cap, all out, Stop / Ctrl+C / SIGTERM, an error), then each save in its own try (a full card cannot keep stop or the later steps from running); a second signal while ending is said and ignored. Before: "freeroam-runner-2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 5, 6): the Safety group said at the start and written into run.json; each robot's odometry trust record loaded from the Pi's store (odo_trust.json) and saved at every end and every minute; every calibration correction saved at ANY end (the time cap, Stop / Ctrl+C / SIGTERM, an error: save_corrections in the finally), the wheel and gyro scales in use read back at the start (get); the layer's out-and-back request passed to the controller. Before: "freeroam-runner-2026-11-12e17"   # e17: the layer told who is unaccounted, its corrections (how) to the controller (an fpose, never a fix the robot's filter would refuse), revoked eliminations, the board for the gate's cap, the ML hook (off). Before: "freeroam-runner-2026-11-11e16"
 VERSION_E16 = "freeroam-runner-2026-11-11e16"   # e16 (home 11 Nov 08:48): each RAW row's accelerometer (ax, ay) and lift flag to the controller (on_raw_motion: a jolt while standing is a contact; a lift is evidence a person moved it). Before: "freeroam-runner-2026-11-10e14b"   # e14b: a dark picture holds every robot until the camera has adjusted. e14 (10 Nov): the battery floor from MIRLT_MIN_BATTERY, else Mission Control's Advanced, else the site file, said at the start
 VERSION_E13 = "freeroam-runner-2026-11-10e13"   # e13 (10 Nov): --readable-map (school: plan only where the camera reads tags; MIRLT_ROAM_READABLE=0 the old whole table)
 VERSION_E12 = "freeroam-runner-2026-11-10e12"   # e12 (10 Nov): the bridge's "camera" messages (no pictures) said and logged; one robot held at an edge parked and shown, the others roam on; orderly shutdown
@@ -72,6 +72,7 @@ FOLLOW_LOOK_CM = 8.0    # the robots' own front stop while driving: roam.py's 8 
                         # keeps 2.5 cm between the circles (about 6.5 face to face). No DOE: a backstop
 FIX_HZ = 10.0           # camera fixes forwarded to each robot a second (run_plan --fix-hz). Not chosen here
 TICK_S = 0.05           # the controller's loop (20 a second; the camera bridge sends ~12 fixes a second per robot)
+SHAPE_LIVE_S = 1.0      # (e22, 7) Mission Control's live error shapes: Nick's "every second". Not a tuning number
 SAFE = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3", "set edge_bot_cm 11",
         "set bumper_cm 0"]                 # the robots' edge guard (ladder.SAFE; not kept over a power-off)
 DISK_CHECK_S = 60.0
@@ -994,6 +995,9 @@ class Runner:
             if now - getattr(self, "_trust_cp", self.t0) >= FC.CHECKPOINT_S:
                 self._trust_cp = now                   # (e18, 6) a crash or power cut loses at most a minute
                 self.trust_save("checkpoint")
+            if now - getattr(self, "_shape_live_t", 0.0) >= SHAPE_LIVE_S:
+                self._shape_live_t = now               # (e22, 7) Mission Control's live error shapes, every second
+                self.write_shape_live()
             if now - last_say > 60.0:
                 last_say = now
                 say("[%7.1f] " % (now - self.t0) + "; ".join(
@@ -1037,6 +1041,7 @@ class Runner:
             return
         self._end_saved = True
         c = self.ctrl
+        self.shape_fit_save(why)                 # (e22, 5) the back reach refitted from this run's own record
         try:
             done = c.save_corrections(why)
             self.saved_corrections = done
@@ -1079,6 +1084,51 @@ class Runner:
         if p and "checkpoint" not in why:
             say("Odometry trust records saved (%s): %s" % (p, "; ".join(t.words() for t in self.ctrl.trust.values())))
         return p
+
+    def shape_fit_save(self, why):
+        """(e22, 5; Nick 13 Nov: "keep the measured 19 cm; make sure it is refitted from each real run's data") Each
+        robot's error-shape fit at the run's end (error_shape.AxesFit: its own record or the fleet's, the measured cone
+        as the prior until the record weighs enough) into shape_fit.json, and said: the back reach (stuck wheels) now
+        against the 18.9 cm prior. The record itself (odo_trust's samples, each with its error along and across its own
+        track) is saved with the trust records, so the next run starts from it."""
+        out = {}
+        try:
+            for n, r in self.ctrl.R.items():
+                sh = getattr(r, "shape", None)
+                if sh is None:
+                    continue
+                f = dict(sh.axes_fit._compute())
+                out[n] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in f.items()}
+            with open(os.path.join(self.dir, "shape_fit.json"), "w") as fh:
+                json.dump(dict(why=why, robots=out), fh, indent=1, default=str)
+            say("Error shape refitted from this run's record: " + "; ".join(
+                "%s back reach %.1f cm (prior %.1f, %s, %d samples)" % (n, f.get("b_back", 0.0),
+                                                                        f.get("prior_b_back", 0.0),
+                                                                        f.get("source"), f.get("n", 0))
+                for n, f in out.items()))
+        except Exception as e:  # noqa: BLE001
+            say("(the error shape's fit was not written: %s)" % e)
+        return out
+
+    def write_shape_live(self):
+        """(e22, 7; Nick 13 Nov: "show the error shape live in Mission Control, every second") Each robot's error shape
+        (error_shape.Shape.draw: its pose, disc, ellipse and seen segment), stage and lost flag into shape_live.json
+        (small; atomic). live_view.py reads it for the map page; state.json stays once a minute."""
+        c = self.ctrl
+        try:
+            d = dict(t=self.AC.now(), robots={n: dict(shape=(r.shape.draw() if getattr(r, "shape", None) is not None
+                                                              else None),
+                                                       summary=(r.shape.summary() if getattr(r, "shape", None)
+                                                                is not None else None),
+                                                       stage=getattr(r, "stage", None), lost=r.lost is not None,
+                                                       rescue=bool(r.__dict__.get("rescue")))
+                                               for n, r in c.R.items()})
+            tmp = os.path.join(self.dir, "shape_live.json.tmp")
+            with open(tmp, "w") as f:
+                json.dump(d, f, default=str)
+            os.replace(tmp, os.path.join(self.dir, "shape_live.json"))
+        except Exception:  # noqa: BLE001
+            pass
 
     def write_state(self, why):
         c = self.ctrl

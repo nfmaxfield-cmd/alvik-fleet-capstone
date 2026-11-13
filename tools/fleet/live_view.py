@@ -18,6 +18,8 @@ Changelog
   2026-11-12a  first version (Mission Control build)
   2026-11-12e21  pm_cm is the robot's ONE error shape's largest reach (state.json's shape, error_shape.py) when the run
                  writes it, not the firmware's own sd (about 6x too sure: the 12 Nov audit); shape and stage added.
+  2026-11-13e22  (Nick 13 Nov) the shape every second: shape_live.json (freeroam.py) gives each robot's shape to draw
+                 (shape_draw: its pose, disc, ellipse, seen segment), its stage and whether it is rescuing itself.
 """
 import csv
 import glob
@@ -27,7 +29,9 @@ import math
 import os
 import time
 
-VERSION = "live-view-2026-11-12e21"   # e21: the one error shape and Nick's stage. Before: "live-view-2026-11-12a"
+VERSION = "live-view-2026-11-13e22"   # e22: the error shape every second (shape_live.json: its pose, disc, ellipse, seen segment) for the map. Before: "live-view-2026-11-12e21"   # e21: the one error shape and Nick's stage. Before: "live-view-2026-11-12a"
+SHAPE_FRESH_S = 5.0   # (e22, 7) shape_live.json older than this (written every second): the run is not writing it; the
+                      # once-a-minute state.json is used. Not a tuning number (display only)
 FRESH_S = 1.0         # the robots take camera fixes up to 1 s old (params.h fix_max_age_ms): a fix older than this is
                       # not "the camera has it now". No DOE: the firmware's own limit
 K95_2D = 2.45         # the 95 % circle of a 2-D normal is 2.45 standard deviations (chi-square, 2 degrees of freedom)
@@ -102,6 +106,14 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
             state = json.load(f).get("robots") or {}
     except (OSError, ValueError):
         pass
+    live_shape = {}
+    try:                                   # (e22, 7) the shapes every second (freeroam.py's shape_live.json)
+        with open(os.path.join(folder, "shape_live.json")) as f:
+            sl = json.load(f)
+        if now - float(sl.get("t") or 0.0) <= SHAPE_FRESH_S:
+            live_shape = sl.get("robots") or {}
+    except (OSError, ValueError, TypeError):
+        pass
     try:
         with open(os.path.join(folder, "edge_parked.json")) as f:
             ep = json.load(f)
@@ -134,11 +146,15 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
         st = state.get(n) or {}
         if x is None and n not in names_colours:
             continue
-        shp = st.get("shape") if isinstance(st.get("shape"), dict) else None
+        ls = live_shape.get(n) or {}
+        shp = ls.get("summary") if isinstance(ls.get("summary"), dict) else \
+            (st.get("shape") if isinstance(st.get("shape"), dict) else None)
+        draw = ls.get("shape") if isinstance(ls.get("shape"), dict) else None
         pm = (round(float(shp["extent"]), 1) if shp and shp.get("extent") is not None else
               (round(K95_2D * sd, 1) if sd else None))
         out.append(dict(name=n, ref=refs.get(n, ""), colour=names_colours.get(n), x=x, y=y, th=wrap360(th),
-                        pm_cm=pm, shape=shp, stage=st.get("stage"), seen=fresh, source=src,
+                        pm_cm=pm, shape=shp, shape_draw=draw, stage=ls.get("stage") or st.get("stage"),
+                        rescue=bool(ls.get("rescue")), seen=fresh, source=src,
                         since_fix_s=round(now - tc, 1) if tc else None, battery=bat.get(n) or st.get("battery"),
                         doing=st.get("mode") or "", held=bool(st.get("lost")), out=st.get("out") or "",
                         needs_hand=any(n in w for w in needs)))

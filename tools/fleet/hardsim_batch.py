@@ -11,6 +11,7 @@ Version / changelog:
   hardsim-batch-2026-11-12a  first version (hard simulator build).
   hardsim-batch-2026-11-12e21  each run's JSON also keeps the controller's seconds in each of Nick's stages (stage_s),
                  a few e21 counts (escapes, searches, veers, heading flips caught) and the simulated firmware's refusals.
+  hardsim-batch-2026-11-13e22  e22's counts too (the ladder's rungs, the identity guard's refusals, notes), in "e22".
 """
 import argparse
 import json
@@ -20,7 +21,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "hardsim-batch-2026-11-12e21"   # e21: stage_s, e21 counts and firmware refusals kept. Before: "hardsim-batch-2026-11-12a"
+VERSION = "hardsim-batch-2026-11-13e22"   # e22: the e22 counts kept too (rescue rungs, identity refusals, notes). Before: "hardsim-batch-2026-11-12e21"   # e21: stage_s, e21 counts and firmware refusals kept. Before: "hardsim-batch-2026-11-12a"
 
 
 def run_one(seed, hours, profile, out, code=None, faults=None, profile_path=None):
@@ -50,7 +51,10 @@ def run_one(seed, hours, profile, out, code=None, faults=None, profile_path=None
                e21={k: v for k, v in s.ctrl.counts.items() if k in (
                    "consistent_escapes", "searches", "search_holds", "veers", "veer_steps", "heading_flips_caught",
                    "head_unknown_confirmed", "shape_events", "creep_edge_refused", "camera_corrections", "creeps")},
-               fw_refusals={k: v for k, v in getattr(s, "stats", {}).items() if str(k).startswith("fw_")})
+               fw_refusals={k: v for k, v in getattr(s, "stats", {}).items() if str(k).startswith("fw_")},
+               e22={k: v for k, v in s.ctrl.counts.items() if str(k).startswith(("rescue", "id_", "escape_id", "notes",
+                                                                                 "unsure_cleared"))},
+               sim_bumps=getattr(s, "stats", {}).get("bumps"))
     with open(out, "w") as f:
         json.dump(res, f, default=str)
     return res

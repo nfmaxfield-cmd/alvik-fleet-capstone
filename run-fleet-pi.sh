@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# (2026-11-13 e22) `timing`: the free-roam controller's tick timed on the Pi itself (tools/pi/plan_timing_bench.py; nothing
+# moves, no camera): the slowest 1 in 100 ticks against the 50 ms loop.
 # (2026-11-12 Mission Control build) `freeroam-upload`: Mission Control's free roam on the robots uploads its logs and
 # frames when it ends (uploads on by default), the recorder left running for Mission Control's camera. freeroam-run starts
 # the Pi efficiency monitor beside the run (tools/pi/pi_monitor.py: pi_monitor.csv; MIRLT_PI_MONITOR=0 off).
@@ -318,6 +320,10 @@ bench_profile() {   # bench_profile NAME MINUTES OUTDIR
 }
 
 case "$WHAT" in
+  timing)          # (e22, Nick 13 Nov) ./run-fleet-pi.sh timing [--quick]: the free-roam controller's tick timed on
+                   # this Pi with simulated robots (nothing moves, no camera needed): the slowest 1 in 100 ticks against
+                   # the 50 ms loop, e22's way and e21's; saved in logs/timing/
+    python3 tools/pi/plan_timing_bench.py "$@" ;;
   bench)           # (e16) ./run-fleet-pi.sh bench [minutes] [old|trimmed|both]: the Pi measured, nothing moves
     BM=10; BP=both
     for x in "$@"; do case "$x" in [0-9]*) BM="$x" ;; old|trimmed|both|layouts) BP="$x" ;; esac; done

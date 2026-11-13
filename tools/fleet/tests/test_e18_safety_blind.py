@@ -1,4 +1,4 @@
-"""Build e18 (12 Nov, Nick's decisions 1-7): the out-and-back identity drive, never still everywhere (missions and
+"""(e22: four tests pin MIRLT_ID_GUARD / MIRLT_SELF_RESCUE to their old ways, each with a comment saying why.) Build e18 (12 Nov, Nick's decisions 1-7): the out-and-back identity drive, never still everywhere (missions and
 calibration too) with every safety switch in ONE Safety group, a doubtful heading beside a known / unknown neighbour,
 lost robots first, each robot's odometry trust and the blind-drive allowance, every calibration correction saved at any
 run end. Simulator and saved logs only: no robot, no Pi.
@@ -386,6 +386,8 @@ def _dark_rig(odo, seed=1, roam=150.0):
 
 
 def test_a_blind_excursion_through_a_dark_patch_good_record_allowed_poor_record_shortened_or_refused(monkeypatch):
+    # (e22) the excursion's own rule: the self-rescue ladder would move the standing robots meanwhile
+    monkeypatch.setattr(FC, "SELF_RESCUE", False)
     monkeypatch.setattr(FC, "SHAPE", False)      # (e21) e18's numbers: the rig's positions differ under the shape
     Rg, rg = _dark_rig((0.003, 0.0, 0.005))
     Rp, rp = _dark_rig((0.05, 0.03, 0.05))
@@ -521,6 +523,10 @@ def _far_rig(on, monkeypatch):
 
 def test_a_robot_named_all_along_beyond_its_fix_gate_is_corrected_from_the_camera(monkeypatch):
     monkeypatch.setattr(FC, "CONSISTENT_ESCAPE", False)   # (e21) e18b's rule alone (the escape would correct it first)
+    # (e22) e18b's rule alone and in its 3 s: a standing robot's far correction now waits for its own move to prove the
+    # sighting is its own (MIRLT_ID_GUARD; the ladder makes that move: test_e22_no_standing), so both are pinned off here
+    monkeypatch.setattr(FC, "ID_GUARD", False)
+    monkeypatch.setattr(FC, "SELF_RESCUE", False)
     R, ev = _far_rig(True, monkeypatch)
     assert ev and ev[0][0] - 3.0 < 3.0 and R.own_gap("Center") < 3.0
     assert any(s[1] == "Center" and s[2].startswith("fpose") for s in R.sent)
@@ -543,6 +549,10 @@ def test_far_named_needs_a_steady_offset_and_nobody_else_on_the_spot():
 
 def _reseed(on, monkeypatch, turned=0.0, src="tags"):
     monkeypatch.setattr(FC, "RESEED_HEADING_KEEP", on)
+    # (e22) the re-seed's heading rule alone: pose_fuse is called with no sightings, so e22's identity guard has no
+    # evidence of who the camera saw (it is tested with the whole flow in test_e22_no_standing)
+    monkeypatch.setattr(FC, "ID_GUARD", False)
+    monkeypatch.setattr(FC, "SELF_RESCUE", False)      # (e22) and the standing robots are not moved by the ladder meanwhile
     R = H.Rig({"Left": (30.0, 30.0, 0.0), "Center": (60.0, 90.0, 90.0), "Right": (95.0, 30.0, 180.0)}, seed=2,
               wiggle=False)
     R.run(3.0)

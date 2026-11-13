@@ -1,0 +1,92 @@
+{
+ "version": "bump-rate-e22-2026-11-13a",
+ "runs": [
+  {
+   "run": "20261111-085837-freeroam",
+   "hours": 4.006,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 27,
+   "robot_h": 12.018
+  },
+  {
+   "run": "20261111-082651-freeroam",
+   "hours": 0.308,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 1,
+   "robot_h": 0.923
+  },
+  {
+   "run": "20261105-143553-freeroam",
+   "hours": 0.305,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 0,
+   "robot_h": 0.914
+  },
+  {
+   "run": "20261107-143835-freeroam",
+   "hours": 0.009,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 0,
+   "robot_h": 0.026
+  },
+  {
+   "run": "20261107-122722-freeroam",
+   "hours": 0.501,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 0,
+   "robot_h": 1.503
+  },
+  {
+   "run": "20261107-133604-freeroam",
+   "hours": 0.501,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 0,
+   "robot_h": 1.503
+  },
+  {
+   "run": "20261109-123542-freeroam",
+   "hours": 0.006,
+   "robots": [
+    "Center",
+    "Left",
+    "Right"
+   ],
+   "felt": 0,
+   "robot_h": 0.017
+  }
+ ],
+ "robot_h": 16.9,
+ "felt": 28,
+ "bumps_per_robot_h": 1.656,
+ "bump_cm": {
+  "p50": 1.82,
+  "p90": 8.1,
+  "p95": 8.12
+ },
+ "bump_cm_n": 32,
+ "note": "rate: 'felt a robot' events per robot-hour; size: their measured jump quantiles (cone_fit.json)"
+}

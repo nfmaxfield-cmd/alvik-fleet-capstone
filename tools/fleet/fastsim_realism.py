@@ -43,6 +43,11 @@ Version / changelog:
                a guess of its own (a steep angle: noise stretched along its depth; a bump mid-run: its picture turned; a
                dark patch only it has; a third camera), and cam_swap=(t0, t1, a, b): two cameras' names swapped for a spell
                (each picture through the other's calibration: one mirrored left-right, the other top-bottom).
+  fastsim-realism-2026-11-13e22  (Nick 13 Nov) bumps at the MEASURED rate in every profile (docs/results/e22-nov13/
+               bump_rate.json: the real runs' "felt a robot" events per robot-hour, sized by their measured jumps), from a
+               random stream of their own (the seed's other draws unchanged); MIRLT_SIM_MEASURED_BUMPS=0 turns them off.
+               Slips were already at the measured rate (slips_per_robot_h, slip_len_s). Every bump checks the edge
+               (a middle over it: a fall at once; a wheel over it: hung), e21's bump did not.
   fastsim-realism-2026-11-12e21  faults "bumps" (BUMPS_PER_H a robot-hour, each moving the body BUMP_CM one way, its
                wheels and own pose not: a push, a knock by another robot, a seam) and "slips" (SLIPS_PER_H spells of
                SLIP_S of fully stuck wheels: the body still while its wheels and own pose drive on), both added to harsh.
@@ -61,7 +66,7 @@ _AN = os.path.join(os.path.dirname(HERE), "analysis")
 if _AN not in sys.path:
     sys.path.insert(0, _AN)
 
-VERSION = "fastsim-realism-2026-11-12e21"   # e21: two faults (Nick 12 Nov, decision 5): "bumps" (the robot is pushed: its body moves, its wheels do not) and "slips" (stuck wheels: spells of turning wheels and a still body), both in harsh; the simulated robot's own filter is freeroam_fastsim's firmware filter (the ratchet). Before: "fastsim-realism-2026-11-12e20"   # e20: cameras named on every sighting; cams=[...] and cam_swap (the simulator breaks the camera guesses). Before: "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
+VERSION = "fastsim-realism-2026-11-13e22"   # e22: bumps at the MEASURED rate and size in every profile (bump_rate.json: 1.66 a robot-hour, the real "felt a robot" jumps; MIRLT_SIM_MEASURED_BUMPS=0: as e21), drawn from their own random stream so every other draw of a seed is unchanged; a bump that puts the middle over the edge is a fall at once, one that puts a wheel over hangs it (the edge checked). Before: "fastsim-realism-2026-11-12e21"   # e21: two faults (Nick 12 Nov, decision 5): "bumps" (the robot is pushed: its body moves, its wheels do not) and "slips" (stuck wheels: spells of turning wheels and a still body), both in harsh; the simulated robot's own filter is freeroam_fastsim's firmware filter (the ratchet). Before: "fastsim-realism-2026-11-12e20"   # e20: cameras named on every sighting; cams=[...] and cam_swap (the simulator breaks the camera guesses). Before: "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
 PROFILE_DIR = os.path.join(HERE, "sim_profiles")
 DEFAULT_MEASURED = "measured-home-2026-11-11-0858.json"
 PROFILES = ("easy", "measured", "harsh")
@@ -83,6 +88,17 @@ BUMPS_PER_H = 6.0
 BUMP_CM = (3.0, 10.0)
 SLIPS_PER_H = 6.0
 SLIP_S = (2.0, 6.0)
+# (e22) MEASURED bumps for every profile: docs/results/e22-nov13/bump_rate.json (7 home runs, 16.9 robot-hours: 28 "felt a
+# robot" events, 1.66 a robot-hour; sizes the jumps' quantiles from cone_fit.json, n 32). The numbers below are the same,
+# for a Pi without docs/.
+MEASURED_BUMPS = dict(per_robot_h=1.656, cm={"p5": 0.3, "p50": 1.82, "p90": 8.1, "p95": 8.12, "max": 10.0})
+try:
+    _bj = json.load(open(os.path.join(HERE, "..", "..", "docs", "results", "e22-nov13", "bump_rate.json")))
+    MEASURED_BUMPS = dict(per_robot_h=float(_bj["bumps_per_robot_h"]),
+                          cm=dict({"p5": 0.3, "max": 10.0}, **{k: float(v) for k, v in _bj["bump_cm"].items()}))
+except Exception:  # noqa: BLE001
+    pass
+SIM_MEASURED_BUMPS = os.environ.get("MIRLT_SIM_MEASURED_BUMPS", "1") != "0"
 
 
 def qsample(q, rng, scale=1.0):
@@ -297,6 +313,18 @@ def make_class(F):
                         d = rng.uniform(*BUMP_CM)
                         self.bumps[n].append([t, d * math.cos(a), d * math.sin(a), False])
                         t += rng.expovariate(BUMPS_PER_H / 3600.0)
+            if SIM_MEASURED_BUMPS and MEASURED_BUMPS["per_robot_h"] > 0:
+                # (e22) bumps at the measured rate and size, from their own stream (the seed's other draws unchanged)
+                brng = random.Random(self.seed * 7919 + 17)
+                rate_b = MEASURED_BUMPS["per_robot_h"] / 3600.0
+                for n in self.names:
+                    t = brng.expovariate(rate_b)
+                    while t < T:
+                        a = brng.uniform(0, 2 * math.pi)
+                        d = qsample(MEASURED_BUMPS["cm"], brng)
+                        self.bumps[n].append([t, d * math.cos(a), d * math.sin(a), False])
+                        t += brng.expovariate(rate_b)
+                    self.bumps[n].sort(key=lambda q: q[0])
             self.hung_at = None
             if "hung" in self.faults:
                 n = rng.choice(self.names)
@@ -559,6 +587,8 @@ def make_class(F):
                         if n in self._prev:
                             self._prev[n] = (b.x, b.y, b.th)
                         self.stats["bumps"] = self.stats.get("bumps", 0) + 1
+                        if SIM_MEASURED_BUMPS:
+                            self.edge_check(b)         # (e22) the edge checked at once: over it is a fall, a wheel hung
 
         def _restart(self):
             R = self.restart

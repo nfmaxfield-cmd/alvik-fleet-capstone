@@ -37,7 +37,7 @@ Changelog
 import os
 import sys
 
-VERSION = "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -199,6 +199,28 @@ SWITCHES = [
      "(Nick 12 Nov) A move the robot's own wheels, accelerometer, line sensors and the camera say did not move is a slip: "
      "it does not count against the camera's trust in that square, its own pose is corrected from the camera at once, "
      "and a square that keeps causing slips is logged as a surface feature. 0: as e20", "e21"),
+    ("MIRLT_SELF_RESCUE", "ladder", "ask", "F",
+     "(Nick 13 Nov: robots never pause for a person) A robot that stands longer than the camera needs to answer its last "
+     "move (2 fix delays + the time to be called lost, measured) takes the next rung of a never-ending ladder: its "
+     "heading from a short out-and-back the camera sees (or a turn on the spot); a straight move that gains room for its "
+     "error shape; else one that keeps its room toward the ground where the cameras find robots best (learned in the "
+     "run); else a turn on the spot; again after the dwell. Questions, NEEDS A HAND and click requests become notes in "
+     "the log. ask: e13-e21 (held while a person is asked)", "e22"),
+    ("MIRLT_ID_GUARD", "1", "0", "F",
+     "(e21's falls: a sighting of another robot or a mirrored camera taken as its own) A correction, re-seed, 'seen "
+     "again' or escape beyond the camera's noise only from a sighting that is the robot's: inside its own error shape "
+     "and no other robot's (shapes never overlap), its joined-up sightings moving as its wheels did (or standing as it "
+     "stood), and not elsewhere than its last fix when it has not moved since. 0: e21", "e22"),
+    ("MIRLT_FW_ESCAPE", "pi", "robot", "F",
+     "(Nick 13 Nov) The robots' own consistency escape (firmware 2026-11-12e21's fix_escape_n) is set to 0: the Pi's "
+     "escape, which checks who the camera saw, is the only one. robot: the Pi sends the derived count (e21)", "e22"),
+    ("MIRLT_PLAN_BUDGET", "derived", "every_tick", "F",
+     "(Pi speed) Planning is paced by its own measured cost: in each 50 ms tick steering (the reflex, adjustments, the "
+     "queue watch, heartbeats) always runs; a robot's plan runs if it is the tick's first or the time used plus "
+     "planning's measured 95th percentile stays inside the loop less steering's slowest 1 in 100 ticks, else the next "
+     "tick (it goes first then). Far-apart reservations are not compared sample by sample (a box test), and a paused "
+     "robot's 'no move gains room' is kept until its pose, shape or the others change. every_tick: e21 (every free "
+     "robot plans in the same tick, every check run in full)", "e22"),
     ("MIRLT_FW_FILTER_PARAMS", "derived", "off", "F",
      "Robots on firmware 2026-11-12e21 or newer get their filter's settings from the measured record at the start of a "
      "run (variance growth, fix age limit from the measured delay, the consistency escape); off: their own defaults",

@@ -42,7 +42,11 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-11-12e21"
+#define FW_VERSION "2026-11-13e22"
+// 2026-11-13e22 (Nick 13 Nov, the e21 report's question 3): fix_escape_n is 0 by default for the first flash, so the
+//              robot never escapes the ratchet by itself: the Pi's consistency escape (which checks who the camera saw:
+//              shape exclusivity, motion signature, a camera trusted there) is the only one. Set fix_escape_n 5 for
+//              e21's own escape. Nothing else changed.
 // 2026-11-12e21 (the 12 Nov error and loss audit; Nick's decision 6: code and tests only, a staged rollout, the same
 //              sketch on every robot): the own pose's filter (pose.h). Its sd grows linearly with distance from the
 //              measured record (pose_sd_per_cm 0.095; 0 = the old pose_q_cm), fix_max_age_ms 1500 from the measured delay
