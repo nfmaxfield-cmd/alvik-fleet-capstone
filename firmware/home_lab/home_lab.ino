@@ -42,7 +42,15 @@
 Arduino_Alvik alvik;
 
 // Bump this whenever the firmware changes, so every logged run says which code it ran.
-#define FW_VERSION "2026-11-05d"
+#define FW_VERSION "2026-11-12e21"
+// 2026-11-12e21 (the 12 Nov error and loss audit; Nick's decision 6: code and tests only, a staged rollout, the same
+//              sketch on every robot): the own pose's filter (pose.h). Its sd grows linearly with distance from the
+//              measured record (pose_sd_per_cm 0.095; 0 = the old pose_q_cm), fix_max_age_ms 1500 from the measured delay
+//              (the Pi sends its own measured value), a 3.84 s pose history (pose_hist_ms; 1280 = the old one), every
+//              refused fix counted by reason and reported (FOLLOW gains rej_old, rej_far, rej_hist, rej_future, escapes
+//              as its last five columns), and the consistency escape (fix_escape_n far fixes in a row that agree with
+//              each other: the own pose is wrong, it takes the camera's offset; 0 = never, the old ratchet). The old
+//              behaviour: set pose_sd_per_cm 0, fix_max_age_ms 1000, pose_hist_ms 1280, fix_escape_n 0.
 // 2026-11-05d (Nick, 5 Nov 20:46, a robot seen tilted at the board's edge): a tilt ends only the current follow step
 //              (the run goes on so the laptop can back the robot away), every forward drive or turn is refused while
 //              it is tilted (e02 legs and follow steps), and a straight BACKWARD drive is allowed and not stopped by

@@ -3,6 +3,9 @@ step follower (firmware/home_lab/pose.h, follow.h, experiments.h runSurvey),
 step for step, for the simulated robot (robot.py mixes this in).
 
 Kept line-for-line close to the C++ so a change there is easy to mirror here.
+
+Changelog: 2026-11-12e21 pose.h's e21 filter mirrored (the linear sd growth pose_sd_per_cm, pose_hist_ms over a 96-entry
+history, refusals counted by reason, the consistency escape fix_escape_n, FOLLOW's five new columns).
 The robot's sensors and motors are the simulator's: wheel odometry from the
 quantized encoders with nominal sizes (the library's get_pose), heading from
 the simulated gyro, the front distance sensor from ray casts against the room,
@@ -37,7 +40,7 @@ def isnan(v):
 
 class PoseTracker:
     """pose.h, namespace pose."""
-    NH = 32
+    NH = 96                 # (2026-11-12e21) pose.h NH: 96 x 40 ms
     H_MS = 40
 
     def __init__(self, rb):
@@ -49,6 +52,9 @@ class PoseTracker:
         self.var = self.var_th = 0.0
         self.dist = 0.0
         self.fixes_used = self.fixes_rejected = 0
+        self.rej = dict(old=0, far=0, hist=0, future=0, first=0)
+        self.escapes = 0
+        self.esc = []
         self.last_reject = ""
         self.hist = []          # [(ms, x, y, th)], oldest first, at most NH
         self.h_last = 0
@@ -81,6 +87,9 @@ class PoseTracker:
         self.drift_dps = 0.0
         self.known = known
         self.fixes_used = self.fixes_rejected = 0
+        self.rej = dict(old=0, far=0, hist=0, future=0, first=0)
+        self.escapes = 0
+        self.esc = []
         self.hist = []
         self.last_ms = self.rb.millis()
         self.q_cm, self.q_deg, self.q_dps = P("pose_q_cm"), P("pose_q_deg"), P("pose_q_dps")
@@ -98,6 +107,9 @@ class PoseTracker:
         self.dist = 0.0
         self.drift_dps = 0.0
         self.fixes_used = self.fixes_rejected = 0
+        self.rej = dict(old=0, far=0, hist=0, future=0, first=0)
+        self.escapes = 0
+        self.esc = []
         self.hist = []
         self.last_ms = self.rb.millis()
         self.q_cm, self.q_deg, self.q_dps = P("pose_q_cm"), P("pose_q_deg"), P("pose_q_dps")
@@ -109,6 +121,7 @@ class PoseTracker:
         self.th_off = wrap180(nth - self.rb.heading())
         self.last_th = self.th()
         self.var, self.var_th = sig * sig, sig_th * sig_th
+        self.esc = []
         self.known = True
         self.hist = []
         self.push(self.rb.millis())
@@ -129,7 +142,10 @@ class PoseTracker:
         self.x += ds * math.cos(mid)
         self.y += ds * math.sin(mid)
         self.dist += ds
-        self.var += self.q_cm * abs(ds)
+        if self.rb.P("pose_sd_per_cm") > 0:          # (2026-11-12e21) the sd grows linearly
+            self.var = (math.sqrt(self.var) + self.rb.P("pose_sd_per_cm") * abs(ds)) ** 2
+        else:
+            self.var += self.q_cm * abs(ds)
         self.var_th += self.q_deg * abs(dh) + self.q_dps * (now - self.last_ms) / 1000.0
         self.last_th = h
         self.last_ms = now
@@ -146,44 +162,68 @@ class PoseTracker:
             f = (t - n[0]) / span if span > 0 else 1.0
             f = min(f, 1.0)
             return (n[1] + f * (self.x - n[1]), n[2] + f * (self.y - n[2]), n[3] + f * wrap180(self.th() - n[3]))
+        now0 = self.rb.millis()
+        hist_ms = self.rb.P("pose_hist_ms")
         for k in range(len(self.hist) - 1, 0, -1):
             b, a = self.hist[k], self.hist[k - 1]
+            if hist_ms > 0 and now0 - a[0] > hist_ms:
+                break                                  # (2026-11-12e21) only pose_hist_ms of it
             if t >= a[0]:
                 f = (t - a[0]) / (b[0] - a[0])
                 return (a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), a[3] + f * wrap180(b[3] - a[3]))
         return None
 
-    def reject(self, why):
+    def reject(self, why, key=None):
         self.last_reject = why
         self.fixes_rejected += 1
+        if key:
+            self.rej[key] = self.rej.get(key, 0) + 1
         return False
 
     def fix(self, t, fx, fy, fth, sig, sig_th):
         P = self.rb.P
         now = self.rb.millis()
         if now - t > P("fix_max_age_ms"):
-            return self.reject("old")
+            return self.reject("old", "old")
         if t - now > 200:
-            return self.reject("future")
+            return self.reject("future", "future")
         if sig <= 0:
             sig = 0.1
         if sig_th <= 0:
             sig_th = 1.0
         if not self.known:
             if isnan(fth):
-                return self.reject("first fix needs a heading")
+                return self.reject("first fix needs a heading", "first")
             self.set(fx, fy, fth, sig, sig_th)
             self.fixes_used += 1
             return True
         h = self.at(t)
         if h is None:
-            return self.reject("older than the pose history")
+            return self.reject("older than the pose history", "hist")
         hx, hy, hth = h
         ex, ey = fx - hx, fy - hy
         S = self.var + sig * sig
         gate = P("fix_gate")
         if ex * ex + ey * ey > gate * gate * S and ex * ex + ey * ey > 9.0:
-            return self.reject("too far from the own pose")
+            need = int(P("fix_escape_n"))           # (2026-11-12e21) the consistency escape
+            if need > 0:
+                self.esc.append((ex, ey))
+                del self.esc[:-need]
+                if len(self.esc) >= need:
+                    mx = sum(q[0] for q in self.esc) / len(self.esc)
+                    my = sum(q[1] for q in self.esc) / len(self.esc)
+                    if all((q[0] - mx) ** 2 + (q[1] - my) ** 2 <= gate * gate * sig * sig for q in self.esc):
+                        self.x += mx
+                        self.y += my
+                        self.hist = [(ms, qx + mx, qy + my, qth) for (ms, qx, qy, qth) in self.hist]
+                        self.var = sig * sig + 0.25 * (mx * mx + my * my)
+                        self.esc = []
+                        self.escapes += 1
+                        self.fixes_used += 1
+                        self.last_reject = ""
+                        return True
+            return self.reject("too far from the own pose", "far")
+        self.esc = []
         k = self.var / S
         dx, dy = k * ex, k * ey
         self.var = (1 - k) * self.var
@@ -447,10 +487,12 @@ class FollowMixin:
             return
         self.f_next_log = now + self.f_period
         p = self.pose
-        self.send("D,FOLLOW,%s,%d,%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.1f,%.2f,%d" % (
+        rj = getattr(p, "rej", {})
+        self.send("D,FOLLOW,%s,%d,%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.1f,%.2f,%d,%d,%d,%d,%d,%d" % (
             self.run_id, now, self.f_cur, self.f_state if p.known else "nopose", len(self.f_q), self.f_last_done,
             self.f_last_failed, p.x, p.y, p.th(), p.sd(), p.sd_th(), p.fixes_used, p.fixes_rejected,
-            self.read_front(), self.f_travel, now - self.last_rx))
+            self.read_front(), self.f_travel, now - self.last_rx, rj.get("old", 0), rj.get("far", 0),
+            rj.get("hist", 0), rj.get("future", 0), getattr(p, "escapes", 0)))
 
     def f_tick(self):
         self.pose.tick()
@@ -1002,7 +1044,7 @@ class FollowMixin:
         P = self.P
         self.send("H,STEP,run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info")
         self.send("H,FOLLOW,run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,"
-                  "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms")
+                  "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms,rej_old,rej_far,rej_hist,rej_future,escapes")
         if getattr(self, "fw_version", "") >= "2026-11-05b":
             self.send("H,FSPD,run,ms,step_id,verb,scale,x,y")
         self.f_q = []

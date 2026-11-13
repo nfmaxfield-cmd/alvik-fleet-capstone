@@ -74,8 +74,11 @@ Param PARAMS[] = {
   {"pose_q_cm",     0.01,   "own pose: position variance added per cm driven (cm^2/cm)"},
   {"pose_q_deg",   0.003,   "own pose: heading variance added per degree turned (deg^2/deg)"},
   {"pose_q_dps",   0.002,   "own pose: heading variance added per second (deg^2/s, gyro drift)"},
-  {"fix_max_age_ms", 1000,  "follow: ignore a camera fix older than this"},
+  {"fix_max_age_ms", 1500,  "follow: ignore a camera fix older than this (2026-11-12e21: 1500, the measured fix delay's 95th percentile 1.39 s on 11 Nov; the Pi sends its own measured value; 1000 before)"},
   {"fix_gate",         4,   "follow: ignore a fix further than this many standard deviations (and 3 cm) from the own pose"},
+  {"pose_sd_per_cm", 0.095, "own pose (2026-11-12e21): its position sd grows this much per cm driven, linearly (the measured record: sideways error 0.232 cm per cm at 95 %, / 2.45); 0 = the old pose_q_cm growth (variance per cm)"},
+  {"pose_hist_ms",  3840,   "own pose (2026-11-12e21): how far back the pose history is used for a fix (at most 3840: 96 x 40 ms); 1280 = the old 32-entry history"},
+  {"fix_escape_n",     5,   "follow (2026-11-12e21): after this many fixes in a row refused as too far whose offsets agree with each other (within fix_gate camera sigmas), the own pose is wrong: it takes the camera's offset; 0 = never (the old ratchet)"},
 
   // --- survey drive (camera self-calibration) ---
   {"survey_size_cm",  80,   "survey: legs 10,10,20,20,... cm; stops before a leg longer than this"},

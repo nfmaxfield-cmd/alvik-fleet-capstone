@@ -24,6 +24,16 @@
 // than fix_max_age_ms (1 s) or from the future (> 0.2 s ahead) is ignored, as
 // is one further than fix_gate standard deviations (and 3 cm) from the own
 // pose (a wrong detection). The first fix (pose not known yet) sets the pose.
+//
+// 2026-11-12e21 (the 12 Nov error and loss audit, Nick's decision 6; code and tests only, flashed in a staged rollout):
+//   - the variance grows from the measured record: its sd grows pose_sd_per_cm per cm (linear, as the real error does;
+//     pose_sd_per_cm 0 = the old pose_q_cm variance growth, about 6x too sure after 100 cm);
+//   - fix_max_age_ms 1500 from the measured delay (11 Nov: p90 1.14 s, p95 1.39 s; 17 % of fixes were refused as old
+//     at 1000), and the Pi sends its own measured value;
+//   - a longer history: 96 x 40 ms = 3.84 s (pose_hist_ms limits it; 1280 = the old 32 entries);
+//   - every refused fix counted by its reason (old, future, history, far, no heading) and reported in FOLLOW;
+//   - the consistency escape: fix_escape_n far fixes in a row whose offsets agree with each other mean its own pose is
+//     wrong, so it takes the camera's offset (fix_escape_n 0 = the old ratchet).
 #pragma once
 
 #include "motion.h"
@@ -34,7 +44,7 @@ inline bool isNaN(float v) { return v != v; }
 namespace pose {
 
 const float DEG2RAD = 0.017453293f;
-const int NH = 32;                 // pose history: 32 x 40 ms = 1.28 s
+const int NH = 96;                 // pose history: 96 x 40 ms = 3.84 s (2026-11-12e21; was 32 = 1.28 s; pose_hist_ms)
 const unsigned long H_MS = 40;
 
 struct Hist { unsigned long ms; float x, y, th; };
@@ -47,6 +57,12 @@ float var = 0, varTh = 0;          // variances: cm^2 (per axis), deg^2
 float dist = 0;                    // signed wheel distance since start(), cm (forward +)
 int fixesUsed = 0, fixesRejected = 0;
 const char* lastReject = "";
+// (2026-11-12e21) refusals by reason, and the escape
+int rejOld = 0, rejFuture = 0, rejHist = 0, rejFar = 0, rejFirst = 0, escapes = 0;
+const int NE = 16;
+float escX[NE], escY[NE];
+int escN = 0;
+float sdLin = 0;                   // the linear sd (pose_sd_per_cm > 0)
 
 Hist hist[NH];
 int hHead = 0, hCount = 0;         // hist[hHead - 1] is the newest
@@ -77,6 +93,9 @@ void start(bool isKnown, float x0 = 0, float y0 = 0, float th0 = 0) {
   driftDps = 0;
   known = isKnown;
   fixesUsed = fixesRejected = 0;
+  rejOld = rejFuture = rejHist = rejFar = rejFirst = escapes = 0;
+  escN = 0;
+  sdLin = 0;
   hCount = hHead = 0;
   lastMs = millis();
   qCm = P("pose_q_cm"); qDeg = P("pose_q_deg"); qDps = P("pose_q_dps");
@@ -109,6 +128,8 @@ void set(float nx, float ny, float nth, float sig, float sigTh) {
   thOff = wrap180(nth - heading());
   lastTh = th();
   var = sig * sig; varTh = sigTh * sigTh;
+  sdLin = sig;
+  escN = 0;
   known = true;
   hCount = hHead = 0;
   push(millis());
@@ -131,7 +152,13 @@ void tick() {
   x += ds * cosf(mid);
   y += ds * sinf(mid);
   dist += ds;
-  var += qCm * fabsf(ds);
+  if (P("pose_sd_per_cm") > 0) {                 // (2026-11-12e21) the sd grows linearly, as the measured error does
+    float sdNow = sqrtf(var);
+    sdNow += P("pose_sd_per_cm") * fabsf(ds);
+    var = sdNow * sdNow;
+  } else {
+    var += qCm * fabsf(ds);
+  }
   varTh += qDeg * fabsf(dh) + qDps * (now - lastMs) / 1000.0f;
   lastTh = h;
   lastMs = now;
@@ -153,9 +180,12 @@ bool at(unsigned long t, float& hx, float& hy, float& hth) {
     hth = hist[newest].th + f * wrap180(th() - hist[newest].th);
     return true;
   }
+  unsigned long now0 = millis();
+  long histMs = (long)P("pose_hist_ms");
   for (int k = 1; k < hCount; k++) {
     const Hist& b = hist[(hHead + NH - k) % NH];        // newer
     const Hist& a = hist[(hHead + NH - k - 1) % NH];    // older
+    if (histMs > 0 && (long)(now0 - a.ms) > histMs) break;   // (2026-11-12e21) only pose_hist_ms of it
     if ((long)(t - a.ms) >= 0) {
       float f = (float)(t - a.ms) / (float)(b.ms - a.ms);
       hx = a.x + f * (b.x - a.x);
@@ -170,24 +200,59 @@ bool at(unsigned long t, float& hx, float& hy, float& hth) {
 // A camera fix. th = NAN: position only. Returns false (and lastReject) if ignored.
 bool fix(unsigned long t, float fx, float fy, float fth, float sig, float sigTh) {
   unsigned long now = millis();
-  if ((long)(now - t) > (long)P("fix_max_age_ms")) { lastReject = "old"; fixesRejected++; return false; }
-  if ((long)(t - now) > 200) { lastReject = "future"; fixesRejected++; return false; }
+  if ((long)(now - t) > (long)P("fix_max_age_ms")) { lastReject = "old"; fixesRejected++; rejOld++; return false; }
+  if ((long)(t - now) > 200) { lastReject = "future"; fixesRejected++; rejFuture++; return false; }
   if (sig <= 0) sig = 0.1f;
   if (sigTh <= 0) sigTh = 1.0f;
   if (!known) {
-    if (isNaN(fth)) { lastReject = "first fix needs a heading"; fixesRejected++; return false; }
+    if (isNaN(fth)) { lastReject = "first fix needs a heading"; fixesRejected++; rejFirst++; return false; }
     set(fx, fy, fth, sig, sigTh);   // the robot has not moved on its own yet: take it as it is
     fixesUsed++;
     return true;
   }
   float hx, hy, hth;
-  if (!at(t, hx, hy, hth)) { lastReject = "older than the pose history"; fixesRejected++; return false; }
+  if (!at(t, hx, hy, hth)) { lastReject = "older than the pose history"; fixesRejected++; rejHist++; return false; }
   float ex = fx - hx, ey = fy - hy;
   float S = var + sig * sig;
   float gate = P("fix_gate");
   if (ex * ex + ey * ey > gate * gate * S && ex * ex + ey * ey > 9.0f) {
-    lastReject = "too far from the own pose"; fixesRejected++; return false;
+    // (2026-11-12e21) the consistency escape: far fixes in a row that agree with each other (the camera's offset steady
+    // within fix_gate of its sigma) mean the own pose is wrong, not the camera: take the camera's offset
+    int needN = (int)P("fix_escape_n");
+    if (needN > 0) {
+      if (needN > NE) needN = NE;
+      if (escN >= needN) {
+        for (int k = 1; k < needN; k++) { escX[k - 1] = escX[k]; escY[k - 1] = escY[k]; }
+        escN = needN - 1;
+      }
+      escX[escN] = ex; escY[escN] = ey; escN++;
+      if (escN >= needN) {
+        float mx = 0, my = 0;
+        for (int k = 0; k < escN; k++) { mx += escX[k]; my += escY[k]; }
+        mx /= escN; my /= escN;
+        bool agree = true;
+        for (int k = 0; k < escN; k++) {
+          float dx = escX[k] - mx, dy = escY[k] - my;
+          if (dx * dx + dy * dy > gate * gate * sig * sig) { agree = false; break; }
+        }
+        if (agree) {
+          x += mx; y += my;
+          for (int k2 = 0; k2 < hCount; k2++) {
+            Hist& e = hist[(hHead + NH - 1 - k2) % NH];
+            e.x += mx; e.y += my;
+          }
+          var = sig * sig + 0.25f * (mx * mx + my * my);
+          escN = 0;
+          escapes++;
+          fixesUsed++;
+          lastReject = "";
+          return true;
+        }
+      }
+    }
+    lastReject = "too far from the own pose"; fixesRejected++; rejFar++; return false;
   }
+  escN = 0;
   float k = var / S;
   float dx = k * ex, dy = k * ey;
   var = (1 - k) * var;

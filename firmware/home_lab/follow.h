@@ -105,10 +105,12 @@ void log() {
   unsigned long now = millis();
   if ((long)(now - nextLog) < 0) return;
   nextLog = now + period;
-  net::logf("D,FOLLOW,%s,%lu,%u,%s,%d,%u,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.1f,%.2f,%lu", gRunId.c_str(), now,
-            (unsigned)curId, pose::known ? state : "nopose", qLen, (unsigned)lastDone, (unsigned)lastFailed,
+  // (2026-11-12e21) five columns appended: refused fixes by reason (old, far, history, future) and escapes
+  net::logf("D,FOLLOW,%s,%lu,%u,%s,%d,%u,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.1f,%.2f,%lu,%d,%d,%d,%d,%d", gRunId.c_str(),
+            now, (unsigned)curId, pose::known ? state : "nopose", qLen, (unsigned)lastDone, (unsigned)lastFailed,
             pose::x, pose::y, pose::th(), pose::sd(), pose::sdTh(), pose::fixesUsed, pose::fixesRejected,
-            readFront(), travel, now - net::lastRx);
+            readFront(), travel, now - net::lastRx, pose::rejOld, pose::rejFar, pose::rejHist, pose::rejFuture,
+            pose::escapes);
 }
 
 void tickHook() {
@@ -467,7 +469,7 @@ void run() {
   if (!calibrateYawSign()) return;
   net::sendLine("H,STEP,run,id,state,ms,x_cm,y_cm,th_deg,front_cm,info");
   net::sendLine("H,FOLLOW,run,ms,step_id,state,queued,last_done,last_failed,x_cm,y_cm,th_deg,pos_sd_cm,th_sd_deg,"
-                "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms");
+                "fixes_used,fixes_rejected,front_cm,travel_cm,quiet_ms,rej_old,rej_far,rej_hist,rej_future,escapes");
   net::sendLine("H,FSPD,run,ms,step_id,verb,scale,x,y");      // (2026-11-05b) fspd / fsteer answers
   qHead = qLen = 0;
   maxId = curId = lastDone = lastFailed = 0;
