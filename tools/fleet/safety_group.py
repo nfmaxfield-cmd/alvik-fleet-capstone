@@ -26,11 +26,14 @@ Changelog
                  switch on), refusals said at the start; missions, calibration and the frame watch read through here.
   2026-11-12e20  learned camera trust (e20): MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE,
                  MIRLT_MOTION_HEADING; MIRLT_PAIR_STAND_PART (a close pair standing apart is parted).
+  2026-11-12e21  one error shape (e21): MIRLT_ERROR_SHAPE, MIRLT_STAGES, MIRLT_LOST_CREEP (the creep with no edge
+                 rule, now off), MIRLT_SHAPE_PLAN, MIRLT_CONSISTENT_ESCAPE, MIRLT_INWARD_TWO_HEADINGS,
+                 MIRLT_CAMERA_VERDICT (per camera), MIRLT_BRIDGE_PER_CAMERA, MIRLT_FW_FILTER_PARAMS.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -128,6 +131,12 @@ SWITCHES = [
      "line of sightings gives its heading, with a precision from that camera's measured noise across the line and the "
      "distance driven; it is a heading source, evidence for the cameras' trust, and it settles a heading in doubt without "
      "a crawl when it is precise enough. 0: e19 (the crawl)", "e20"),
+    ("MIRLT_CAMERA_VERDICT", "per_camera", "whole", "T F",
+     "(e20's open problem) A camera found wrong is refused alone: only the camera(s) the evidence implicates, and a "
+     "trusted camera's agreement releases it. whole: e19's one verdict for every camera", "e21"),
+    ("MIRLT_BRIDGE_PER_CAMERA", "1", "0", "T",
+     "The camera bridge sends each camera's sighting of a robot on its own (its camera named), so every camera earns "
+     "its own trust; 0: one merged 'both' sighting when both cameras see it", "e21"),
     ("MIRLT_PAIR_STAND_PART", "1", "0", "T",
      "Two robots that passed close and then BOTH stand still beyond the close-pass distance count as parted, so who is "
      "who is checked (kept, swapped or a wiggle) instead of neither taking a camera fix until one moves 22 cm away (hard "
@@ -151,6 +160,35 @@ SWITCHES = [
     ("MIRLT_BLIND_RULE", "edge", "cap", "F M C",
      "A robot with no camera drives on while its whole possible error cannot reach an edge (cap: the 8 / 40 cm caps)",
      "e13"),
+    ("MIRLT_ERROR_SHAPE", "cone", "circle", "F M",
+     "(Nick 12 Nov) ONE error shape per robot (tools/fleet/error_shape.py): a cone along its own track (its measured "
+     "along and sideways growth, from its own record and the fleet's) plus a disc for the error already seen when it was "
+     "lost and the events it reports since (bumps, slips, stuck wheels, re-seeds, merges, restarts, each by its measured "
+     "jump); it shrinks only with an accepted fix. Plans, the edge rule, the pause, corrections and Mission Control read "
+     "it. circle: e20's lost bubble (2 cm + its record per cm, a circle) and every user's own radius", "e21"),
+    ("MIRLT_STAGES", "four", "e20", "F M",
+     "(Nick 12 Nov) Nick's four stages: run; veer (when the shape would reach an edge within the next moves, moves are "
+     "scored by the room they gain and how well the cameras read the ground ahead); found (the shape shrinks); pause and "
+     "search only when NO move gains room (it turns on the spot, the cameras and detector look at its shape, nearby "
+     "robots hold still only if they must, then a person is asked). e20: moves refused at the edge, a pause by the "
+     "bubble where it stands", "e21"),
+    ("MIRLT_LOST_CREEP", "0", "1", "F",
+     "1: e17's never-still creep at the blind limit, which ignored the edge rule; 0: no creep without the edge rule "
+     "(the pause and search instead)", "e21"),
+    ("MIRLT_SHAPE_PLAN", "ellipse", "circle", "F",
+     "Reservations carry each robot's shape (a disc and an ellipse); two shapes are kept apart along the line between "
+     "them, planned ahead. circle: each shape as the circle of its largest reach", "e21"),
+    ("MIRLT_CONSISTENT_ESCAPE", "1", "0", "F",
+     "(the ratchet) When the camera's sightings of a robot agree with each other but not with its own pose, for more "
+     "sightings than the camera's measured noise can explain, its own pose is wrong: the camera's pose is sent (fpose) "
+     "and its heading is taken from its next short move as the camera sees it (a 180 deg flip is caught). 0: e20", "e21"),
+    ("MIRLT_INWARD_TWO_HEADINGS", "1", "0", "F",
+     "The 'inward by both' check uses each position's own heading (its own heading for its own pose, the camera's "
+     "measured heading for the camera's spot); 0: one heading for both (e08)", "e21"),
+    ("MIRLT_FW_FILTER_PARAMS", "derived", "off", "F",
+     "Robots on firmware 2026-11-12e21 or newer get their filter's settings from the measured record at the start of a "
+     "run (variance growth, fix age limit from the measured delay, the consistency escape); off: their own defaults",
+     "e21"),
     ("MIRLT_BLIND_ALLOW", "1", "0", "F M",
      "Each robot's own measured odometry record (cm per cm, deg per turn and per curve) predicts its error on a blind "
      "leg; a blind excursion is allowed only where that prediction keeps the margin from edges and robots with a way "

@@ -33,7 +33,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 import safety_group as SG    # noqa: E402  (e18: every safety switch's automatic default lives in safety_group.py)
 
-VERSION = "2026-11-12e19"   # e19 (audit H6): tilt_recovery_tries_e19 (the opposite of what tilted it first; forward tries when the nose points inward; growing rounds, recover_scale). Before: "2026-11-12e18"   # e18: the switches read through safety_group (one place, the same defaults). Before: "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
+VERSION = "2026-11-12e21"   # e21: inward_agreed takes the camera spot's own heading (heading_cam; the 12 Nov audit C1). Before: "2026-11-12e19"   # e19 (audit H6): tilt_recovery_tries_e19 (the opposite of what tilted it first; forward tries when the nose points inward; growing rounds, recover_scale). Before: "2026-11-12e18"   # e18: the switches read through safety_group (one place, the same defaults). Before: "2026-11-10e14"   # e14 (school 17:46, a slow tag detector in dim light): fresh_fix_s, how old a fix may be and still count as seen, from the robot's measured fix interval (MIRLT_FIX_GAP_RULE=fixed: 0.6 s as before); between_fixes_cm. e13 (10 Nov, Nick "derived, risk-based thresholds"): no_picture_limit, the time a robot may go
 #                              without camera pictures, from its speed, heading, uncertainty and the edge room. 2026-11-07a: e08
 VERSION_A = "2026-11-07a"
 
@@ -416,17 +416,29 @@ def inward_heading(rect, x, y):
     return math.degrees(math.atan2(vy, vx))
 
 
-def inward_agreed(rect, own, cam, heading_deg, reverse=False, tol_deg=80.0):
+_TWO = object()
+
+
+def inward_agreed(rect, own, cam, heading_deg, reverse=False, tol_deg=80.0, heading_cam=_TWO):
     """A move along heading_deg (backwards when reverse) goes inward by BOTH the camera's spot and its own pose (each
     one's inward direction within tol_deg of the motion: it gains distance from the nearest edge by both). Never guess
-    outward. tol_deg 80 (chosen: at least 0.17 cm inward per cm; the callers also check the end is further in)."""
+    outward. tol_deg 80 (chosen: at least 0.17 cm inward per cm; the callers also check the end is further in).
+    (e21, the 12 Nov audit C1: one heading for both positions could not catch a heading 180 deg off) heading_cam: the
+    heading the camera's spot moves along (the camera's own measured heading); None: not known, so not agreed. Left
+    out: heading_deg for both (e08)."""
     mot = heading_deg + (180.0 if reverse else 0.0)
+    if heading_cam is _TWO:
+        mot_c = mot
+    elif heading_cam is None:
+        return False
+    else:
+        mot_c = heading_cam + (180.0 if reverse else 0.0)
     ok = True
-    for p in (own, cam):
+    for p, m in ((own, mot), (cam, mot_c)):
         if p is None:
             return False
         h = inward_heading(rect, p[0], p[1])
-        if abs((mot - h + 180.0) % 360.0 - 180.0) > tol_deg:
+        if abs((m - h + 180.0) % 360.0 - 180.0) > tol_deg:
             ok = False
     return ok
 

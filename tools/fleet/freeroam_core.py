@@ -51,8 +51,9 @@ import safety_group as SG   # noqa: E402  (e18: every safety switch's automatic 
 import odo_trust as OT      # noqa: E402  (e18, 5: each robot's measured odometry trust, the blind-drive allowance)
 import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fed by the tracking layer and RAW)
 import camera_trust as CT   # noqa: E402  (e20: learned camera trust, heading from motion)
+import error_shape as ES    # noqa: E402  (e21: ONE error shape per robot)
 
-VERSION = "freeroam-2026-11-12e20"   # e20 (camera trust): every fix says its camera (on_fix cam=); the odometry record learns only from a camera trusted for position there, weighted by that trust (MIRLT_ODO_LEARN_TRUST); heading from motion on every camera (camera_trust.MotionHeading: a camera's straight-drive line with its measured noise across it) as evidence for the cameras, a heading source handed with the next fix, and a heading in doubt settled without a crawl when it is precise enough (MIRLT_MOTION_HEADING). Before: "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-12e21"   # e21 (Nick 12 Nov): ONE error shape per robot (error_shape.Shape: a cone along its own track plus a disc for the error seen and the events it reports; MIRLT_ERROR_SHAPE) read by the plans (reservations carry it: MIRLT_SHAPE_PLAN), the edge rule, the blind stop, corrections and Mission Control; Nick's four stages (run, veer, found, pause and search: MIRLT_STAGES); no creep without the edge rule (MIRLT_LOST_CREEP); the ratchet broken on the Pi (consistency escape, MIRLT_CONSISTENT_ESCAPE) with the heading from its next move; 'inward by both' with two headings (MIRLT_INWARD_TWO_HEADINGS); the firmware filter's settings derived (MIRLT_FW_FILTER_PARAMS). Before: "freeroam-2026-11-12e20"   # e20 (camera trust): every fix says its camera (on_fix cam=); the odometry record learns only from a camera trusted for position there, weighted by that trust (MIRLT_ODO_LEARN_TRUST); heading from motion on every camera (camera_trust.MotionHeading: a camera's straight-drive line with its measured noise across it) as evidence for the cameras, a heading source handed with the next fix, and a heading in doubt settled without a crawl when it is precise enough (MIRLT_MOTION_HEADING). Before: "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -327,6 +328,21 @@ OB_GAP_CM = 0.5         # (1) CHOSEN: an out-and-back keeps the bodies' circles 
 DOUBT_DEG_UNKNOWN = 180.0   # (3) a heading in doubt with no measure of how far off: any direction. Not chosen
 CAUTIOUS_SHARE = 0.5    # (3) CHOSEN: beside a robot the camera does not confirm, a creep is this share of its step, at the
                         # slowest speed. DOE: yes, with CREEP_MAX_CM (time to be found vs contacts in the simulator)
+CAMERA_TRUST_BOOK = SG.value("MIRLT_CAMERA_TRUST") != "e19"   # (e21) e20's trust map read for the veer's found chance
+SHAPE = SG.value("MIRLT_ERROR_SHAPE") == "cone"       # (e21, 1) one error shape per robot ("circle": e20's bubble)
+STAGES = SG.value("MIRLT_STAGES") == "four"           # (e21, 2) Nick's four stages ("e20": as before)
+LOST_CREEP = SG.flag("MIRLT_LOST_CREEP")              # (e21, 2) 1: the never-still creep with no edge rule (e17)
+SHAPE_PLAN = SG.value("MIRLT_SHAPE_PLAN") == "ellipse"   # (e21, 3) reservations carry the ellipse ("circle": its reach)
+CONSISTENT_ESCAPE = SG.flag("MIRLT_CONSISTENT_ESCAPE")   # (e21, 4) the ratchet broken on the Pi
+INWARD_TWO = SG.flag("MIRLT_INWARD_TWO_HEADINGS")     # (e21, 4) "inward by both" with each position's own heading
+FW_FILTER = SG.value("MIRLT_FW_FILTER_PARAMS") == "derived"   # (e21, 6) the new firmware's filter settings derived
+ESCAPE_ALPHA = 1e-3     # (e21, 4) the consistency escape fires when the chance that the camera's noise alone put this
+                        # many sightings this far off its own pose is under 1 in 1000 (a statistical level, not tuned;
+                        # DOE: no). Never fewer than ESCAPE_MIN_N sightings
+ESCAPE_MIN_N = 3        # (e21, 4) the tracking layer's own steadiness count (STEADY: 3 fixes). Reused; DOE: no
+FW_HIST_MS = 3840          # (e21, 6) the new firmware's pose history: 96 x 40 ms (pose.h NH)
+FW_E21 = "2026-11-12e21"   # (e21, 6) firmware with the derived filter (variance growth, age, history, refusal reasons,
+                           # the escape on the robot)
 ROOM_CLEAR_CM = 2.0     # (4) CHOSEN: a robot making room for a lost one clears its corridor by this much more. DOE: no
 EXC_MIN_CM = 3.0        # (5) CHOSEN: an excursion shortened below this is refused (the camera's noise is ~1 cm). DOE: no
 RATIO_MIN_CM = 10.0     # (6) CHOSEN: a straight drive this long or longer, the camera fresh at both ends, measures the
@@ -479,6 +495,20 @@ class Traj:
     def __init__(self, rows):
         a = np.array(rows, dtype=float).reshape(-1, 6)
         self.lo, self.hi, self.x, self.y, self.m, self.sl = a.T
+        self.ea = None          # (e21, 3) the error shape's ellipse per sample (along, across semi-axes and their axis'
+        self.eb = None          # cos / sin); None: the margins are discs only, as before
+        self.ec = self.es = None
+
+    def set_shape(self, rows):
+        """(e21, 3) rows [(iso_extra, along, across, angle deg)] per sample: the disc part is added to the margin, the
+        ellipse kept for the reach along any direction (clearance)."""
+        if not rows or len(rows) != len(self.x):
+            return self
+        a = np.array(rows, dtype=float)
+        self.m = self.m + a[:, 0]
+        self.ea, self.eb = a[:, 1], a[:, 2]
+        self.ec, self.es = np.cos(np.radians(a[:, 3])), np.sin(np.radians(a[:, 3]))
+        return self
 
     @staticmethod
     def stand(t, x, y, m=PLAN_M0, slack=SLACK0_S):
@@ -546,10 +576,43 @@ def curve_traj(t0, segs, side, m0=PLAN_M0, bubble_grow=0.0, slack0=SLACK0_S, tai
     return tr
 
 
+def json_s(d):
+    import json as _j
+    return _j.dumps(d, separators=(",", ":"))
+
+
+def shape_words(sh):
+    f, bk, c = sh.axes()
+    return "disc %.1f cm, %.1f cm ahead, %.1f back along its track, %.1f across" % (sh.iso(), f, bk, c)
+
+
 def concat(*ts):
     rows = np.vstack([np.stack([t.lo, t.hi, t.x, t.y, t.m, t.sl], 1) for t in ts])
     out = Traj(rows)
     out.end = getattr(ts[-1], "end", (rows[-1, 2], rows[-1, 3]))
+    if any(t.ea is not None for t in ts):          # (e21, 3) the shapes carried on (zeros where a part had none)
+        z = [np.zeros(len(t.x)) for t in ts]
+        out.ea = np.concatenate([t.ea if t.ea is not None else z[k] for k, t in enumerate(ts)])
+        out.eb = np.concatenate([t.eb if t.eb is not None else z[k] for k, t in enumerate(ts)])
+        out.ec = np.concatenate([t.ec if t.ec is not None else z[k] + 1.0 for k, t in enumerate(ts)])
+        out.es = np.concatenate([t.es if t.es is not None else z[k] for k, t in enumerate(ts)])
+    return out
+
+
+def _shape_reach(A, B, dx, dy, dd):
+    """(e21, 3) Each reservation's ellipse reach along the line between the samples (dx, dy from A's to B's; dd its
+    length): the separating-axis test on that line (a gap left there is a real gap). 0 where neither has a shape."""
+    out = 0.0
+    if A.ea is None and B.ea is None:
+        return out
+    inv = 1.0 / np.maximum(dd, 1e-9)
+    ux, uy = dx * inv, dy * inv
+    if A.ea is not None:
+        c, s = A.ec[:, None], A.es[:, None]
+        out = out + np.sqrt((A.ea[:, None] * (ux * c + uy * s)) ** 2 + (A.eb[:, None] * (uy * c - ux * s)) ** 2)
+    if B.ea is not None:
+        c, s = B.ec[None, :], B.es[None, :]
+        out = out + np.sqrt((B.ea[None, :] * (ux * c + uy * s)) ** 2 + (B.eb[None, :] * (uy * c - ux * s)) ** 2)
     return out
 
 
@@ -559,7 +622,9 @@ def clearance_profile(A, B, now=None):
     over = (lo_a <= B.hi[None, :]) & (B.lo[None, :] - A.sl[:, None] - B.sl[None, :] <= hi_a)
     if now is not None:
         over &= (A.hi[:, None] >= now) & (B.hi[None, :] >= now)
-    d = np.hypot(A.x[:, None] - B.x[None, :], A.y[:, None] - B.y[None, :]) - A.m[:, None] - B.m[None, :]
+    dx, dy = B.x[None, :] - A.x[:, None], B.y[None, :] - A.y[:, None]
+    dd = np.hypot(dx, dy)
+    d = dd - A.m[:, None] - B.m[None, :] - _shape_reach(A, B, dx, dy, dd)
     d = np.where(over, d, np.inf)
     return d.min(axis=1)
 
@@ -573,7 +638,9 @@ def clearance(A, B, now=None):
         over &= (A.hi[:, None] >= now) & (B.hi[None, :] >= now)
     if not over.any():
         return float("inf")
-    d = np.hypot(A.x[:, None] - B.x[None, :], A.y[:, None] - B.y[None, :]) - A.m[:, None] - B.m[None, :]
+    dx, dy = B.x[None, :] - A.x[:, None], B.y[None, :] - A.y[:, None]
+    dd = np.hypot(dx, dy)
+    d = dd - A.m[:, None] - B.m[None, :] - _shape_reach(A, B, dx, dy, dd)
     return float(d[over].min())
 
 
@@ -786,6 +853,11 @@ class Controller:
         self.excursions = []             # (e18, 5) every blind leg asked: allowed / shortened / refused, and its check
         self.camtrust = None             # (e20) the site's camera_trust.TrustBook (the runner / simulator sets it)
         self.mheading = CT.MotionHeading()   # (e20, 2) heading from motion, per robot and camera
+        for n_, r_ in self.R.items():        # (e21, 1) ONE error shape per robot (error_shape), fed here, read by all
+            r_.shape = ES.Shape(n_, self.trust[n_])
+            r_.stage, r_.stage_t = "run", None
+        self.stage_s = {}                    # (e21, 2) {stage: seconds}, all robots
+        self.search_focus = {}               # (e21, 2) {robot: (x, y, reach cm)}: where the cameras and detector look
 
     # -- I/O ---------------------------------------------------------------------------------------------------
     def out(self, r, text):
@@ -794,6 +866,13 @@ class Controller:
 
     def event(self, r, kind, text):
         self.log("events", dict(t=round(self.t, 2), robot=r.name if r else "-", kind=kind, text=text))
+        if SHAPE and r is not None and kind in ES.EVENT_ALIASES and kind != "pose re-seeded":
+            # (e21, 1) what it reports widens its shape at once, by the measured jump (a re-seed: after its fpose)
+            cm = r.shape.event(self.t, kind)
+            if cm:
+                self.counts["shape_events"] = self.counts.get("shape_events", 0) + 1
+                if r.lost is not None:
+                    self.grow_bubble(r)
 
     def send_step(self, r, fmt):
         sid = r.next_id
@@ -842,6 +921,28 @@ class Controller:
         r = self.R.get(name)
         if r is not None:
             r.fw = self.fw_override or fw
+            if FW_FILTER and str(r.fw or "") >= FW_E21 and not r.__dict__.get("fw_filter_sent"):
+                self.fw_filter_params(r)
+
+    def fw_filter_params(self, r):
+        """(e21, 6) A robot on firmware 2026-11-12e21 or newer: its filter's settings from the measured record, sent once
+        (old firmware keeps its own defaults; the Pi's consistency escape works for both). pose_sd_per_cm: the shape's
+        across growth per cm at 95 % / 2.45 (an sd); fix_max_age_ms: this run's measured fix delay at its 99th percentile
+        (camera_timing) plus the robot's own lag, within the firmware's history; fix_escape_n: the escape's count for the
+        camera's noise and the firmware's gate (consistent_escape's rule)."""
+        r.fw_filter_sent = self.t
+        _f, _b, b = r.shape.axes_at(40.0, 0.0)
+        per = max(0.001, b / 40.0 / 2.45)
+        hi = float(np.percentile(self.delays, 99)) if len(self.delays) >= 20 else None
+        age = int(min(FW_HIST_MS - 100, max(1000, 1000.0 * ((hi if hi is not None else 1.39) + 0.2))))
+        sg = self.trust[r.name].cam_sd or 1.0
+        p1 = math.exp(-1.0 / (2.0 * sg * sg))           # one sigma past the gate (the first sighting that counts)
+        n = max(ESCAPE_MIN_N, int(math.ceil(math.log(ESCAPE_ALPHA) / math.log(p1))))
+        for k, v in (("pose_sd_per_cm", "%.4f" % per), ("fix_max_age_ms", "%d" % age), ("fix_escape_n", "%d" % n)):
+            self.out(r, "set %s %s" % (k, v))
+        self.event(r, "filter settings", "firmware %s: variance growth %.3f cm sd per cm (its shape's record), fix age "
+                   "limit %d ms (measured delay%s), escape after %d agreeing far fixes" % (
+                       r.fw, per, age, "" if hi is not None else ": the 11 Nov p95 1.39 s until measured here", n))
 
     def on_battery(self, name, pct, t):
         r = self.R.get(name)
@@ -894,6 +995,9 @@ class Controller:
                 return None
             return self.correct_from_camera(r, t, x, y, th, arr, how, src)
         oa = self.own_at(r, t)
+        if CONSISTENT_ESCAPE and CAMERA_CORRECT and oa is not None and self.consistent_escape(r, t, x, y, oa, sigma,
+                                                                                             src, how):
+            return self.correct_from_camera(r, t, x, y, th, arr, "consistent", src)
         if FAR_NAMED_CORRECT and CAMERA_CORRECT and oa is not None and self.far_named(r, t, x, y, oa, src):
             if MOTION_PROOF and not self.within_doubt(r, t, x, y, sigma):
                 # (e19, audit H4: "named far" made 3 of the 7 falls' wrong corrections, 24-91 cm) beyond its doubt: it
@@ -971,6 +1075,24 @@ class Controller:
         if MOTION_HEADING and not self.__dict__.get("mh_by_layer"):
             self.motion_heading(r, t, x, y)        # (e20, 2) heading from this camera's motion (the layer feeds every
                                                    # camera's sighting instead when it can: mh_by_layer)
+        if SHAPE:
+            self.shape_found(r, sigma)             # (e21, 1) an accepted fix: the shape starts again from what is seen
+
+    def shape_found(self, r, sigma=None, why="fix"):
+        """(e21, 1) An accepted fix: the shape is anchored at its own pose with the error seen now: the camera's 95 %
+        noise and its own pose's disagreement with the camera (a firmware that refused the fix keeps it wide)."""
+        sg = float(sigma) if sigma else (self.trust[r.name].cam_sd or 1.0)
+        pf = r.__dict__.get("pfuse")
+        gap = pf.disagree_cm if pf is not None else 0.0
+        o = r.own
+        if o is None:
+            return
+        was = r.stage if STAGES else None
+        r.shape.anchor(self.t, o[1], o[2], o[3], 2.45 * sg + gap, why)
+        if was in ("veer", "pause"):
+            r.found_t = self.t
+        if r.__dict__.get("search") is not None:
+            self.search_end(r, "found: the camera has it again")
 
     def on_follow(self, name, t, state, x, y, th, cur=0, last_done=None, last_failed=None):
         r = self.R.get(name)
@@ -1004,6 +1126,14 @@ class Controller:
         if prev is not None:
             r.turn_since_head = r.__dict__.get("turn_since_head", 0.0) + abs(wrap180(th - prev[3]))
         r.own = (t, x, y, th, state, cur)
+        if prev is not None:                   # (e21, 1) its own motion carries its shape along its track
+            d_ = math.hypot(x - prev[1], y - prev[2])
+            if d_ > 15.0 and t - prev[0] < 0.5:
+                r.shape.anchor(t, x, y, th, r.shape.iso(), "its pose was set")    # an fpose, not motion
+            else:
+                r.shape.drive(x, y, th, d_, abs(wrap180(th - prev[3])), d_ / max(1e-3, t - prev[0]) < OT.SPOT_V)
+        else:
+            r.shape.anchor(t, x, y, th, r.shape.base, "first pose")
         if self.blind_allow:
             tru = self.trust.get(name)
             if r.__dict__.get("fpose_t") != r.__dict__.get("trust_fpose"):
@@ -1256,11 +1386,37 @@ class Controller:
             return r.own[3]
         return r.cam[3] if r.cam and r.cam[3] is not None else 0.0
 
-    def margin0(self, r):
+    def margin0(self, r, iso_only=False):
+        """Its reservation's margin at the start of a move. (e21, 1/3) with the error shape: lost, its whole shape's reach
+        (iso_only: the disc alone, the planner adding the ellipse along the path: shape_on); not lost, its own pose's
+        disagreement with the camera (its moves are driven on its own pose, so they land that far off)."""
+        if SHAPE:
+            if r.lost is not None:
+                ext = r.shape.iso() if (iso_only and SHAPE_PLAN) else r.bubble
+            else:
+                pf = r.__dict__.get("pfuse")
+                ext = pf.disagree_cm if pf is not None else 0.0
+            return PLAN_M0 + ext + (3.0 if r.silent else 0.0)
         return PLAN_M0 + (r.bubble if r.lost is not None else 0.0) + (3.0 if r.silent else 0.0)
+
+    def shape_on(self, r, tr, h0=None):
+        """(e21, 3) A lost robot's planned reservation carries its error shape along the path: the ellipse grown with
+        every cm and degree it plans (error_shape.along_path). The traj was made with margin0(r, iso_only=True)."""
+        if not (SHAPE and SHAPE_PLAN and r.lost is not None) or tr is None:
+            return tr
+        pts = list(zip(tr.x.tolist(), tr.y.tolist()))
+        rows = r.shape.along_path(pts, h0)
+        # the ellipse's centre sits back along its track: the reservation keeps the ellipse at the sample and widens its
+        # disc by that offset (never less safe)
+        tr.set_shape([(abs(q[4]), q[1], q[2], q[3]) for q in rows])
+        self.counts["shape_trajs"] = self.counts.get("shape_trajs", 0) + 1
+        return tr
 
     # -- dead reckoning --------------------------------------------------------------------------------------------
     def grow_bubble(self, r):
+        if SHAPE and not self.ekf_live(r) and r.lost is not None:
+            r.bubble = r.shape.extent()           # (e21, 1) the one shape's largest reach (circle users read this)
+            return
         if self.ekf_live(r):
             # (e09, B2) the filter's own uncertainty, grown by its wheels and gyro since the camera last saw it
             r.bubble = max(BLIND_BASE, r.fp.unc_cm(self.t))
@@ -1295,6 +1451,11 @@ class Controller:
                 prev = q
         r.pc = None
         r.bubble = BLIND_BASE
+        if SHAPE:
+            pf = r.__dict__.get("pfuse")
+            if pf is not None:
+                r.shape.widen_base(r.shape.base + max(0.0, pf.disagree_cm - r.shape.base))   # (e21) the error seen
+            r.shape.why = why
         if not self.ekf_live(r):
             self.grow_bubble(r)                 # (e18) the stretch since its last fix counts (fixed or record)
         self.event(r, "lost", "%s at %.1f, %.1f: dead reckoning, bubble %.1f cm" % (why, p[0], p[1], r.bubble)
@@ -1315,7 +1476,12 @@ class Controller:
         if oa is None and r.own is not None:
             oa = r.own[1:4]
         jump = math.hypot(x - oa[0], y - oa[1]) if oa else 0.0
-        if jump > REACQUIRE_MAX_CM and oa is not None:
+        lim = REACQUIRE_MAX_CM
+        if SHAPE and oa is not None and jump > 1e-6:
+            # (e21, 1) a spot inside its own error shape (its reach toward the spot) is where it may well be: believed
+            # without the chain (the 12 cm limit stays the least)
+            lim = max(REACQUIRE_MAX_CM, r.shape.support((x - oa[0]) / jump, (y - oa[1]) / jump))
+        if jump > lim and oa is not None:
             off = (x - oa[0], y - oa[1])
             ch = L.setdefault("chain", [])
             if ch and math.dist(off, ch[0][1]) > 3.0:
@@ -1447,6 +1613,10 @@ class Controller:
         h = q[2] if q[2] is not None else self.heading(r)
         self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (q[0], q[1], h, sig, sig_th))
         r.fpose_t = self.t
+        if SHAPE:                                   # (e21, 1) its pose set from the camera: the shape starts there
+            r.shape.anchor(self.t, q[0], q[1], h, 2.45 * sig, why)
+            if why == "re-seed":
+                r.shape.event(self.t, "pose re-seeded")     # a re-seed can land wrong too: its measured jump
         return True
 
     def fpose_pending_watch(self, r):
@@ -1454,6 +1624,337 @@ class Controller:
         if pend is not None:
             self.send_fpose(r, pend["t_pic"], pend["x"], pend["y"], pend["th"], pend["sig"], pend["sig_th"],
                             pend["why"])
+
+
+    # -- (e21, Nick 12 Nov decision 2) the four stages: run, veer, found, pause and search -------------------------------
+    VEER_AHEAD_CM = 0.5 * (ARC_LEN_BINS[1][0] + ARC_LEN_BINS[1][1])    # "within the next moves": the menu's middle
+                                                                       # piece length (27.5 cm). Derived from the menu
+    GAIN_L_CM = (2.0, 4.0, 8.0, 16.0)    # CHOSEN: the straight moves tried for room (doubling from the firmware's 2 cm
+                                         # floor to two body lengths). DOE: no (any move that gains room is found)
+    GAIN_EPS_CM = 0.5                    # a move "gains room" by at least this (INWARD_GAIN_CM's role, e10). Reused
+
+    def shape_head(self, r):
+        """(e21) Its heading doubt for the shape (95 %, deg): unknown (180) after a correction or a restart until the camera
+        confirms it; else twice its own heading's measured sd."""
+        if r.__dict__.get("head_unknown"):
+            return 180.0
+        return min(180.0, 2.0 * self.head_sd(r))
+
+    def stage_of(self, r):
+        """(e21, 2) Which of Nick's stages r is in now (also counted: stage_watch)."""
+        if not STAGES:
+            return "run"
+        if r.__dict__.get("search") is not None:
+            return "pause"
+        if r.lost is not None:
+            p = self.pos(r)
+            if p is None:
+                return "run"
+            r.shape.hd_deg = self.shape_head(r)
+            room = self.shape_room(r, p, 5.0)
+            ext0 = r.shape.extent()
+            f2, k2, c2 = r.shape.axes_at(r.shape.s + self.VEER_AHEAD_CM, r.shape.head_doubt_rad())
+            grow = max(0.0, r.shape.iso() + max(f2, k2, c2) - ext0)
+            return "veer" if room - grow < 0.0 else "run"
+        ft = r.__dict__.get("found_t")
+        if ft is not None:
+            pf = r.__dict__.get("pfuse")
+            gap = pf.disagree_cm if pf is not None else 0.0
+            if gap > SR.SURE_TOL_CM or r.__dict__.get("head_unknown") or r.__dict__.get("corr_unconf") is not None:
+                return "found"
+            r.found_t = None
+        return "run"
+
+    def stage_watch(self, r, dt):
+        st = self.stage_of(r)
+        if st != r.stage:
+            if r.stage in ("veer", "pause", "found") or st in ("veer", "pause", "found"):
+                self.log("stages", dict(t=round(self.t, 2), robot=r.name, stage=st, was=r.stage,
+                                        shape=json_s(r.shape.summary())))
+            r.stage = st
+        if dt > 0 and r.mode not in ("out", "gone", "start"):
+            self.stage_s[st] = self.stage_s.get(st, 0.0) + dt
+            ps = r.__dict__.setdefault("stage_s", {})
+            ps[st] = ps.get(st, 0.0) + dt
+
+    def found_chance(self, x, y):
+        """(e21, 2) How likely the cameras read ground at (x, y) well enough to find a robot there: the best lower bound
+        of any camera's position trust at that square (e20's trust map), 0 outside the readable area; 1 where no camera
+        book is kept (before e20)."""
+        if not self.seen_at(x, y):
+            return 0.0
+        b = self.camtrust
+        if b is None or not CAMERA_TRUST_BOOK:
+            return 1.0
+        best = 0.0
+        try:
+            for cam in b.cameras():
+                for meth in ("lights", "tags", "ml", "motion"):
+                    sc = b.score(cam, meth, "position", x, y)
+                    if sc["evidence"]:
+                        best = max(best, sc["lower"])
+        except Exception:  # noqa: BLE001
+            return 1.0
+        return best if best > 0 else 0.5            # a square with no checks yet: an even chance
+
+    def veer_pick(self, r, x, y, h, tr_for):
+        """(e21, 2) Veer: every menu piece scored by the room it leaves at its end, as expected: the chance the cameras
+        find it there (found_chance) x the room with a fresh fix + the rest x the room with its shape grown along the
+        piece; the best feasible piece is taken. Turning away from the edge also swings the cone's long axis away."""
+        sg = self.trust[r.name].cam_sd or 1.0
+        cands = []
+        for cell in self.cmenu.cells:
+            k, L, v = self.cmenu.draw(cell)
+            mx, my, _ = arc_at(x, y, h, k, 0.5 * L)
+            ex, ey, eh = arc_at(x, y, h, k, L)
+            ell = r.shape.along_path([(float(mx), float(my)), (float(ex), float(ey))], h)[-1]
+            stop = SR.stop_cm(v)
+            room_b = ES.rect_margin(self.rect, float(ex), float(ey), *ell) - HALF - stop
+            room_f = ES.rect_margin(self.rect, float(ex), float(ey), 2.45 * sg, 0.0, 0.0, 0.0) - HALF - stop
+            P = self.found_chance(float(ex), float(ey))
+            cands.append((P * room_f + (1.0 - P) * room_b, cell, k, L, v, float(ex), float(ey), float(eh)))
+        cands.sort(key=lambda c: -c[0])
+        for sc, cell, k, L, v, ex, ey, eh in cands[:24]:
+            for side in self.sides(ex, ey, eh):
+                tr = tr_for(k, L, v, side)
+                if self.curve_ok(r, tr):
+                    self.counts["veers"] = self.counts.get("veers", 0) + 1
+                    return "veer", cell, k, L, v, side, tr
+        return None
+
+    def gain_move(self, r, p, h):
+        """(e21, 2) The straight move (after a turn on the spot where it may turn) that gains the most room for its
+        shape, or None when NO move gains room (Nick's test for the pause). Turning on the spot never moves the shape;
+        a heading in doubt (shape_head) widens it along and across the move, so with its heading unknown nothing gains."""
+        r.shape.hd_deg = self.shape_head(r)
+        room0 = self.shape_room(r, p, 5.0)
+        turn_ok = self.can_turn_here(r)
+        heads = [wrap180(h + d) for d in range(0, 360, 30)] if turn_ok else [h, wrap180(h + 180.0)]
+        unconf = self.pose_unconfirmed(r)
+        best = []
+        for hh in heads:
+            back = abs(wrap180(hh - (h + 180.0))) <= 1.0 and not turn_ok
+            for L in self.GAIN_L_CM:
+                ex, ey = p[0] + L * math.cos(math.radians(hh)), p[1] + L * math.sin(math.radians(hh))
+                ell = r.shape.along_path([(ex, ey)], hh if not back else h)[-1]
+                if not back and abs(wrap180(hh - h)) > 30.0:          # the turn on the spot first: its doubt
+                    pass
+                gain = ES.rect_margin(self.rect, ex, ey, *ell) - HALF - SR.stop_cm(BACK_V) - room0
+                if gain > self.GAIN_EPS_CM:
+                    best.append((gain, hh, L, back))
+        best.sort(key=lambda b: -b[0])
+        for gain, hh, L, back in best[:12]:
+            turn = 0.0 if back else wrap180(hh - h)
+            hd = h if back else hh
+            if back and unconf:
+                continue                                 # (e19, H4) no reverse on an unconfirmed pose
+            tr = Traj.move(self.t + 0.2, p, hd if not back else wrap180(h + 180.0), turn if not back else 0.0, L,
+                           BACK_V, m0=self.margin0(r, iso_only=True))
+            tr = self.shape_on(r, tr, h)
+            if not self.keepout_ok(r, tr):
+                continue
+            if any(clearance(tr, o.traj, now=self.t) < REFLEX_CC for o in self.others(r)):
+                continue
+            return dict(gain=gain, turn=turn, L=L, back=back, tr=tr, h1=hd)
+        return None
+
+    def lost_limit_step(self, r):
+        """(e21, 2) Its shape (with body and stop) could reach an edge where it stands. Veer: a move that gains room, if
+        there is one; else pause and search."""
+        p, h = self.pos(r), self.heading(r)
+        g = self.gain_move(r, p, h)
+        if g is not None:
+            if r.__dict__.get("search") is not None:
+                self.search_end(r, "a move gains room again")
+            mv = dict(kind="veer step", cell=None, turn=g["turn"], L=g["L"], v=BACK_V, t0=self.t, p0=p, h0=h,
+                      h1=wrap180(h + g["turn"]), end=g["tr"].end, phase="turn", n=r.n_moves + 1, drive_id=None,
+                      turn_id=None, t_drive=None, adj_scale=1.0, rev=g["back"])
+            if abs(g["turn"]) >= 3.0:
+                mv["turn_id"] = self.send_step(r, "fs %%d T %.2f -" % wrap180(h + g["turn"]))
+            mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f %d -" % (
+                p[0], p[1], g["tr"].end[0], g["tr"].end[1], wrap180(h + g["turn"]), BACK_V, 1 if g["back"] else 0))
+            r.move, r.traj, r.mode, r.queue = mv, g["tr"], "move", []
+            r.n_moves += 1
+            self.counts["veer_steps"] = self.counts.get("veer_steps", 0) + 1
+            if self.t - r.__dict__.get("veer_said", -1e9) >= 30.0:
+                r.veer_said = self.t
+                self.event(r, "veers", "its error shape (%s) could reach an edge here: %.0f cm %s gains %.1f cm of "
+                           "room" % (shape_words(r.shape), g["L"], "back" if g["back"] else
+                                     "after a %.0f deg turn" % g["turn"], g["gain"]))
+            self.why_zero(r, "veer step (its shape near an edge)")
+            self.pump(r)
+            return True
+        self.search_step(r)
+        return False
+
+    def search_window(self, r):
+        """(e21, 2) How long a search runs before a person is asked: one full turn on the spot (the camera sees every side
+        of it) and two fix delays (a picture taken after the turn, and the detector's answer). Derived; DOE: no."""
+        return turn_s(360.0) + 2.0 * self.fix_delay(r)
+
+    def search_step(self, r):
+        """(e21, 2) Pause and search (only when NO move gains room): it turns on the spot (its shape does not move), the
+        cameras and the detector look at its shape's region (search_focus, read by the tracking layer), robots near it
+        hold still ONLY if they must (they are close enough for the camera to take one for the other), then a person is
+        asked. It keeps turning slowly while it waits: never still."""
+        p, h = self.pos(r), self.heading(r)
+        se = r.__dict__.get("search")
+        if se is None:
+            se = r.search = dict(t0=self.t, turns=0, asked=False, held=[])
+            self.counts["searches"] = self.counts.get("searches", 0) + 1
+            self.event(r, "search", "no move gains room for its error shape (%s): it pauses and is searched for: it turns "
+                       "on the spot, the cameras and detector look within %.0f cm of %.0f, %.0f" % (
+                           shape_words(r.shape), r.shape.extent(), p[0], p[1]))
+        self.search_focus[r.name] = (p[0], p[1], r.shape.extent() + HALF)
+        # robots that MUST hold: their middle within the camera's close-pass reach of its shape (the camera could take one
+        # for the other while it is found), and not themselves lost
+        import tracking_layer as TL_
+        must = r.shape.extent() + TL_.CLOSE_CM
+        for o in self.R.values():
+            if o is r or o.mode in ("out", "gone", "start") or o.lost is not None or self.pos(o) is None:
+                continue
+            if math.dist(self.pos(o), p) < must:
+                if o.name not in se["held"]:
+                    se["held"].append(o.name)
+                    self.counts["search_holds"] = self.counts.get("search_holds", 0) + 1
+                    self.event(o, "holds for a search", "%s is being searched for %.0f cm away: it holds still while the "
+                               "camera looks (it is close enough to be taken for it)" % (r.name, math.dist(self.pos(o),
+                                                                                                        p)))
+                o.search_hold_until = self.t + 1.0
+                if o.move is not None and o.mode == "move":
+                    self.halt(o, "holds still while %s is searched for" % r.name)
+                    self.end_move(o)
+        if not se["asked"] and self.t - se["t0"] >= self.search_window(r):
+            se["asked"] = True
+            if BLIND_RULE != "cap":
+                self.ask_place(r)
+        if self.t < r.__dict__.get("wiggle_due", 0.0):
+            return
+        if self.can_turn_here(r):
+            mv = dict(kind="search turn", cell=None, turn=90.0, L=0.0, v=5.0, t0=self.t, p0=p, h0=h,
+                      h1=wrap180(h + 90.0), end=p, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None,
+                      t_drive=None)
+            mv["turn_id"] = self.send_step(r, "fs %%d T %.2f -" % wrap180(h + 90.0))
+            r.move, r.mode = mv, "move"
+            r.traj = Traj.stand(self.t, *p, m=self.margin0(r))
+            r.n_moves += 1
+            se["turns"] += 1
+            r.wiggle_due = self.t + turn_s(90.0) + 0.5
+            self.why_zero(r, "search: turns on the spot")
+            self.pump(r)
+        else:
+            r.wiggle_due = self.t + 1.0
+            if not r.stopped_hard:
+                self.trophy_break(r, "searched for, no room to turn on the spot: stands until seen")
+
+    def search_end(self, r, why):
+        se = r.__dict__.get("search")
+        if se is None:
+            return
+        r.search = None
+        self.search_focus.pop(r.name, None)
+        for n in se.get("held", []):
+            o = self.R.get(n)
+            if o is not None:
+                o.search_hold_until = None
+        self.log("searches", dict(t=round(self.t, 2), robot=r.name, dur_s=round(self.t - se["t0"], 1),
+                                  turns=se["turns"], asked=int(se["asked"]), held=";".join(se["held"]), why=why))
+        self.event(r, "search over", "%s after %.1f s (%d turns%s)" % (why, self.t - se["t0"], se["turns"],
+                                                                      ", a person asked" if se["asked"] else ""))
+
+    def creep_edge_ok(self, r, p, end):
+        """(e21, 2: "no creep without the edge rule") a creep may not leave its shape's room to an edge worse than now."""
+        if LOST_CREEP or not STAGES:
+            return True
+        ell = r.shape.ellipse() if r.lost is not None else (self.unc(r), 0.0, 0.0, 0.0)
+        r0 = ES.rect_margin(self.rect, p[0], p[1], *ell)
+        if r.lost is not None:
+            ell = r.shape.along_path([tuple(end)])[-1]
+        r1 = ES.rect_margin(self.rect, end[0], end[1], *ell)
+        return r1 >= min(r0, HALF + SR.stop_cm(BACK_V)) - self.GAIN_EPS_CM
+
+    # -- (e21, decision 4) the ratchet broken on the Pi: the consistency escape -----------------------------------------
+    def consistent_escape(self, r, t, x, y, oa, sigma, src, how):
+        """(e21, 4; the audit's C3: once its own pose is more than its filter's gate off, the robot refuses every honest
+        fix for good) The camera's sightings of r agree with each other (each within the camera's noise of their mean,
+        the offset from its own pose steady, standing or driving) but not with its own pose (beyond its filter's gate),
+        for more sightings than the camera's measured noise can explain (the chance of each landing that far off by noise
+        alone, under ESCAPE_ALPHA together), nobody else near that spot, the camera not distrusted there: its own pose is
+        wrong. True: correct it from the camera (its heading then from its next short move as the camera sees it)."""
+        if how and str(how).startswith(("elimination", "wiggle")):
+            return False
+        sg = max(0.3, float(sigma) if sigma else (self.trust[r.name].cam_sd or 1.0))
+        off = (x - oa[0], y - oa[1])
+        d = math.hypot(*off)
+        gate = max(3.0, self.fw_gate_cm(r))
+        w = r.__dict__.setdefault("esc", [])
+        if d <= gate or self.t - (r.__dict__.get("fpose_t") or -1e9) < FAR_AFTER_FPOSE_S:
+            w.clear()
+            return False
+        w.append((t, off))
+        del w[:-24]
+        w[:] = [q for q in w if t - q[0] <= 4.0]
+        mx = sum(q[1][0] for q in w) / len(w)
+        my = sum(q[1][1] for q in w) / len(w)
+        tol = CT.AGREE_K * sg * math.sqrt(2.0)            # two sightings of one spot differ by sqrt 2 sigma
+        if any(math.hypot(q[1][0] - mx, q[1][1] - my) > tol for q in w):
+            w[:] = [q for q in w if math.hypot(q[1][0] - off[0], q[1][1] - off[1]) <= tol]    # a new steady offset
+            return False
+        dm = math.hypot(mx, my)
+        p1 = math.exp(-max(0.0, dm - gate) ** 2 / (2.0 * sg * sg)) if dm > gate else 1.0
+        need = max(ESCAPE_MIN_N, int(math.ceil(math.log(ESCAPE_ALPHA) / math.log(p1))) if 0.0 < p1 < 1.0 else 10 ** 6)
+        if len(w) < need:
+            return False
+        for o in self.R.values():
+            if o is r or o.mode == "gone":
+                continue
+            for q in ((o.own[1], o.own[2]) if o.own else None, self.pos(o)):
+                if q is not None and math.hypot(q[0] - x, q[1] - y) <= 2 * HALF + gate:
+                    return False                   # another robot may be that spot: the identity rules decide
+        fc = r.__dict__.get("fix_cam")
+        if self.camtrust is not None and fc and fc[0] and CAMERA_TRUST_BOOK:
+            try:
+                if self.camtrust.state(fc[0], fc[1], "position", x, y) == "distrusted":
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+        w.clear()
+        self.counts["consistent_escapes"] = self.counts.get("consistent_escapes", 0) + 1
+        self.log("escapes", dict(t=round(self.t, 2), robot=r.name, d_cm=round(dm, 1), n=need, gate_cm=round(gate, 1),
+                                 sigma_cm=round(sg, 2), standing=int(self.standing_own(r))))
+        self.event(r, "consistent sightings", "the camera's last %d sightings agree with each other (within %.1f cm) and "
+                   "put it %.0f cm from its own pose, beyond its filter's %.0f cm gate: its own pose is wrong (the "
+                   "ratchet): set from the camera, its heading checked by its next short move" % (len(w) or need, tol,
+                                                                                                    dm, gate))
+        return True
+
+    def fw_gate_cm(self, r):
+        """Its filter's gate now (cm): 4 of its own stated sds (FOLLOW pos_sd_cm), at least 3 cm; FIX_GATE_CM when its
+        sd is not known."""
+        sd = r.__dict__.get("fw_sd")
+        return max(3.0, 4.0 * sd) if sd is not None else FIX_GATE_CM
+
+    def cam_heading_for(self, r):
+        """(e21, 4) The heading of the camera's spot for 'inward by both': the camera's own heading where its source has a
+        good one, else a fresh motion heading, else its own heading only while that is not in doubt (no correction,
+        restart or escape since, the camera having confirmed it); None: not known."""
+        if r.cam is not None and r.cam[3] is not None and \
+                CAM_HEAD_SD.get(str((r.__dict__.get("fix_cam") or ("", "", ""))[1] or ""), 90.0) <= HD_CONFIRM_DEG:
+            return r.cam[3]
+        mh = r.__dict__.get("mh")
+        if mh is not None and self.t - mh.get("t_ctrl", -1e9) <= 2.0:
+            o_then = self.own_at(r, mh["t"])
+            if r.own is not None and o_then is not None and o_then[2] is not None:
+                return wrap180(mh["th"] + wrap180(r.own[3] - o_then[2]))
+        if r.__dict__.get("head_unknown") or r.__dict__.get("hd_confirm") is not None:
+            return None
+        return self.heading(r)
+
+    def inward_ok(self, own, cam, h, rev, r):
+        """'Inward by both' (safety_rules.inward_agreed); (e21, 4) each position with its own heading."""
+        if INWARD_TWO:
+            return SR.inward_agreed(self.rect, own, cam, h, reverse=rev, heading_cam=self.cam_heading_for(r))
+        return SR.inward_agreed(self.rect, own, cam, h, reverse=rev)
 
     # -- (e19, audit H4) no far jump without motion proof ------------------------------------------------------------
     def stated_doubt(self, r):
@@ -1553,6 +2054,8 @@ class Controller:
         rule no longer rates it as good evidence)."""
         p = (r.cam[1], r.cam[2]) if (r.cam is not None and self.fresh(r) and r.lost is None) else self.pos(r)
         r.boot_pose = dict(t=self.t, p=p, h=self.heading(r), due=None)
+        if SHAPE:
+            r.shape.event(self.t, "restart")       # (e21, 1) a restart widens its shape by the largest measured jump
         r.turn_since_head = 1e3
         r.hd_confirm = dict(t=self.t, why="it restarted: its heading after the boot is not known", tries=0, stage=None)
         self.counts["restarts_seen"] = self.counts.get("restarts_seen", 0) + 1
@@ -1695,8 +2198,15 @@ class Controller:
                     fn(r.name)
                 except Exception:  # noqa: BLE001
                     pass
-        if HEADING_CONFIRM and d > REACQUIRE_MAX_CM:
+        if HEADING_CONFIRM and (d > REACQUIRE_MAX_CM or (CONSISTENT_ESCAPE and how == "consistent")) and \
+                r.__dict__.get("hd_confirm") is None:
             r.hd_confirm = dict(t=self.t, why="its own pose was %.0f cm off" % d, tries=0, stage=None)
+        if CONSISTENT_ESCAPE and d > FIX_GATE_CM:
+            # (e21, 4; 11 Nov 08:58: Right corrected, kept heading 14 deg, drove the wrong way) a pose this far off may
+            # have a heading 180 deg off too: unknown until the camera sees its next short move
+            r.head_unknown = self.t
+        if SHAPE:
+            r.shape.anchor(self.t, r.own[1] if r.own else x, r.own[2] if r.own else y, None, 2.45, "corrected")
         if r.stopped_hard and (r.adj is None or r.adj["kind"] != "stop"):
             self.close_break(r)
         self.counts["camera_corrections"] = self.counts.get("camera_corrections", 0) + 1
@@ -1987,6 +2497,9 @@ class Controller:
             turn = 0.0 if back else wrap180(b_ - h)
             hd = wrap180(h + 180.0) if back else wrap180(h + turn)
             tr = Traj.move(self.t + 0.2 + (turn_s(turn) if turn else 0.0), p, hd, 0.0, L, v, m0=self.margin0(r))
+            if not self.creep_edge_ok(r, p, tr.end):
+                self.counts["creep_edge_refused"] = self.counts.get("creep_edge_refused", 0) + 1
+                continue                       # (e21, 2) no creep without the edge rule
             if back and unconf and edge_dist(self.rect, *tr.end) < edge_dist(self.rect, *p):
                 # (e19, audit H4: 5 of the 7 falls were "creep back" after a wrong correction) its pose is not
                 # confirmed: no reverse toward an edge (no rear sensor); it turns first instead
@@ -2067,6 +2580,11 @@ class Controller:
             return                  # (e19, H6) tilted: its recovery rounds move it (a creep would be refused while tilted)
         if self.t < r.__dict__.get("id_hold_until", -1e9):
             return                  # (e18) a measurement pause: the layer watches its identity move (bounded)
+        if STAGES and not LOST_CREEP and (r.__dict__.get("search") is not None or (
+                r.lost is not None and self.blind_stop(r, self.pos(r), 5.0))):
+            return                  # (e21, 2) at its blind limit the veer step or the search moves it, never a creep
+        if self.t < (r.__dict__.get("search_hold_until") or -1e9):
+            return                  # (e21, 2) holding still while a robot near it is searched for
         if self.unaccounted_why(r) and self.t < self.__dict__.get("id_watch_until", -1e9):
             # (e18, found by the identity batch) while ANY robot's identity move is watched, no other unaccounted robot
             # creeps: its moving sighting read as "the one that turned" and named the wrong robot (a swap)
@@ -2203,6 +2721,7 @@ class Controller:
                                      moved_cm=round(moved, 1), in_a_row=hc["tries"]))
             if abs(err) <= HD_CONFIRM_DEG:
                 r.hd_confirm = None
+                r.head_unknown = None                   # (e21) the camera saw its heading
                 self.counts["hd_confirmed"] = self.counts.get("hd_confirmed", 0) + 1
                 self.event(r, "heading confirmed", "a %.0f cm crawl: the camera saw it go %.0f deg, its own heading "
                            "%.0f (%.1f off)" % (moved, cam_h, hc["h_own"], err))
@@ -2210,6 +2729,9 @@ class Controller:
             h = wrap180(self.heading(r) + err)
             self.out(r, "fpose %.2f %.2f %.2f 1.0 3.0" % (ex, ey, h))
             r.fpose_t = self.t
+            r.head_unknown = None                       # (e21) set from what the camera saw
+            if abs(err) >= 90.0:
+                self.counts["heading_flips_caught"] = self.counts.get("heading_flips_caught", 0) + 1
             self.counts["hd_confirm_set"] = self.counts.get("hd_confirm_set", 0) + 1
             self.event(r, "heading set", "a %.0f cm crawl: the camera saw it go %.0f deg, its own heading said %.0f: "
                        "its heading set from the camera and checked again" % (moved, cam_h, hc["h_own"]))
@@ -2227,6 +2749,9 @@ class Controller:
                 st["status"] = "dropped"
         hc = r.__dict__.get("hd_confirm")
         if hc is None:
+            return
+        if "c0" not in hc:                       # (e21) a new check was asked while this crawl ran: it starts afresh
+            hc["stage"] = None
             return
         hc["stage"] = "measure"
         hc["t_end"] = self.t
@@ -2293,6 +2818,27 @@ class Controller:
                 # a free heading check from its own driving (never still): its heading is confirmed as by a crawl
                 r.turn_since_head = 0.0
                 self.counts["heading_confirmed_by_motion"] = self.counts.get("heading_confirmed_by_motion", 0) + 1
+        if CONSISTENT_ESCAPE and r.__dict__.get("head_unknown") is not None and st != "distrusted" and \
+                res.get("err_own") is not None and res["sigma"] <= HD_CONFIRM_DEG and \
+                r.__dict__.get("hd_confirm") is None:
+            # (e21, 4) its heading unknown after a correction: its next short move as the camera saw it settles it, a
+            # 180 deg flip included (Right, 11 Nov 08:58: corrected, kept 14 deg, drove the wrong way)
+            e_ = abs(res["err_own"])
+            if e_ <= CT.HEAD_K * math.hypot(res["sigma"], HEAD_SD0):
+                r.head_unknown = None
+                self.counts["head_unknown_confirmed"] = self.counts.get("head_unknown_confirmed", 0) + 1
+            elif e_ >= 90.0 and r.own is not None:
+                o_then = self.own_at(r, t)
+                h_now = wrap180(res["th"] + wrap180(r.own[3] - (o_then[2] if o_then and o_then[2] is not None
+                                                                else r.own[3])))
+                self.out(r, "fpose %.2f %.2f %.2f 1.0 %.1f" % (r.own[1], r.own[2], h_now, max(3.0, res["sigma"])))
+                r.fpose_t = self.t
+                r.head_unknown = None
+                r.turn_since_head = 0.0
+                self.counts["heading_flips_caught"] = self.counts.get("heading_flips_caught", 0) + 1
+                self.event(r, "heading flipped", "after its correction the camera saw it drive %.0f deg while its own "
+                           "heading said %.0f deg off that: its heading set from the camera's view of its move" % (
+                               res["th"], e_))
         res["state"] = st
         if st == "trusted" and book is not None:  # (an unnamed camera, as before e20: nothing changes)
             r.mh = dict(res, t_ctrl=self.t)
@@ -2317,6 +2863,9 @@ class Controller:
         o_then = self.own_at(r, mh["t"])
         err = wrap180(mh["th"] - (o_then[2] if o_then is not None and o_then[2] is not None else own))
         r.hd_confirm = None
+        r.head_unknown = None                       # (e21) the camera saw its heading by its own driving
+        if abs(err) >= 90.0:
+            self.counts["heading_flips_caught"] = self.counts.get("heading_flips_caught", 0) + 1
         self.counts["hd_settled_by_motion"] = self.counts.get("hd_settled_by_motion", 0) + 1
         if abs(err) <= HD_CONFIRM_DEG:
             self.counts["hd_confirmed"] = self.counts.get("hd_confirmed", 0) + 1
@@ -2861,12 +3410,24 @@ class Controller:
         xs, ys, ms = (tr.x[:-1], tr.y[:-1], tr.m[:-1]) if loop else (tr.x, tr.y, tr.m)
         grow = ms - (ms[0] if len(ms) else PLAN_M0)
         mar = []
-        if p is not None:
-            mar.append(edge_dist(self.rect, *p) - self.need_cm(r, None, False, u0))
         n = len(xs)
-        for k in range(n):
-            need = self.need_cm(r, speed, False, u0 + max(0.0, float(grow[k])))
-            mar.append(edge_dist(self.rect, xs[k], ys[k]) - need)
+        shp = SHAPE and r.lost is not None and not self.ekf_live(r)
+        if shp:
+            # (e21, 1) lost: its error shape's reach toward each edge at every sample (the cone grown along this path),
+            # not a circle of its largest reach
+            along = r.shape.along_path([(float(a), float(b)) for a, b in zip(xs, ys)])
+            if p is not None:
+                mar.append(ES.rect_margin(self.rect, p[0], p[1], *r.shape.ellipse()) -
+                           self.need_cm(r, None, False, PLAN_M0))
+            for k in range(n):
+                need = self.need_cm(r, speed, False, PLAN_M0 + max(0.0, float(grow[k])))
+                mar.append(ES.rect_margin(self.rect, float(xs[k]), float(ys[k]), *along[k]) - need)
+        else:
+            if p is not None:
+                mar.append(edge_dist(self.rect, *p) - self.need_cm(r, None, False, u0))
+            for k in range(n):
+                need = self.need_cm(r, speed, False, u0 + max(0.0, float(grow[k])))
+                mar.append(edge_dist(self.rect, xs[k], ys[k]) - need)
         if stops and not loop and n:
             # its stopping distance: the overrun carries on along the move's last direction (the path is extended by
             # it, so an inward move's overrun counts as inward and an outward one's as outward)
@@ -2876,11 +3437,22 @@ class Controller:
             if L > 1e-6:
                 sc = SR.stop_cm(speed, self.lead_tab.get(r.name)) / L
                 ex, ey = xs[-1] + dx * sc, ys[-1] + dy * sc
-                mar.append(edge_dist(self.rect, ex, ey) - self.need_cm(r, speed, False, u0 + max(0.0, float(grow[-1]))))
+                if shp:
+                    mar.append(ES.rect_margin(self.rect, float(ex), float(ey), *along[-1]) -
+                               self.need_cm(r, speed, False, PLAN_M0 + max(0.0, float(grow[-1]))))
+                else:
+                    mar.append(edge_dist(self.rect, ex, ey) - self.need_cm(r, speed, False,
+                                                                           u0 + max(0.0, float(grow[-1]))))
         if loop:
             c = tr.loop_c        # the loop disc's rim: where it may coast and brake, any direction: the stop added
-            need = self.need_cm(r, speed, True, u0 + max(0.0, float(tr.m[-1] - LOOP_R - (ms[0] if len(ms) else 0))))
-            mar.append(edge_dist(self.rect, *c) - LOOP_R - need)
+            if shp:
+                e_ = along[-1] if n else r.shape.ellipse()
+                need = self.need_cm(r, speed, True, PLAN_M0 + max(0.0, float(tr.m[-1] - LOOP_R - (ms[0] if len(ms)
+                                                                                                    else 0))))
+                mar.append(ES.rect_margin(self.rect, float(c[0]), float(c[1]), *e_) - LOOP_R - need)
+            else:
+                need = self.need_cm(r, speed, True, u0 + max(0.0, float(tr.m[-1] - LOOP_R - (ms[0] if len(ms) else 0))))
+                mar.append(edge_dist(self.rect, *c) - LOOP_R - need)
         m0 = mar[0]
         if not away and m0 >= 0:
             ok = min(mar) >= 0
@@ -3350,6 +3922,9 @@ class Controller:
 
     def make(self, r, turn, L, v, t0=None):
         p, h = self.pos(r), self.heading(r)
+        if SHAPE and SHAPE_PLAN and r.lost is not None:      # (e21, 3) the shape grows along the path itself
+            tr = Traj.move(self.t + 0.2 if t0 is None else t0, p, h, turn, L, v, m0=self.margin0(r, iso_only=True))
+            return self.shape_on(r, tr, h)
         grow = BLIND_PER_CM if r.lost is not None else 0.0
         return Traj.move(self.t + 0.2 if t0 is None else t0, p, h, turn, L, v, m0=self.margin0(r), bubble_grow=grow)
 
@@ -4541,7 +5116,7 @@ class Controller:
                 self.trophy_break(r, "unsure near an edge with its heading in doubt and a robot near: holds")
             return
         for rev in (True, False):
-            if not SR.inward_agreed(self.rect, own, cam, h, reverse=rev):
+            if not self.inward_ok(own, cam, h, rev, r):
                 continue
             L = 6.0
             tr = Traj.move(self.t + 0.2, p, wrap180(h + 180.0) if rev else h, 0.0, L, BACK_V, m0=self.margin0(r))
@@ -5102,8 +5677,9 @@ class Controller:
         """The next piece from (x, y, h) at t0: the menu (least-used first), then off-menu (gentler / shorter), then
         the loop in its own reserved disc (loop_side: the side reserved now), then an escape that never gets closer.
         Returns (kind, cell, k, L, v, side, traj) or None."""
-        m0 = self.margin0(r)
-        grow = BLIND_PER_CM if r.lost is not None else 0.0
+        shp = SHAPE and SHAPE_PLAN and r.lost is not None    # (e21, 3) the shape grows along each piece
+        m0 = self.margin0(r, iso_only=shp)
+        grow = BLIND_PER_CM if (r.lost is not None and not shp) else 0.0
         find_me = r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
                                           self.blind_stop(r, (x, y), max(v0, 5.0)))
         # starting closer to an edge than a curve may go (after a stop there): curves that never get closer to it
@@ -5112,7 +5688,12 @@ class Controller:
             (r.bubble if r.lost else 0.0)
 
         def tr_for(k, L, v, side):
-            return curve_traj(t0, [(x, y, h, k, L, v)], side, m0=m0, bubble_grow=grow)
+            tr_ = curve_traj(t0, [(x, y, h, k, L, v)], side, m0=m0, bubble_grow=grow)
+            return self.shape_on(r, tr_, h) if shp else tr_
+        if not find_me and STAGES and r.lost is not None and self.stage_of(r) == "veer":
+            res_v = self.veer_pick(r, x, y, h, tr_for)        # (e21, 2) veer: the move that gains the most room
+            if res_v is not None:
+                return res_v
         if not find_me:
             free = self.rng.random() < FREE_SHARE
             for cell in self.cmenu.order(r.name, free=free):
@@ -5229,6 +5810,12 @@ class Controller:
                         res = ("loop", None, k, L, min(4.0, v_cap(k)), sd, tr)
                         self.fallback(r, 5, "loop (forced)", "nothing fits from the coast: loops on (never closer)")
                         break
+            if res is None and STAGES and r.lost is not None and not getattr(r, "tilted", False):
+                # (e21, 2) lost and no curve fits: a straight move that gains room for its shape (veer), else the pause
+                # and search; never a stand by default
+                r.coast = None
+                self.lost_limit_step(r)
+                return
             if res is None:
                 # standing and no curve fits (an edge, a trap at the start): the stop-turn ladder (reverse, edge turn)
                 r.coast = None
@@ -6307,11 +6894,14 @@ class Controller:
 
     # -- every tick ----------------------------------------------------------------------------------------------
     def tick(self, t):
+        dt_ = t - self.t if self.t_start is not None else 0.0
         self.t = t
         if self.t_start is None:
             self.t_start = t
         for r in self.R.values():
             self.watch(r)
+            if STAGES:
+                self.stage_watch(r, dt_)               # (e21, 2) which stage each robot is in, timed
         self.camera_timing()
         if self.keepouts and int(t * 2) != int((t - 0.05) * 2):
             self.clear_keepouts()
@@ -6351,6 +6941,8 @@ class Controller:
                                                        # (before anything else, the unsure-near-an-edge step too)
             elif r.mode == "idle" and t < r.__dict__.get("id_hold_until", -1e9):
                 pass                                   # (e18) standing while the layer watches its identity move
+            elif r.mode == "idle" and t < (r.__dict__.get("search_hold_until") or -1e9):
+                pass                                   # (e21, 2) it must hold still while a robot near it is searched for
             elif r.mode == "idle" and t >= r.busy_until and r.__dict__.get("make_room") is not None and not r.silent \
                     and self.pos(r) is not None and not getattr(r, "tilted", False) and self.make_room_step(r):
                 pass                                   # (e18, 4) out of a lost robot's way first
@@ -6386,8 +6978,10 @@ class Controller:
                                                  self.blind_stop(r, self.pos(r), 5.0))):
                 self.start_curve(r)                    # (11-05d) never waits: from the coast or the stand
             elif r.mode == "idle" and t >= r.busy_until and self.pos(r) is not None and not r.silent:
-                if r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
-                                           self.blind_stop(r, self.pos(r), 5.0)):
+                if r.lost is not None and STAGES and BLIND_RULE != "cap" and self.blind_stop(r, self.pos(r), 5.0):
+                    self.lost_limit_step(r)            # (e21, 2) veer if any move gains room, else pause and search
+                elif r.lost is not None and (r.bubble > BUBBLE_CAP if BLIND_RULE == "cap" else
+                                             self.blind_stop(r, self.pos(r), 5.0)):
                     if BLIND_RULE != "cap":
                         self.ask_place(r)              # (e13, Nick 12:56) a person clicks it on a picture
                     if self.never_still and t - r.__dict__.get("creep_t", -1e9) >= self.still_pause(r):
@@ -6401,6 +6995,8 @@ class Controller:
                     self.go_park(r, "battery %d %% (floor %d %%)" % (r.battery, self.floor))
                 elif not r.lost_hold:
                     self.start_move(r)
+            if r.__dict__.get("search") is not None and r.lost is None:
+                self.search_end(r, "found")            # (a move that gains room ends it too: lost_limit_step)
             self.never_still_watch(r)                  # (e17, Nick 12 Nov) held robots creep, never settle at 0
             if r.curve and r.mode == "move" and r.move is not None and r.move.get("curve") and not r.silent:
                 self.queue_watch(r)                    # (e10, run 2 incident a, c) every tick: still on plan?
@@ -6588,6 +7184,8 @@ class Controller:
                 self.counts["heading_clicks"] = self.counts.get("heading_clicks", 0) + 1
         own0 = (r.own[1], r.own[2]) if r.own is not None else None
         r.place = dict(t=self.t, x=x, y=y, own=own0, how=ans.get("how", "click"))
+        if SHAPE:
+            r.shape.anchor(self.t, x, y, h, sig, "placed by a click")      # (e21, 1) the click's own accuracy
         self.out(r, "fpose %.2f %.2f %.2f %.2f %.2f" % (x, y, h, max(1.0, sig), 3.0 if ans.get("heading") is not None
                                                         else 10.0))
         if r.own is not None:
@@ -6635,11 +7233,23 @@ class Controller:
         if p is None or r.lost is None:
             return False
         self.counts["blind_checks"] = self.counts.get("blind_checks", 0) + 1
+        if SHAPE and not self.ekf_live(r):
+            return self.shape_room(r, p, v) < 0.0          # (e21, 1) the shape's reach toward each edge, not a circle
         if r.__dict__.get("excursion") is not None:
             # (e18, 5) a blind leg its record allowed: the board's own edges (the leg was checked against them with its
             # predicted error at every point; unseen ground is not an edge)
             return self.board_edge(*p) - r.bubble < HALF + SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
         return edge_dist(self.rect, *p) - r.bubble < HALF + SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
+
+    def shape_room(self, r, p, v=5.0, ell=None):
+        """(e21, 1) Room left (cm) for r's error shape centred at p: its reach toward each edge less half its body and its
+        stop at speed v. Under 0: its possible error could reach an edge."""
+        ell = ell or r.shape.ellipse()
+        rect = self.rect
+        if r.__dict__.get("excursion") is not None:
+            b = getattr(self.ws, "board", None) if self.ws is not None else None
+            rect = tuple(b) if b is not None else tuple(self.rect)[:4]
+        return ES.rect_margin(rect, p[0], p[1], *ell) - HALF - SR.stop_cm(max(0.0, v) if v and v > 0.3 else None)
 
     def ease_stop(self, r, why):
         self.why_zero(r, "lost: eases to a stop (%s)" % why)

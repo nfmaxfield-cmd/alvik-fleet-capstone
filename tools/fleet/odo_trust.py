@@ -44,12 +44,14 @@ Changelog
                  made against (camera_trust.py, for position at that square); the fit and the model's check (k_cal) are
                  weighted. A weight of 0 is never added (the caller refuses it: MIRLT_ODO_LEARN_TRUST). All weights 1:
                  exactly as e19.
+  2026-11-12e21  (Nick 12 Nov, decision 1: one error shape) every sample also carries its error ALONG its shadow's own
+                 chord and ACROSS it (al, ac), for error_shape's cone; nothing else changes (records without them load).
 """
 import json
 import math
 import os
 
-VERSION = "odo-trust-2026-11-12e20"   # e20: samples and checks weighted by the camera's trust. Before: "odo-trust-2026-11-12e19"   # e19: the prior from calibration-run data (2.0 + 0.07 cm/cm; MIRLT_TRUST_PRIOR=replay e18b's 2.3 + 0.28)
+VERSION = "odo-trust-2026-11-12e21"   # e21: samples carry along / across their chord (error_shape). Before: "odo-trust-2026-11-12e20"   # e20: samples and checks weighted by the camera's trust. Before: "odo-trust-2026-11-12e19"   # e19: the prior from calibration-run data (2.0 + 0.07 cm/cm; MIRLT_TRUST_PRIOR=replay e18b's 2.3 + 0.28)
 try:
     import safety_group as _SG
     FLEET = _SG.flag("MIRLT_TRUST_FLEET")
@@ -268,7 +270,16 @@ class Trust:
                 s, ts, tc, ms, mc = st[3], st[4], st[5], st[6], st[7]
                 # (deg x cm) of heading doubt carried over the distance after each degree: sum dth_k (s - s_k)
                 ws, wc = s * ts - ms, s * tc - mc
-                self._sample(t, s, ts, tc, ws, wc, e)
+                # (e21) the error along the shadow's own chord and across it (the cone, error_shape)
+                h0 = sh["hist"][0]
+                cx, cy = st[1] - h0[1], st[2] - h0[2]
+                L_ = math.hypot(cx, cy)
+                if L_ >= 1.0:
+                    ux, uy = cx / L_, cy / L_
+                else:
+                    ux, uy = math.cos(math.radians(sh["th"])), math.sin(math.radians(sh["th"]))
+                ex_, ey_ = x - st[1], y - st[2]
+                self._sample(t, s, ts, tc, ws, wc, e, al=ex_ * ux + ey_ * uy, ac=-ex_ * uy + ey_ * ux)
             if len(sh["done"]) == len(STRETCHES_CM) or sh["s"] > STRETCHES_CM[-1] + 5.0:
                 self._shadows.remove(sh)
         if self._s - self._last_anchor_s >= ANCHOR_EVERY_CM and len(self._fixes) >= CAM_AVG_N and \
@@ -302,7 +313,7 @@ class Trust:
                 break
         return best
 
-    def _sample(self, t, s, ts, tc, ws, wc, e):
+    def _sample(self, t, s, ts, tc, ws, wc, e, al=None, ac=None):
         n = self._n_added
         self._n_added += 1
         hold = (n % HOLDOUT_EVERY) == HOLDOUT_EVERY - 1
@@ -311,15 +322,20 @@ class Trust:
                    e=round(e, 2), hold=int(hold), run=RUN)
         if w != 1.0:
             rec["w"] = round(w, 3)                        # (e20) the camera's trust (absent: 1, as e19)
+        if al is not None:
+            rec["al"], rec["ac"] = round(al, 2), round(ac, 2)     # (e21) along / across its chord
         if hold:
             pred = self.radius_raw(s, ts, tc, ws, wc)
             self.check(pred * self.k_cal, e, kind="held-out sample", t=t, raw=pred, w=w)
         self.samples.append(rec)
         del self.samples[:-SAMPLES_KEEP]
 
-    def add_sample(self, s, e, ts=0.0, tc=0.0, ws=0.0, wc=0.0, t=0.0, hold=False, run=None):
-        """A sample from elsewhere (tests, a replay of logs)."""
-        self.samples.append(dict(t=t, s=s, ts=ts, tc=tc, ws=ws, wc=wc, e=e, hold=int(hold), run=run or RUN))
+    def add_sample(self, s, e, ts=0.0, tc=0.0, ws=0.0, wc=0.0, t=0.0, hold=False, run=None, al=None, ac=None):
+        """A sample from elsewhere (tests, a replay of logs). (e21) al, ac: its error along / across its chord."""
+        rec = dict(t=t, s=s, ts=ts, tc=tc, ws=ws, wc=wc, e=e, hold=int(hold), run=run or RUN)
+        if al is not None:
+            rec["al"], rec["ac"] = al, ac
+        self.samples.append(rec)
         del self.samples[:-SAMPLES_KEEP]
         self._n_added += 1
         self._fit = None
