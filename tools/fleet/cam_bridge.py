@@ -240,7 +240,9 @@ class Bridge:
         self.lock_fix_t = {}
         self.track_f = open(os.path.join(log_dir, "track.csv"), "w", newline="")
         self.track_w = csv.writer(self.track_f)
-        self.track_w.writerow(["t", "robot", "x", "y", "status", "sent_th", "why", "src"])
+        # (e21) "cams" appended: each camera's own sighting when both saw it ("overhead:x:y;side:x:y"), so a later
+        # experiment can score each camera from the run's logs
+        self.track_w.writerow(["t", "robot", "x", "y", "status", "sent_th", "why", "src", "cams"])
         self.ev_f = open(os.path.join(log_dir, "events.jsonl"), "a")
 
     def event(self, kind, **kw):
@@ -436,7 +438,9 @@ class Bridge:
                         c["headings"] += 1
                         self.event("heading", robot=n, th=round(th, 2), how="travel")
             self.track_w.writerow(["%.4f" % t, n, "%.2f" % st["x"], "%.2f" % st["y"], st["status"],
-                                   "" if sent_th is None else "%.2f" % sent_th, st.get("why") or "", st.get("src") or ""])
+                                   "" if sent_th is None else "%.2f" % sent_th, st.get("why") or "", st.get("src") or "",
+                                   ";".join("%s:%.2f:%.2f" % (c_, q_[0], q_[1]) for c_, q_, _s, _t in
+                                            (st.get("per_cam") or []))])
             try:
                 self.lock_step(n, st, img, t, new_obs, sts)
             except Exception as e:      # noqa: BLE001  (the lock-on never stops the detector's fixes)

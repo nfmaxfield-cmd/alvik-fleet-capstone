@@ -249,6 +249,7 @@ class CameraSources:
                 self.layer.set_unaccounted(n, c.unaccounted_why(r))
                 if hasattr(self.layer, "set_focus"):
                     self.layer.set_focus(n, getattr(c, "search_focus", {}).get(n))   # (e21) a searched robot
+                    self.layer.set_slips(n, (getattr(c, "slip_windows", None) or {}).get(n))   # (e21) its slips
         lag = float(sc.get("own_lag_s", 0.3))
         for n, r in c.R.items():
             if r.own is None:

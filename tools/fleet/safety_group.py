@@ -185,6 +185,14 @@ SWITCHES = [
     ("MIRLT_INWARD_TWO_HEADINGS", "1", "0", "F",
      "The 'inward by both' check uses each position's own heading (its own heading for its own pose, the camera's "
      "measured heading for the camera's spot); 0: one heading for both (e08)", "e21"),
+    ("MIRLT_UNCONF_REVERSE", "1", "0", "F",
+     "(e19, audit H4) No reverse toward an edge while the robot's pose is unconfirmed (no rear sensor). 0: the error "
+     "shape's edge rule alone carries a reverse's whole margin (its sensors cannot see an edge behind it). Nick 12 Nov: "
+     "off only if the long checks show no difference", "e19, switch e21"),
+    ("MIRLT_SLIP_TAG", "1", "0", "F T",
+     "(Nick 12 Nov) A move the robot's own wheels, accelerometer, line sensors and the camera say did not move is a slip: "
+     "it does not count against the camera's trust in that square, its own pose is corrected from the camera at once, "
+     "and a square that keeps causing slips is logged as a surface feature. 0: as e20", "e21"),
     ("MIRLT_FW_FILTER_PARAMS", "derived", "off", "F",
      "Robots on firmware 2026-11-12e21 or newer get their filter's settings from the measured record at the start of a "
      "run (variance growth, fix age limit from the measured delay, the consistency escape); off: their own defaults",

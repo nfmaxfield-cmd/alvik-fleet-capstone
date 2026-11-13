@@ -275,6 +275,7 @@ class TrackingLayer:
         self.whole = []             # (e19) (t, sightings, outside every gate) per picture: the whole-camera watch
         self.cam_distrust = None    # (e19) dict(t, why) while the camera as a whole is not trusted
         self.cam_bad = set()        # (e21) the cameras the per-camera verdict refuses now (None: an unnamed camera)
+        self.slips = {}             # (e21) {robot: [(t0, t1)]}: its moves that slipped (the run's verdict)
         self.focus = {}             # (e21) {robot: (x, y, reach)}: a searched robot's error shape (its gate, the detector)
         self.mot_last = {}          # (e19) robot -> (t, its last drive's motion agreed with a sighting)
         self.cam_test_want = []     # (e19) robots asked for a short test drive while the camera is not trusted
@@ -655,6 +656,10 @@ class TrackingLayer:
         self.cam_test_want = sorted(tests) if bad else []
         return bad
 
+    def set_slips(self, name, windows):
+        """(e21) The run's slip windows for a robot (picture times): no evidence against a camera inside them."""
+        self.slips[name] = list(windows or ())
+
     def set_focus(self, name, f):
         """(e21) The run's search for a robot (its error shape's region) or None."""
         if f:
@@ -863,6 +868,11 @@ class TrackingLayer:
         tol = AGREE_K_E20 * math.sqrt(2.0 * sc * sc + so * so)
         err = math.hypot(d.x - ref[1] - D[0], d.y - ref[2] - D[1])
         ok = err <= tol
+        if not ok and any(a <= t and ref[0] <= b for a, b in self.slips.get(n, ())):
+            # (e21, Nick 12 Nov) the robot's own sensors said it slipped over these pictures: a slip, not the camera
+            self.counts["slip_spared"] = self.counts.get("slip_spared", 0) + 1
+            self.cam_ref[key] = (t, d.x, d.y)
+            return None
         book.observe(d.cam, d.src, "position", d.x, d.y, ok, 1.0, d.light, t, ref_words)
         self.cam_ref[key] = (t, d.x, d.y)
         self.counts["trust_checks"] = self.counts.get("trust_checks", 0) + 1

@@ -43,9 +43,20 @@ def test_the_prior_is_the_measured_cone_one_sided_along_the_track():
     sh = _shape(40.0)
     f, b, c = sh.axes()
     assert b > f and c > f                                     # back along its track and sideways, little ahead
-    i, a, bb, ang, off = sh.ellipse()
+    i, a, bb, ang, off, gx, gy = sh.ellipse()
     assert off < 0 and abs(ang) < 1e-6                        # its centre sits back along its track
     assert sh.extent() == pytest.approx(i + max(a + abs(off), bb))
+
+
+def test_the_seen_error_is_a_segment_toward_the_cameras_spot_not_a_disc():
+    sh = _shape(0.0, base=2.0)
+    sh.seen(-20.0, 0.0)                    # its own pose 20 cm right of where the camera last saw it
+    ell = sh.ellipse()
+    assert sh.support(-1.0, 0.0, ell) == pytest.approx(22.0)     # toward the camera's spot: the whole gap
+    assert sh.support(1.0, 0.0, ell) == pytest.approx(2.0)       # the other way: only the disc
+    assert sh.extent() == pytest.approx(22.0)
+    sh.anchor(1.0, 60.0, 60.0, 0.0, 2.0)                         # an accepted fix: gone
+    assert sh.support(-1.0, 0.0) == pytest.approx(2.0)
 
 
 def test_a_robot_that_has_not_driven_has_no_cone_only_what_was_seen():
@@ -396,3 +407,56 @@ def test_mission_control_shows_the_shape_not_the_firmwares_own_sd(tmp_path):
     rows = LV.from_freeroam(str(d), {"Left": "#f00"}, {}, now=1e9 + 0.5)
     left = [r for r in rows if r["name"] == "Left"][0]
     assert left["pm_cm"] == pytest.approx(16.5) and left["stage"] == "veer"
+
+
+# -- 8. Nick's answers of 12 Nov 21:38: slips, the reverse rule, camera names in the logs ------------------------------
+def test_a_slip_is_tagged_corrects_its_pose_and_a_spot_that_keeps_slipping_is_a_surface_feature(monkeypatch):
+    monkeypatch.setattr(FC, "SLIP_TAG", True)
+    c, out, logs = _ctrl()
+    r = _place(c, "A", 40.0, 40.0, 0.0, t=1.0)
+    c.on_follow("A", 1.1, "idle", 46.0, 40.0, 0.0)        # its wheels say it went 6 cm; the camera saw it stay
+    r.cam, r.cam_arr = (1.05, 40.0, 40.0, None), 1.1
+    c.t = 1.15
+    mv = dict(kind="creep", L=6.0, t0=0.5, t_drive=0.6, n=1)
+    for k in range(FC.SLIP_SPOT_N):
+        c.slip(r, mv, (40.0, 40.0), dict(used=["wheels", "camera"]))
+    assert c.slip_windows["A"] and c.counts.get("slip_corrections", 0) >= 1
+    assert any(t_.startswith("fpose 4") and float(t_.split()[1]) < 46.0 for n, t_ in out if n == "A")
+    assert c.counts.get("slip_spots") == 1
+    assert any(tb == "events" and row["kind"] == "surface feature" for tb, row in logs)
+
+
+def test_the_layer_spares_the_camera_inside_a_slip_window():
+    for slips, spared in (([(0.0, 10.0)], True), ([], False)):
+        book = CT.TrustBook("t", board=(0, 0, 122, 122))
+        L = TL.TrackingLayer(["A"], sources=("motion",), book=book, board=(0, 0, 122, 122))
+        L.seed("A", 0.0, 40.0, 40.0)
+        L.set_slips("A", slips)
+        for k in range(21):                      # its own pose drives 20 cm +x
+            L.own("A", 0.25 * k, 40.0 + 1.0 * k, 40.0, 0.0, False)
+        d0 = TL.Det("motion", 0.0, 40.0, 40.0, cam="cam-a")
+        d1 = TL.Det("motion", 5.0, 40.0, 40.0, cam="cam-a")   # ... the camera saw it stay: a slip, or a camera fault
+        L._rel_check("A", d0, 0.0, book)
+        L._rel_check("A", d1, 5.0, book)
+        s_ = book.score("cam-a", "motion", "position", area=None)
+        assert (L.counts.get("slip_spared", 0) > 0) == spared
+        assert (s_["checks"] == 0) == spared             # spared: nothing counted against the camera
+
+
+def test_the_reverse_rule_is_behind_its_switch(monkeypatch):
+    c, out, logs = _ctrl()
+    r = _place(c, "A", 20.0, 60.0, 0.0)
+    r.corr_unconf = dict(t=1.0, how="test", d=10.0, drift=None)
+    tr = FC.Traj.move(1.2, (20.0, 60.0), 180.0, 0.0, 6.0, 5.0)
+    res = ("back off", None, 0.0, 6.0, 5.0, tr)
+    monkeypatch.setattr(FC, "UNCONF_REVERSE", True)
+    assert not c.reverse_ok(r, res)
+    monkeypatch.setattr(FC, "UNCONF_REVERSE", False)
+    assert c.reverse_ok(r, res)
+
+
+def test_every_fix_and_sighting_names_its_camera_in_the_run_logs():
+    fr = open(os.path.join(FLEET, "freeroam.py")).read()
+    assert "t,robot,x_cm,y_cm,th_deg,arrived,cam,src" in fr
+    br = open(os.path.join(FLEET, "cam_bridge.py")).read()
+    assert '"why", "src", "cams"]' in br

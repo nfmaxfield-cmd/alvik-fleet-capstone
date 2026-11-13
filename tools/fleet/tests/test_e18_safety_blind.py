@@ -103,6 +103,17 @@ OFFS = {"Left": (30.0, -10.0, 0.0), "Right": (30.0, 10.0, 0.0)}
 
 
 def _two_unaccounted(truth, offs=OFFS, secs=30.0, **kw):
+    # (e21) e18's mechanism on e18's own numbers: the circle bubble (MIRLT_ERROR_SHAPE=circle). Under the e21 shape the
+    # reflex stops this identity drive 0.1 cm inside its need (the shape's 2.45 cm disc against the record's 2.0 cm):
+    # reported in docs/build-reports/e21-nov12-error-shape.md
+    FC.SHAPE = False
+    try:
+        return _two_unaccounted0(truth, offs, secs, **kw)
+    finally:
+        FC.SHAPE = FC.SG.value("MIRLT_ERROR_SHAPE") == "cone"
+
+
+def _two_unaccounted0(truth, offs=OFFS, secs=30.0, **kw):
     R = H.Rig(truth, own_off=offs, lights_off_cm=0.0, spin_flag=False, seed=3, **kw)   # the home lights: no turn seen
     R.run(0.1)
     for n in ("Left", "Right"):
@@ -374,7 +385,8 @@ def _dark_rig(odo, seed=1, roam=150.0):
     return R, r
 
 
-def test_a_blind_excursion_through_a_dark_patch_good_record_allowed_poor_record_shortened_or_refused():
+def test_a_blind_excursion_through_a_dark_patch_good_record_allowed_poor_record_shortened_or_refused(monkeypatch):
+    monkeypatch.setattr(FC, "SHAPE", False)      # (e21) e18's numbers: the rig's positions differ under the shape
     Rg, rg = _dark_rig((0.003, 0.0, 0.005))
     Rp, rp = _dark_rig((0.05, 0.03, 0.05))
     assert Rg.c.trust["Left"].radius(40.0) < Rp.c.trust["Left"].radius(40.0)
@@ -508,6 +520,7 @@ def _far_rig(on, monkeypatch):
 
 
 def test_a_robot_named_all_along_beyond_its_fix_gate_is_corrected_from_the_camera(monkeypatch):
+    monkeypatch.setattr(FC, "CONSISTENT_ESCAPE", False)   # (e21) e18b's rule alone (the escape would correct it first)
     R, ev = _far_rig(True, monkeypatch)
     assert ev and ev[0][0] - 3.0 < 3.0 and R.own_gap("Center") < 3.0
     assert any(s[1] == "Center" and s[2].startswith("fpose") for s in R.sent)

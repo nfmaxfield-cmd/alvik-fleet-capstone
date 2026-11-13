@@ -248,7 +248,7 @@ class Runner:
         self.fw = {}
         self.restarts = {n: 0 for n in names}
         self.track = open(os.path.join(outdir, "camera_track.csv"), "w", buffering=1)
-        self.track.write("t,robot,x_cm,y_cm,th_deg,arrived\n")
+        self.track.write("t,robot,x_cm,y_cm,th_deg,arrived,cam,src\n")   # (e21) cam, src appended: each fix's camera
         self.pose_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if pose_to else None
         self.pose_to = pose_to
         self.frames, self.guard = frames, guard
@@ -746,6 +746,8 @@ class Runner:
             self.layer.set_unaccounted(n, c.unaccounted_why(r))
             if hasattr(self.layer, "set_focus"):
                 self.layer.set_focus(n, getattr(c, "search_focus", {}).get(n))   # (e21) a searched robot: its shape
+                self.layer.set_slips(n, [(a - c.clock, b - c.clock) for a, b in
+                                         (getattr(c, "slip_windows", None) or {}).get(n, [])])   # (e21) its slips
         for tp in sorted(batch):
             for ev in batch[tp]:
                 if self.layer.T[ev["robot"]].sure is None:
@@ -776,8 +778,9 @@ class Runner:
                      light=ev.get("light"))
             if ev.get("how"):
                 continue                              # (e17) a correction: the robot got an fpose, not a fix
-            self.track.write("%.3f,%s,%.2f,%.2f,%s,%.3f\n" % (ev["t"], n, ev["x"], ev["y"], "" if th is None else
-                                                               "%.1f" % th, now))
+            self.track.write("%.3f,%s,%.2f,%.2f,%s,%.3f,%s,%s\n" % (
+                ev["t"], n, ev["x"], ev["y"], "" if th is None else "%.1f" % th, now,
+                ev.get("cam") or str(ev.get("src") or "").split(":")[-1], ev.get("src") or ""))
             o = self.offsets.get(n) or []
             if not o or now - self.fix_last[n] < 1.0 / FIX_HZ or c.R[n].lost is not None or \
                     not getattr(c.R[n], "fix_used", True):

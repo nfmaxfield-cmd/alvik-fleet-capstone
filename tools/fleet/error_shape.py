@@ -23,6 +23,9 @@ The shape (95 % bounds, like odo_trust's record), centred on the robot's own pos
         back    = k_cal x min(s, b_back)                             how far back along its track (stuck wheels);
         across  = k_cal x (b_across + a_across x s + lateral(turns))  the cone's sideways widening;
       the ellipse's along semi-axis is (forward + back) / 2, its centre (forward - back) / 2 along the chord;
+    + the error SEEN when the camera lost it, as a segment: from its own pose toward where the camera last saw it (its
+      own pose and the camera disagreed by that vector; one of the two is right, so it is somewhere along it). A
+      direction known is not a disc: the segment's reach in a direction n is max(0, g . n);
     lateral(turns) = s x sin(heading doubt), the doubt from the degrees turned on the spot and on curves (odo_trust's
     per-degree terms), as odo_trust's own model.
 s = cm driven since the anchor. The ellipse's support in a direction n is sqrt((along n.u)^2 + (across n.v)^2): its
@@ -205,6 +208,7 @@ class Shape:
         self.h = None                  # its own heading now (deg)
         self.x = self.y = None         # its own pose now
         self.why = "start"
+        self.gx = self.gy = 0.0        # the seen error's vector (own pose -> the camera's last spot), set at a loss
         self.hd_deg = None             # its heading doubt (95 %, deg) set by the controller: unknown (180) after a
                                        # correction until the camera confirms it
 
@@ -216,10 +220,15 @@ class Shape:
         if h is not None:
             self.h = h
         self.base = max(0.0, float(base_cm))
+        self.gx = self.gy = 0.0
         self.ev = 0.0
         self.events = []
         self.s = self.ts = self.tc = self.ms = self.mc = 0.0
         self.why = why
+
+    def seen(self, gx, gy):
+        """The camera lost it while its own pose and the camera's last spot disagreed by (gx, gy) (own -> camera)."""
+        self.gx, self.gy = float(gx), float(gy)
 
     def widen_base(self, cm):
         """The error already seen grows (its own pose disagrees with the camera more than at the anchor): never shrinks
@@ -277,7 +286,7 @@ class Shape:
         """(forward, back, across) after s cm with lateral reach lat (cm)."""
         f = self.axes_fit.get()
         k = self.k_cal()
-        fwd = k * (f["b_fwd"] + f["a_fwd"] * s) if s > 0 else 0.0
+        fwd = k * min(s, f["b_fwd"] + f["a_fwd"] * s)       # it cannot overshoot by more than it drove
         back = k * min(s, f["b_back"])
         across = k * (f["b_across"] + f["a_across"] * s + min(s, lat))
         if self.hd_deg:
@@ -289,10 +298,9 @@ class Shape:
             fwd = max(fwd, s * (1.0 - math.cos(hd)))      # which way is "back" is in doubt too: both ways
         return fwd, back, across
 
-    @staticmethod
-    def _ell(iso, fwd, back, across, ang):
-        """(iso, along semi-axis, across, angle, centre offset along the chord: + forward)."""
-        return iso, 0.5 * (fwd + back), across, ang, 0.5 * (fwd - back)
+    def _ell(self, iso, fwd, back, across, ang):
+        """(iso, along semi-axis, across, angle, centre offset along the chord: + forward, seen gx, seen gy)."""
+        return iso, 0.5 * (fwd + back), across, ang, 0.5 * (fwd - back), self.gx, self.gy
 
     def axes(self):
         return self.axes_at(self.s, self.head_doubt_rad())
@@ -314,18 +322,20 @@ class Shape:
 
     def extent(self):
         """Its largest reach in any direction from its own pose (cm): the circle that holds the whole shape."""
-        i, a, b, _, off = self.ellipse()
-        return i + max(a + abs(off), b)
+        i, a, b, _, off, gx, gy = self.ellipse()
+        return i + max(a + abs(off), b) + math.hypot(gx, gy)
 
     def support(self, nx, ny, ell=None):
-        i, a, b, ang, off = ell or self.ellipse()
+        i, a, b, ang, off, gx, gy = ell or self.ellipse()
         return i + support_ellipse(a, b, ang, nx, ny) + off * (nx * math.cos(math.radians(ang)) +
-                                                               ny * math.sin(math.radians(ang)))
+                                                               ny * math.sin(math.radians(ang))) + \
+            max(0.0, gx * nx + gy * ny)
 
     def summary(self):
-        i, a, b, ang, off = self.ellipse()
+        i, a, b, ang, off, gx, gy = self.ellipse()
         f, bk, _ = self.axes()
         return dict(iso=round(i, 2), forward=round(f, 2), back=round(bk, 2), across=round(b, 2), angle=round(ang, 1),
+                    seen_cm=round(math.hypot(gx, gy), 2),
                     s=round(self.s, 1), extent=round(self.extent(), 2), base=round(self.base, 2),
                     events=list(self.events[-5:]), why=self.why, fit=self.axes_fit.get().get("source"))
 
@@ -370,7 +380,7 @@ def support_ellipse(a, b, ang_deg, nx, ny):
     return math.sqrt((a * pu) ** 2 + (b * pv) ** 2)
 
 
-def rect_margin(rect, x, y, iso, a, b, ang_deg, off=0.0):
+def rect_margin(rect, x, y, iso, a, b, ang_deg, off=0.0, gx=0.0, gy=0.0):
     """How far the shape centred at (x, y) stays inside the rectangle (x0, y0, x1, y1): the least over the four sides of
     (distance to that side - the shape's reach toward it). A rect with its own edge_dist (a proven workspace): the shape's
     largest reach (the workspace has no sides to aim at)."""
@@ -378,25 +388,28 @@ def rect_margin(rect, x, y, iso, a, b, ang_deg, off=0.0):
     x, y = x + off * c, y + off * s                  # the ellipse's own centre (back along its track)
     f = getattr(rect, "edge_dist", None)
     if f is not None:
-        return f(x, y) - iso - max(a, b)
+        return f(x, y) - iso - max(a, b) - math.hypot(gx, gy)
     x0, y0, x1, y1 = rect[:4]
     rx = math.sqrt((a * c) ** 2 + (b * s) ** 2)      # reach along +-x
     ry = math.sqrt((a * s) ** 2 + (b * c) ** 2)      # reach along +-y
-    return min(x - x0 - rx, x1 - x - rx, y - y0 - ry, y1 - y - ry) - iso
+    # the seen segment reaches max(0, g . n) toward each side
+    return min(x - x0 - rx - max(0.0, -gx), x1 - x - rx - max(0.0, gx), y - y0 - ry - max(0.0, -gy),
+               y1 - y - ry - max(0.0, gy)) - iso
 
 
-def rect_margin_v(rect, xs, ys, iso, a, b, ang_deg, off=0.0):
+def rect_margin_v(rect, xs, ys, iso, a, b, ang_deg, off=0.0, gx=0.0, gy=0.0):
     """rect_margin over arrays (numpy)."""
     import numpy as np
     c, s = np.cos(np.radians(ang_deg)), np.sin(np.radians(ang_deg))
     xs, ys = xs + off * c, ys + off * s
     f = getattr(rect, "edge_dist", None)
     if f is not None:
-        return np.array([f(float(x), float(y)) for x, y in zip(xs, ys)]) - iso - np.maximum(a, b)
+        return np.array([f(float(x), float(y)) for x, y in zip(xs, ys)]) - iso - np.maximum(a, b) - np.hypot(gx, gy)
     x0, y0, x1, y1 = rect[:4]
     rx = np.sqrt((a * c) ** 2 + (b * s) ** 2)
     ry = np.sqrt((a * s) ** 2 + (b * c) ** 2)
-    return np.minimum(np.minimum(xs - x0 - rx, x1 - xs - rx), np.minimum(ys - y0 - ry, y1 - ys - ry)) - iso
+    return np.minimum(np.minimum(xs - x0 - rx - np.maximum(0.0, -gx), x1 - xs - rx - np.maximum(0.0, gx)),
+                      np.minimum(ys - y0 - ry - np.maximum(0.0, -gy), y1 - ys - ry - np.maximum(0.0, gy))) - iso
 
 
 def _centre(p, s_):
@@ -414,10 +427,19 @@ def pair_gap(p, sa, q, sb):
     dx, dy = q[0] - p[0], q[1] - p[1]
     d = math.hypot(dx, dy)
     if d < 1e-9:
-        return -(sa[0] + max(sa[1], sa[2]) + sb[0] + max(sb[1], sb[2]))
+        return -(sa[0] + max(sa[1], sa[2]) + _gl(sa) + sb[0] + max(sb[1], sb[2]) + _gl(sb))
     ux, uy = dx / d, dy / d
-    return d - sa[0] - support_ellipse(sa[1], sa[2], sa[3], ux, uy) - sb[0] - support_ellipse(sb[1], sb[2], sb[3], -ux,
-                                                                                               -uy)
+    return d - sa[0] - support_ellipse(sa[1], sa[2], sa[3], ux, uy) - _gs(sa, ux, uy) - sb[0] - \
+        support_ellipse(sb[1], sb[2], sb[3], -ux, -uy) - _gs(sb, -ux, -uy)
+
+
+def _gl(s_):
+    return math.hypot(s_[5], s_[6]) if len(s_) > 6 else 0.0
+
+
+def _gs(s_, ux, uy):
+    """The seen segment's reach in the direction (ux, uy)."""
+    return max(0.0, s_[5] * ux + s_[6] * uy) if len(s_) > 6 else 0.0
 
 
 def capsule_gap(p, sa, q, sb):
@@ -427,6 +449,7 @@ def capsule_gap(p, sa, q, sb):
 
     def seg(c, s_):
         iso, a, b, ang = s_[:4]
+        iso = iso + _gl(s_)                     # (the capsule comparison: the seen segment as a disc)
         if a >= b:
             r, L, th = b, a - b, ang
         else:
@@ -477,6 +500,6 @@ def true_gap(p, sa, q, sb, n=180):
         ux, uy = math.cos(th), math.sin(th)
         # separation along u: projection gap
         g = (q[0] - p[0]) * ux + (q[1] - p[1]) * uy - sa[0] - support_ellipse(sa[1], sa[2], sa[3], ux, uy) - sb[0] - \
-            support_ellipse(sb[1], sb[2], sb[3], -ux, -uy)
+            support_ellipse(sb[1], sb[2], sb[3], -ux, -uy) - _gs(sa, ux, uy) - _gs(sb, -ux, -uy)
         best = min(best, -g)
     return -best          # the largest separation over all axes (convex sets: the true gap when positive)
