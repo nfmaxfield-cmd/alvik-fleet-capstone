@@ -705,3 +705,19 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-11-12/e21-problem-25-runs-stands-falls-contacts-e20-vs-e21-chart.png`: 25 hard-simulator runs: the longest stand per run, e20 against e21 with each camera verdict, with falls and contacts marked. **problem**. e21 report section 9
 - `2026-11-12/e21-feature-25-runs-e20-vs-e21-both-verdicts-terminal.png`: The 25-run totals: e20 4 falls, e21 per-camera verdict 8, e21 final (whole verdict) 3; stands and stage shares. **feature**. e21 report section 9
 - `2026-11-12/e21-problem-falls-traced-pose-far-from-truth-terminal.png`: Every fall of both codes traced: most of e21's came with the robot's own pose 30-150 cm from the truth (another robot named as it). **problem**. e21 report section 9
+
+
+## 2026-11-13 (e22: no standing, no waiting for a person; report build-reports/e22-nov13-no-standing.md)
+- `2026-11-13/e22-feature-error-shapes-on-the-map-chart.png`: Each robot's error shape on the board at two moments of a hard-simulator run (where it thinks it is, where it really is, its stage). **feature**. e22 report section 2 (weekly summary)
+- `2026-11-13/e22-feature-four-stages-e21-vs-e22-chart.png`: The share of robot time in run / veer / found / pause, e21 against e22, by group of runs. **feature**. e22 report section 2 (weekly summary)
+- `2026-11-13/e22-feature-ratchet-before-after-e20-vs-e22-chart.png`: How far each robot's own pose drifts from the camera's spot at each share of the time: two real runs, e20's code and e22's in the simulator. **feature**. e22 report section 3 (weekly summary)
+- `2026-11-13/e22-feature-standing-time-25-runs-e20-e21-e22-chart.png`: The longest stand in each of the 25 runs, e20 / e21 / e22, against the 60 s line. **feature** and **problem**. e22 report section 7 (weekly summary)
+- `2026-11-13/e22-feature-falls-and-contacts-by-seed-chart.png`: Falls and body contact in each of the 25 runs, e20 / e21 / e22. **problem**. e22 report section 7 (weekly summary)
+- `2026-11-13/e22-feature-pi-tick-timing-e21-vs-e22-chart.png`: The controller's tick (estimated for the Pi 4) at each share of the ticks, planning every tick in full against planning paced. **feature**. e22 report section 4 (weekly summary)
+- `2026-11-13/e22-feature-mission-control-live-error-shapes-map-page.png`: Mission Control's map page with each robot's live error shape (an ellipse along its own track), simulator data. **feature**. e22 report section 5
+- `2026-11-13/e22-feature-mission-control-live-error-shapes-600px.png`: The same at phone width. **feature**. e22 report section 5
+- `2026-11-13/e22-feature-mission-control-status-line-nothing-running.png`: The status line with nothing running: each robot asleep with its next check-in, and the Restart Mission Control button. **feature**. e22 report section 5 (Nick 08:28)
+- `2026-11-13/e22-feature-mission-control-terminal-run-waking-a-sleeping-robot.png`: A free roam started from the terminal, shown read-only, waiting for a sleeping robot: "Center asleep, waking (next check-in in ~71 s)". **feature**. e22 report section 5 (the 08:14 run)
+- `2026-11-13/e22-feature-mission-control-terminal-run-live-shapes-read-only.png`: The same run two minutes later: the woken robot drives with the others, their shapes and tracks live. **feature**. e22 report section 5
+- `2026-11-13/e22-feature-mission-control-terminal-run-600px.png`: The terminal run at phone width. **feature**. e22 report section 5
+- `2026-11-13/e22-problem-and-fix-boxed-corner-tracks.png`: Nick's 10:00 field report in the simulator: Left boxed into a corner by two standing (held) robots; with MIRLT_BOX_ASK=0 nobody moves for 3 minutes, with it on the standing robots are asked out of its way and it gets out. **problem** and **feature**. e22 report section 6 (Nick 13 Nov ~10:00)

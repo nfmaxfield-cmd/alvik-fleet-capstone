@@ -5,7 +5,7 @@
 Every chart states what is measured and where the data come from (its title and source line); the report puts one
 plain sentence under each.
 
-Changelog: e22-2026-11-13a first version.
+Changelog: e22-2026-11-13a first version. e22c: source lines wrapped to the figure.
 """
 import glob
 import json
@@ -28,6 +28,9 @@ plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.rig
 
 
 def source(fig, text):
+    import textwrap
+    w = max(60, int(fig.get_size_inches()[0] * 15))      # (e22c) wrapped to the figure's width
+    text = "\n".join(textwrap.fill(t, w) for t in text.split("\n"))
     fig.text(0.01, 0.01, text, fontsize=8, color="#5B6474", ha="left", va="bottom")
 
 
@@ -76,10 +79,12 @@ def shapes_chart():
                                  facecolor=c, alpha=0.15, edgecolor=c, lw=1.8, ls="--" if r["lost"] else "-"))
             ax.plot([d["x"]], [d["y"]], "s", color=c, ms=9)
             ax.plot([r["truth"][0]], [r["truth"][1]], "x", color="black", ms=9, mew=2)
-            ax.text(d["x"], d["y"] + d["b"] + d["iso"] + 7, "%s (%s)" % (r["name"], r["stage"]), color=c, ha="center",
+            A_, B_ = d["a"] + d["iso"] + 4.7, d["b"] + d["iso"] + 4.7
+            top = ey + math.sqrt((A_ * sa) ** 2 + (B_ * ca) ** 2)
+            ax.text(ex, min(126.0, top + 2.0), "%s (%s)" % (r["name"], r["stage"]), color=c, ha="center",
                     fontsize=9, fontweight="bold")
         ax.set_xlim(-8, 130)
-        ax.set_ylim(-8, 130)
+        ax.set_ylim(-8, 132)
         ax.set_aspect("equal")
         ax.set_title("%.0f s into the run" % sn["t"])
         ax.set_xlabel("cm")
@@ -87,7 +92,7 @@ def shapes_chart():
                  fontsize=11)
     source(fig, "Measured: the controller's error shape (body + 95 % error; dashed: no camera fix now) and the simulator's "
                 "truth. Source: hard simulator, harsh profile seed 4, e22 code (shape_snaps.json)")
-    fig.tight_layout(rect=(0, 0.04, 1, 0.95))
+    fig.tight_layout(rect=(0, 0.06, 1, 0.95))
     save(fig, "e22-feature-error-shapes-on-the-map-chart.png")
 
 
@@ -222,7 +227,8 @@ def timing_chart():
         col = BLUE if case["way"] == "e22" else ORANGE
         ls = "-" if case["profile"] == "measured" else "--"
         ax.plot(range(len(P)), [case[p] * d.get("pi_factor", 1.0) for p, _ in P], "o" + ls, color=col, lw=2,
-                label="%s's way, %s profile" % (case["way"], case["profile"]))
+                label=("planning paced (e22), %s profile" if case["way"] == "e22" else
+                       "planning every tick in full (e21's way, same code), %s profile") % case["profile"])
     ax.axhline(50, color=RED, lw=1, ls="--")
     ax.text(0.02, 52, "the 50 ms loop", color=RED, fontsize=8)
     ax.set_yscale("log")
@@ -230,7 +236,7 @@ def timing_chart():
     ax.set_xticklabels([q for _, q in P])
     ax.set_xlabel("share of the ticks that take less than the value")
     ax.set_ylabel("controller tick, ms (estimated for the Pi 4)")
-    ax.set_title("The planner's tick: e21's way against e22's (planning paced, the cull)")
+    ax.set_title("The controller's tick: planning every tick in full against planning paced (e22)")
     ax.legend(frameon=False, fontsize=8)
     source(fig, "Measured: every tick's time on the build machine x %.0f (the Pi 4 is about 5 x slower; earlier reports). "
                 "Source: tools/pi/plan_timing_bench.py's runs, tick_timing.json" % d.get("pi_factor", 1.0))

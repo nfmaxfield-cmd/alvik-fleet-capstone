@@ -1,0 +1,16 @@
+PASS  fix delay median (real 0.59 s): 0.55
+PASS  quiet spells over 1 s per robot-hour (real 371): 382.66
+PASS  pictures a second (real 1.6): 1.4
+PASS  measured: no body contact: [0, 0, 0, 0]
+PASS  measured: bodies never closer than 1 cm (a warning: no contact): [3.13, 1.95, 6.73, 11.14]
+PASS  measured: no robot off the board: [0, 0, 0, 0]
+PASS  measured: no name swaps: [0, 0, 0, 0]
+PASS  measured: never still (no stand over 60 s by a robot free to move): [21.2, 17.8, 9.5, 13.9]
+PASS  harsh: body contact in at most a quarter of the runs: 0 of 4
+PASS  harsh: no stand over 120 s by a robot free to move: [[], [], [], []]
+FAIL  measured: no run with robots hung at an edge over 120 s in all: [0, 340.0, 0, 26.7]
+FAIL  case skew seed 2: no stand over 60 s by a robot free to move: 170.3
+PASS  case missing_cam seed 1: no stand over 60 s by a robot free to move: 15.2
+PASS  case wrong_names seed 2: no robot off the board: 0
+PASS  case restart seed 1: robots hung at an edge 120 s at most in all: 0
+2 check(s) failed
