@@ -924,6 +924,24 @@ class Controller:
             if FW_FILTER and str(r.fw or "") >= FW_E21 and not r.__dict__.get("fw_filter_sent"):
                 self.fw_filter_params(r)
 
+    def on_fw_state(self, name, sd, rej=None):
+        """(e21, 6) Its FOLLOW row's filter state: its own position sd (pos_sd_cm: the firmware's real gate for the
+        consistency escape) and, from firmware 2026-11-12e21, its refused fixes by reason and its escapes (old firmware:
+        rej None). A change in the refusals is logged (fw_refusals) so a run reports why fixes were refused."""
+        r = self.R.get(name)
+        if r is None:
+            return
+        try:
+            r.fw_sd = max(0.0, float(sd))
+        except (TypeError, ValueError):
+            pass
+        if rej:
+            old = r.__dict__.get("fw_rej") or {}
+            if any(int(rej.get(k, 0)) != int(old.get(k, 0)) for k in rej):
+                self.log("fw_refusals", dict(t=round(self.t, 2), robot=name, sd_cm=round(r.fw_sd, 2),
+                                             **{k: int(v) for k, v in rej.items()}))
+            r.fw_rej = {k: int(v) for k, v in rej.items()}
+
     def fw_filter_params(self, r):
         """(e21, 6) A robot on firmware 2026-11-12e21 or newer: its filter's settings from the measured record, sent once
         (old firmware keeps its own defaults; the Pi's consistency escape works for both). pose_sd_per_cm: the shape's
@@ -1452,9 +1470,14 @@ class Controller:
         r.pc = None
         r.bubble = BLIND_BASE
         if SHAPE:
-            pf = r.__dict__.get("pfuse")
-            if pf is not None:
-                r.shape.widen_base(r.shape.base + max(0.0, pf.disagree_cm - r.shape.base))   # (e21) the error seen
+            # (e21) the error already seen: its own pose against the camera's last fix, at that picture's time (not the
+            # pose-fuse's slowly decaying widening, which still carries a gap a re-seed has since settled)
+            if r.cam is not None:
+                oa = self.own_at(r, r.cam[0])
+                ft_ = r.__dict__.get("fpose_t")
+                if oa is not None and (ft_ is None or r.cam_arr is None or r.cam_arr >= ft_):
+                    gap = math.hypot(r.cam[1] - oa[0], r.cam[2] - oa[1])
+                    r.shape.widen_base(2.45 * (self.trust[r.name].cam_sd or 1.0) + gap)
             r.shape.why = why
         if not self.ekf_live(r):
             self.grow_bubble(r)                 # (e18) the stretch since its last fix counts (fixed or record)
@@ -1830,7 +1853,9 @@ class Controller:
                 self.ask_place(r)
         if self.t < r.__dict__.get("wiggle_due", 0.0):
             return
-        if self.can_turn_here(r):
+        # a turn on the spot never moves its shape: its corners sweep half its body round wherever it really is, so it
+        # may turn while its shape keeps half a body from every edge (no stop: it does not drive)
+        if self.shape_room(r, p, None) >= 0.0 or self.can_turn_here(r):
             mv = dict(kind="search turn", cell=None, turn=90.0, L=0.0, v=5.0, t0=self.t, p0=p, h0=h,
                       h1=wrap180(h + 90.0), end=p, phase="turn", n=r.n_moves + 1, drive_id=None, turn_id=None,
                       t_drive=None)
@@ -2201,7 +2226,7 @@ class Controller:
         if HEADING_CONFIRM and (d > REACQUIRE_MAX_CM or (CONSISTENT_ESCAPE and how == "consistent")) and \
                 r.__dict__.get("hd_confirm") is None:
             r.hd_confirm = dict(t=self.t, why="its own pose was %.0f cm off" % d, tries=0, stage=None)
-        if CONSISTENT_ESCAPE and d > FIX_GATE_CM:
+        if CONSISTENT_ESCAPE and d > REACQUIRE_MAX_CM:
             # (e21, 4; 11 Nov 08:58: Right corrected, kept heading 14 deg, drove the wrong way) a pose this far off may
             # have a heading 180 deg off too: unknown until the camera sees its next short move
             r.head_unknown = self.t
@@ -2219,6 +2244,8 @@ class Controller:
                        r.name, x, y, "the only steady sighting nobody else can claim" if how == "elimination" else
                        "the sighting that went out and came back with its own drive" if "out-and-back" in str(how) else
                        "the layer has named it all along, beyond its own filter's 6 cm gate" if how == "named far" else
+                       "its sightings agreed with each other, not with its own pose: the ratchet broken" if
+                       how == "consistent" else
                        "the sighting that turned when it wiggled", d))
 
     def far_named(self, r, t, x, y, oa, src):
@@ -2817,6 +2844,7 @@ class Controller:
                     r.__dict__.get("hd_confirm") is None:
                 # a free heading check from its own driving (never still): its heading is confirmed as by a crawl
                 r.turn_since_head = 0.0
+                r.head_unknown = None                   # (e21) the camera saw its heading by its own driving
                 self.counts["heading_confirmed_by_motion"] = self.counts.get("heading_confirmed_by_motion", 0) + 1
         if CONSISTENT_ESCAPE and r.__dict__.get("head_unknown") is not None and st != "distrusted" and \
                 res.get("err_own") is not None and res["sigma"] <= HD_CONFIRM_DEG and \

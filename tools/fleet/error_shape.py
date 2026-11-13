@@ -286,6 +286,7 @@ class Shape:
             hd = math.radians(min(180.0, self.hd_deg))
             across = max(across, s * math.sin(min(hd, math.pi / 2)))
             back = max(back, s * (1.0 - math.cos(hd)))
+            fwd = max(fwd, s * (1.0 - math.cos(hd)))      # which way is "back" is in doubt too: both ways
         return fwd, back, across
 
     @staticmethod
@@ -471,8 +472,8 @@ def true_gap(p, sa, q, sb, n=180):
     """The exact gap between two shapes (disc + ellipse each), by sampling directions (for tests and plan_cost.py)."""
     p, q = _centre(p, sa), _centre(q, sb)
     best = 1e9
-    for k in range(n):
-        th = 2 * math.pi * k / n
+    dirs = [2 * math.pi * k / n for k in range(n)] + [math.atan2(q[1] - p[1], q[0] - p[0])]
+    for th in dirs:
         ux, uy = math.cos(th), math.sin(th)
         # separation along u: projection gap
         g = (q[0] - p[0]) * ux + (q[1] - p[1]) * uy - sa[0] - support_ellipse(sa[1], sa[2], sa[3], ux, uy) - sb[0] - \
