@@ -72,6 +72,7 @@ FOLLOW_LOOK_CM = 8.0    # the robots' own front stop while driving: roam.py's 8 
                         # keeps 2.5 cm between the circles (about 6.5 face to face). No DOE: a backstop
 FIX_HZ = 10.0           # camera fixes forwarded to each robot a second (run_plan --fix-hz). Not chosen here
 TICK_S = 0.05           # the controller's loop (20 a second; the camera bridge sends ~12 fixes a second per robot)
+WAKE_AT_START = os.environ.get("MIRLT_WAKE_AT_START", "1") != "0"   # (e22) a start wakes sleeping robots (0: e21's 30 s)
 SHAPE_LIVE_S = 1.0      # (e22, 7) Mission Control's live error shapes: Nick's "every second". Not a tuning number
 SAFE = ["set safe_edge 3", "set edge_dir 0", "set edge_thr 150", "set edge_n 3", "set edge_bot_cm 11",
         "set bumper_cm 0"]                 # the robots' edge guard (ladder.SAFE; not kept over a power-off)
@@ -168,6 +169,7 @@ class Runner:
             say("Names in this run only (the robots keep their WiFi names): %s" % ", ".join(
                 "%s is %s" % kv for kv in sorted(self.aliases.items())))
         self.link = AC.Link(outdir, ips, aliases=self.aliases)
+        self.ips_ = list(ips or ())
         self.link.session.quiet = True
         self.link.session.listeners.append(lambda *v: self.q.put((AC.now(),) + v))
         self.source = UdpSource(fix_port)
@@ -489,6 +491,9 @@ class Runner:
                     c.R[name].arc_scales = (float(m.group(1)), float(m.group(2)))
                 if "not calibrated" in low:
                     c.event(c.R[name], "not calibrated", vals)
+                    self.__dict__.setdefault("not_cal", set()).add(name)
+                elif low.startswith("calibrated") or "m,calibrated" in low or " calibrated" in low[:40]:
+                    self.__dict__.setdefault("cal_ok", set()).add(name)     # (e22) its compass check after a wake
                 m = re.match(r"\s*([a-z_0-9]+) = (-?[0-9.]+)", vals)
                 if m:                       # (11-05h) a `get` answer: the safety layers' read back
                     self.params_read.setdefault(name, {})[m.group(1)] = float(m.group(2))
@@ -816,6 +821,21 @@ class Runner:
         end = time.time() + 30
         while time.time() < end and not set(self.names) <= set(self.link.robots()):
             self.pump(0.3)
+        if WAKE_AT_START and not set(self.names) <= set(self.link.robots()):
+            # (e22, the 13 Nov 08:14 home run: none found, all asleep from "sleep as soon as a run ends") a robot not
+            # heard may be asleep: it is woken at its check-in, waited for one whole check-in interval, and said so
+            import wake_robots as WR
+            w = WR.Waker(self.link, self.names, getattr(self, "ips_", ()), say=say,
+                         status_path=os.path.join(self.dir, "wake.json"))
+            say("Not heard yet: %s. Asleep? Waking them: %s" % (
+                ", ".join(sorted(set(self.names) - set(self.link.robots()))),
+                "; ".join("%s %s" % (n, w.words(n)) for n in self.names if n not in self.link.robots())))
+            while not w.done() and not w.expired():
+                w.step()
+                self.pump(0.3)
+            w.step()
+            if w.woken:
+                say("Awake: %s" % ", ".join(sorted(w.heard())))
         missing = sorted(set(self.names) - set(self.link.robots()))
         if missing:
             say("Not heard from: %s: they stay out of the run." % ", ".join(missing))
@@ -823,7 +843,9 @@ class Runner:
                 c.R[n].mode, c.R[n].out_why = "gone", "not heard at the start"
         live = [n for n in self.names if n not in missing]
         if not live:
-            raise SystemExit("No robot answered.")
+            raise SystemExit("No robot answered, after waking them through a whole check-in (asleep robots answer at "
+                             "their check-in): are they switched on and on the WiFi?" if WAKE_AT_START else
+                             "No robot answered.")
         for n in live:
             self.send(n, "stop")
         self.pump(1.0)
@@ -916,6 +938,8 @@ class Runner:
             self.pump(3.0)
             if all(self.run_exp.get(n) == "follow" for n in live):
                 break
+        if WAKE_AT_START:
+            self.recheck_woken(live)       # (e22) a robot woken from sleep restarted: its compass check, then it joins
         for n in live:
             if self.run_exp.get(n) != "follow":
                 say("  %s did not start following: out of the run." % n)
@@ -1109,6 +1133,32 @@ class Runner:
         except Exception as e:  # noqa: BLE001
             say("(the error shape's fit was not written: %s)" % e)
         return out
+
+    def recheck_woken(self, live):
+        """(e22) A robot woken from deep sleep restarted (a fresh boot: "not calibrated since power-on", every value not
+        saved on it gone): its compass check only, where it stands (no spin, no roll: a few degrees' wiggle; its saved
+        gyro and wheel scales are kept: run_plan's compass_only way), one robot at a time, then its follow run."""
+        import calib_room as CR
+        for n in [n for n in live if self.run_exp.get(n) != "follow" and n in self.__dict__.get("not_cal", set())]:
+            say("  %s restarted when it woke (not calibrated since power-on): its compass check where it stands, then "
+                "it joins (about 10 s)" % n)
+            self.send(n, "stop")
+            self.send(n, "set calib_spin_deg 0")
+            self.send(n, CR.caps_cmd([(d, 0.0) for d in CR.CAP_DEGS]))
+            self.pump(0.3)
+            self.__dict__.setdefault("cal_ok", set()).discard(n)
+            self.send(n, "calibrate")
+            end = time.time() + 90.0
+            while time.time() < end and n not in self.cal_ok:
+                self.pump(0.3)
+            self.ctrl.event(self.ctrl.R[n], "compass checked", "after its wake: %s" % (
+                "done" if n in self.cal_ok else "no answer in 90 s"))
+            self.not_cal.discard(n)
+            for _ in range(3):
+                if self.run_exp.get(n) == "follow":
+                    break
+                self.send(n, "run follow")
+                self.pump(3.0)
 
     def write_shape_live(self):
         """(e22, 7; Nick 13 Nov: "show the error shape live in Mission Control, every second") Each robot's error shape
@@ -1348,6 +1398,8 @@ def dry_board(a, outdir, names):
         cmd += ["--cam-gap", g]
     for fw in a.sim_fw:
         cmd += ["--fw", fw]
+    for s_ in getattr(a, "sim_asleep", None) or []:
+        cmd += ["--asleep", s_]                    # (e22) that robot starts asleep: NAME:MIN[:FRAC] (fleet_sim)
     for s in a.sim_silent:
         cmd += ["--silent", s]
     for w in a.sim_wifi_drop:
@@ -1599,6 +1651,9 @@ def main(argv=None):
                          "(refused on the robots)")
     ap.add_argument("--sim-fw", action="append", default=[], metavar="NAME=VERSION")
     ap.add_argument("--sim-silent", action="append", default=[], metavar="NAME@T:DUR")
+    ap.add_argument("--sim-asleep", action="append", default=[], metavar="NAME:MIN[:FRAC]",
+                    help="(e22) --dry: that robot starts in deep sleep, checking in every MIN minutes, its next check-in "
+                         "FRAC of the way through (the start must wake it)")
     ap.add_argument("--sim-start", action="append", default=[], metavar="NAME=X,Y,HEADING",
                     help="(e12) --dry: that robot starts there (e.g. 3,60,180: at the x = 0 edge, facing out)")
     ap.add_argument("--sim-wifi-drop", action="append", default=[], metavar="NAME@T:DUR")

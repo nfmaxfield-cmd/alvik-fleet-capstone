@@ -26,6 +26,8 @@ VERSION = "hardsim-batch-2026-11-13e22"   # e22: the e22 counts kept too (rescue
 
 def run_one(seed, hours, profile, out, code=None, faults=None, profile_path=None):
     """One run in THIS process (the batch runs each in its own process)."""
+    os.environ.setdefault("MIRLT_PLAN_SLOWDOWN", "0")   # (e22) planning never deferred by this machine's clock: a seed
+                                                        # replays the same (the Pi's timing: tools/pi/plan_timing_bench.py)
     if code:
         sys.path.insert(0, code)          # the controller / simulator code under test
     if HERE not in sys.path:

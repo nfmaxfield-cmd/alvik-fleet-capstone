@@ -364,8 +364,16 @@ ID_MOVE_CM = _TL.WHOLE_MOVE_CM  # (e22, 2) "it moved": 3 camera sigmas (the whol
 ID_TOL_SHARE = 0.35             # (e22, 2) a chain agrees with its own motion within 35 % of the distance (the whole
                                 # watch's tolerance, e19, CHOSEN there). DOE: yes, with WHOLE_WIN_S, on real two-robot logs
 ID_MIN_N = 3                    # (e22, 2) sightings in a chain: the layer's steadiness count (ESCAPE_MIN_N). Reused
+ID_TRACK_S = 1.0                # (e22, 2) another robot's sighting this close in time on the same spot (within what it
+                                # can drive meanwhile): its track. The layer's own STEADY window is shorter; 1 s covers
+                                # a picture gap. CHOSEN; DOE: yes, with ID_TOL_SHARE, on real close passes
 ID_HIST_N = 80                  # (e22, 2) sightings kept per robot (>= 4 s at 15 a second). Not a tuning number
 COV_CELL_CM = _CT.AREA_CM       # (e22, 1c) the learned coverage's square: the trust map's 30 cm. Reused; DOE: no
+SHAPE_CHECKED_KINDS = ("veer step", "search turn", "rescue step", "rescue turn", "rescue out-and-back")
+                                # (e22, 1; harsh seed 2: robots at their blind limit never moved) moves planned against
+                                # the error shape itself (a gain or never worse; a turn on the spot never moves the middle)
+                                # are not eased to a stop by the blind limit's own check the moment they start (before
+                                # e22 every e21 veer step and search turn was halted at once: "a dropped piece started")
 RESCUE_WIGGLE_DEG = WIGGLE_DEG  # (e22, 1d) where its corners could swing over an edge: the find-me wiggle. Reused
 ROOM_CLEAR_CM = 2.0     # (4) CHOSEN: a robot making room for a lost one clears its corridor by this much more. DOE: no
 EXC_MIN_CM = 3.0        # (5) CHOSEN: an excursion shortened below this is refused (the camera's noise is ~1 cm). DOE: no
@@ -671,7 +679,9 @@ DEFER = ("defer",)      # (e22, 6) pick's "the tick's planning time ran out: aga
 PLAN_BUDGET = CULL      # (e22, 6) planning paced by its measured cost (plan_slot); "every_tick": every robot plans in
                         # the tick it is free (e21)
 TICK_S = 0.05           # the Pi's control loop (freeroam.py's 20 a second). Not chosen
-PLAN_SLOWDOWN = float(os.environ.get("MIRLT_PLAN_SLOWDOWN", "1") or 1)   # (e22) the timing bench's "as slow as the Pi"
+PLAN_SLOWDOWN = float(os.environ.get("MIRLT_PLAN_SLOWDOWN", "1") or 0)   # (e22) the timing bench's "as slow as the Pi";
+                        # 0: never deferred (the hard simulator: its seeds must replay the same, and its machine's
+                        # clock is not the Pi's)
 
 
 def _reach_bound(T):
@@ -1734,6 +1744,13 @@ class Controller:
 
     def fpose_pending_watch(self, r):
         pend = r.__dict__.get("fpose_pending")
+        if pend is not None and ID_GUARD and pend.get("why") in ("re-seed", "correction") and \
+                self.turn_rate(r) <= RESEED_TURN_DPS:
+            ok_, w_ = self.id_check(r, pend["t_pic"], pend["x"], pend["y"], None, "pending " + pend["why"])
+            if not ok_:                                # (e22, 2) checked again when it lands: the others moved meanwhile
+                r.fpose_pending = None
+                self.id_refused(r, "a waiting %s" % pend["why"], w_)
+                return
         if pend is not None:
             self.send_fpose(r, pend["t_pic"], pend["x"], pend["y"], pend["th"], pend["sig"], pend["sig_th"],
                             pend["why"])
@@ -2152,6 +2169,14 @@ class Controller:
                 self.counts["id_refused_other"] = self.counts.get("id_refused_other", 0) + 1
                 return False, "the sighting lies inside %s's error shape too (%.0f cm from its own pose): ambiguous" % (
                     o.name, d_)
+            # the other robot's own track: the layer gave it a sighting on this spot just now (its own pose may be the
+            # wrong one, so its shape alone does not say where it is)
+            for q2 in reversed(o.__dict__.get("idh", [])[-ID_MIN_N * 3:]):
+                if abs(q2[0] - t) <= ID_TRACK_S and math.hypot(x - q2[1], y - q2[2]) <= noise * math.sqrt(2.0) + \
+                        V_MAX * abs(q2[0] - t):
+                    self.counts["id_refused_track"] = self.counts.get("id_refused_track", 0) + 1
+                    return False, "%s's own track passed this spot %.1f s from this picture: ambiguous" % (
+                        o.name, abs(q2[0] - t))
         inside = True
         d_own = 0.0
         if o_own is not None:
@@ -2224,13 +2249,13 @@ class Controller:
         fc = r.__dict__.get("fix_cam")
         if self.camtrust is not None and fc and fc[0] and CAMERA_TRUST_BOOK:
             try:
-                if self.camtrust.state(fc[0], fc[1], "position", x, y) != "trusted":
+                if self.camtrust.state(fc[0], fc[1], "position", x, y) == "distrusted":
                     self.counts["id_refused_outside"] = self.counts.get("id_refused_outside", 0) + 1
-                    return False, "outside its own error shape and the camera is not trusted there"
+                    return False, "outside its own error shape and the camera is distrusted there"
             except Exception:  # noqa: BLE001
                 return False, "outside its own error shape (the camera's trust unknown)"
-        return True, "outside its own error shape (%.0f cm), but its sightings moved as its wheels did, from a camera " \
-            "trusted there" % d_own
+        return True, "outside its own error shape (%.0f cm), but its joined-up sightings moved as its own wheels did " \
+            "(a shape that missed a push), on nobody else's track, from a camera not distrusted there" % d_own
 
     def id_refused(self, r, why, words):
         """(e22, 2) A correction the identity guard held back: logged (identity.csv), said at most every 10 s."""
@@ -2440,6 +2465,8 @@ class Controller:
             if g is not None:
                 self.rescue_send(r, p, h, g, why)
                 rung = g["rung"]
+        if rung is None and not hd_unknown:
+            rung = self.rescue_probe(r, p, h)
         if rung is None:
             turn_ok = self.can_turn_here(r) or (SHAPE and self.shape_room(r, p, None) >= 0.0)
             deg = 90.0 if turn_ok else RESCUE_WIGGLE_DEG * (1 if rs["n"] % 2 else -1)
@@ -2460,6 +2487,49 @@ class Controller:
         self.why_zero(r, "self-rescue: " + rung)
         self.rescue_note(r, "self-rescue", "%s: %s (self-rescue step %d)" % (why, rung, rs["n"]))
         return rung
+
+    def rescue_probe(self, r, p, h):
+        """(e22, 1a for a known heading) No move gains room or finds better ground: a short out-and-back along the
+        heading (after a turn on the spot where it may turn) whose out end keeps its shape's room (never worse), so the
+        camera sees it move: the motion its identity check and the whole-camera watch need to believe a sighting.
+        Returns the rung's words, or None."""
+        L = max(ID_MOVE_CM, self.rescue_ob_cm(r))
+        room0 = self.shape_room(r, p, 3.0) if SHAPE else edge_dist(self.rect, *p) - self.unc(r) - HALF
+        heads = [wrap180(h + d) for d in range(0, 360, 30)] if self.can_turn_here(r) else [h]
+        best = None
+        for hh in heads:
+            ex, ey = p[0] + L * math.cos(math.radians(hh)), p[1] + L * math.sin(math.radians(hh))
+            if SHAPE:
+                g = ES.rect_margin(self.rect, ex, ey, *r.shape.along_path([(ex, ey)], hh)[-1]) - HALF - \
+                    SR.stop_cm(3.0) - room0
+            else:
+                g = edge_dist(self.rect, ex, ey) - self.unc(r) - BLIND_PER_CM * L - HALF - room0
+            if g < -self.GAIN_EPS_CM:
+                continue
+            tr = Traj.move(self.t + 0.2, p, hh, 0.0, L, 3.0, m0=self.margin0(r, iso_only=True))
+            if not self.keepout_ok(r, tr) or any(clearance(tr, o.traj, now=self.t) < REFLEX_CC for o in self.others(r)):
+                continue
+            if best is None or g > best[0]:
+                best = (g, hh, tr)
+        if best is None:
+            return None
+        g, hh, tr = best
+        turn = wrap180(hh - h)
+        x, y = p
+        ex, ey = tr.end
+        mv = dict(kind="rescue out-and-back", cell=None, turn=turn, L=0.0, v=3.0, t0=self.t, p0=p, h0=h, h1=hh,
+                  end=p, phase="turn" if abs(turn) >= 3.0 else "drive", n=r.n_moves + 1, drive_id=None, turn_id=None,
+                  t_drive=None, adj_scale=1.0, rev=False, ob_L=L)
+        if abs(turn) >= 3.0:
+            self.send_step(r, "fs %%d T %.2f -" % hh)
+        mv["turn_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 0 -" % (x, y, ex, ey, hh, 3.0))
+        mv["drive_id"] = self.send_step(r, "fs %%d D %.2f %.2f %.2f %.2f %.2f %.2f 1 -" % (ex, ey, x, y, hh, 3.0))
+        r.move, r.mode = mv, "move"
+        r.traj = Traj.stand(self.t, *p, m=self.margin0(r) + L)
+        r.n_moves += 1
+        self.pump(r)
+        return "a: out %.1f cm and back after a %.0f deg turn (its shape's room kept), so the camera sees it move" % (
+            L, turn)
 
     def rescue_ob_cm(self, r):
         """(e22, 1a) The out-and-back's length: what the camera's measured noise needs to show a heading and to name the
@@ -5417,7 +5487,10 @@ class Controller:
         ws.append((t0 - 0.5, self.t + 0.5))
         del ws[:-20]
         self.counts["slips_tagged"] = self.counts.get("slips_tagged", 0) + 1
-        if r.cam is not None and self.fresh(r) and r.lost is None and r.own is not None:
+        if r.cam is not None and self.fresh(r) and r.lost is None and r.own is not None and \
+                (not ID_GUARD or r.cam[0] >= t0):
+            # (e22) only a picture taken during the move that did not move: the body is where it showed it (an older
+            # fix, kept "fresh" because the robot stood, says where it was before the move began)
             oa = self.own_at(r, r.cam[0]) or r.own[1:4]
             gap = math.hypot(r.cam[1] - oa[0], r.cam[2] - oa[1])
             sg = self.trust[r.name].cam_sd or 1.0
@@ -7845,7 +7918,8 @@ class Controller:
                     self.ease_stop(r, "bubble %.1f cm" % r.bubble)
             elif p and ((r.bubble > BUBBLE_CAP or edge_dist(self.rect, *p) - r.bubble < TURN_EDGE_CC)
                         if BLIND_RULE == "cap" else self.blind_stop(r, p, r.move.get("v", 5.0) * max(r.scale, 0.0))) \
-                    and r.move["kind"] not in ("wiggle", "probe", "probe return", "outback"):
+                    and r.move["kind"] not in ("wiggle", "probe", "probe return", "outback") and \
+                    not (SELF_RESCUE and r.move["kind"] in SHAPE_CHECKED_KINDS):
                 # (e18) an out-and-back is checked safe at every place the camera might have it (its own pose may be far
                 # off: found by its simulator batch, where a robot whose own pose said "off the board" was eased to a
                 # stop the moment its identity drive began)

@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-13e22"   # e22 (Nick 13 Nov): headline() (one plain status line: what runs, since when, each robot found / asleep / not heard, what it waits for), STOP also stops a free roam started from the terminal (its tmux session's Ctrl+C), needs-a-hand requests of an earlier run cleared, the start-failure words say the robots were woken first, note_sleep when robots are sent to sleep. Before: "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -856,6 +856,13 @@ class Starter:
         if r:
             said.append("the run")
         pr = self.practice()
+        try:                                   # (e22) a free roam started from the terminal: its own Ctrl+C too
+            if subprocess.run(["tmux", "has-session", "-t", "freeroam"], capture_output=True, timeout=3).returncode == 0:
+                subprocess.Popen(["bash", os.path.join(REPO, "run-fleet-pi.sh"), "freeroam-stop"], cwd=REPO,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                said.append("the free roam started from the terminal (Ctrl+C to its tmux session)")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         if not pr:
             try:
                 subprocess.Popen([sys.executable, os.path.join(HERE, "stop_all.py")], cwd=REPO,
@@ -1058,6 +1065,11 @@ class Starter:
         site = self.S.site or {}
         z = float((site.get("tags") or {}).get("height_cm") or 6.0)
         rq = PC.open_requests()
+        # (e22, Nick 13 Nov 08:28) a request left by an earlier run (its robot no longer waits) is not shown as live:
+        # only requests made since this run started, while it runs
+        t0 = getattr(self, "started_t", None)
+        stale = [q for q in rq if not self.busy() or t0 is None or float(q.get("t") or 0) < t0 - 1.0]
+        rq = [q for q in rq if q not in stale]
         cams = {}
         for cam in ("overhead", "side"):
             m = None
@@ -1081,7 +1093,7 @@ class Starter:
             pts = {k: list(v)[:2] for k, v in (SP.points_cm(site)[0] or {}).items()}
         except Exception:  # noqa: BLE001
             pts = {}
-        return {"requests": rq, "cams": cams, "points": pts, "z_cm": z}
+        return {"requests": rq, "cams": cams, "points": pts, "z_cm": z, "earlier_runs_cleared": len(stale)}
 
     def place_click(self, d, who=""):
         import place_click as PC
@@ -1137,8 +1149,9 @@ class Starter:
         lines = self.mission_tail(folder, n=60)
         txt = "\n".join(lines)
         if "No robot answered" in txt:
-            return ("Not started, nothing moved: no robot answered the free-roam controller. Check the robot is "
-                    "switched on and on the WiFi (its name shows on the Start screen), then press the button again.")
+            return ("Not started, nothing moved: no robot answered the free-roam controller, even after waking them "
+                    "through a whole check-in (a sleeping robot answers at its check-in). Check the robots are "
+                    "switched on and on the WiFi (their names show on the Start screen), then press the button again.")
         if "No robot could join" in txt or "safety layers read back: nothing moved" in txt:
             return ("Not started, nothing moved: no robot could join the free roam (%s). Its log is in the folder "
                     "below." % next((x for x in reversed(lines) if "No robot" in x), "").strip())
@@ -1205,6 +1218,114 @@ class Starter:
         return []
 
     # -- sleep (Nick 6 Nov: right away when a run ends; switch in Advanced; the 30-minute timer kept, off) ------------
+    def headline(self):
+        """(e22, Nick 13 Nov 08:28: "not very clear about its current status") One plain status line, always: what is
+        running (or nothing), since when, each robot found / asleep / not heard, and what the run waits for."""
+        import live_view as LV
+        now = time.time()
+        site = self.S.site or {}
+        names = [r.get("name") for r in site.get("robots") or [] if r.get("name")]
+        try:
+            st = self.status()
+        except Exception:  # noqa: BLE001
+            st = {}
+        folder, what, since = None, "", None
+        if st.get("running"):
+            folder = st.get("folder")
+            since = getattr(self, "started_t", None)
+            what = "%s%s is running (started here)" % (st.get("title") or st.get("kind") or "A run",
+                                                        " (practice)" if st.get("practice") else "")
+        else:
+            term = LV.terminal_freeroam_folder()
+            if term:
+                folder = term
+                try:
+                    since = min(os.path.getmtime(os.path.join(term, f)) for f in os.listdir(term)) if \
+                        os.listdir(term) else None
+                except OSError:
+                    since = None
+                what = "A free roam started from the terminal is running (shown read-only; STOP stops it)"
+            else:
+                last = self.last or {}
+                what = "Nothing is running" + (". Last: %s" % last.get("words") if last.get("words") else "")
+        rob = {}
+        waking = self.wake_words(folder) if folder else {}
+        heard = {}
+        try:
+            import stop_all as SA
+            p = SA.HEARD_FILE if hasattr(SA, "HEARD_FILE") else None
+            with open(p or os.path.expanduser("~/.config/mirlt/heard_robots.json")) as f:
+                heard = json.load(f) or {}
+        except (OSError, ValueError, TypeError):
+            heard = {}
+        refs = robot_refs(site)
+        import wake_robots as WR
+        seen = {}
+        if folder:
+            for fn in ("follow.csv", "camera_track.csv"):          # its own pose / the camera, many times a second
+                try:
+                    if now - os.path.getmtime(os.path.join(folder, fn)) > 10.0:
+                        continue
+                except OSError:
+                    continue
+                for r_ in LV.tail_rows(os.path.join(folder, fn)):
+                    if r_.get("robot"):
+                        seen[r_["robot"]] = r_
+            try:
+                with open(os.path.join(folder, "wake.json")) as f:
+                    wk = json.load(f)
+                if now - float(wk.get("t") or 0) <= 10.0:
+                    seen.update({k: v for k, v in (wk.get("robots") or {}).items() if v.get("awake")})
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+        for n in names:
+            if n in seen and n not in waking:
+                rob[n] = "found"
+                continue
+            if n in waking:
+                rob[n] = waking[n]
+                continue
+            h = heard.get(n) or heard.get(refs.get(n, "")) or {}
+            t = float(h.get("t") or 0) if isinstance(h, dict) else 0.0
+            sl = WR.sleep_record(n)
+            if folder and t and now - t < 60:
+                rob[n] = "found"
+            elif sl and float(sl.get("t") or 0) >= t - 5:
+                nx = WR.next_checkin_s(n, now)
+                rob[n] = "asleep" + (" (next check-in in ~%.0f s; a start wakes it)" % nx if nx is not None else "")
+            elif t:
+                rob[n] = "last heard %s" % time.strftime("%H:%M", time.localtime(t))
+            else:
+                rob[n] = "not heard yet"
+        waiting = ""
+        if waking:
+            waiting = "waiting for sleeping robots to check in (they are woken then)"
+        elif st.get("running") or folder:
+            lines = list(st.get("lines") or [])
+            w_ = [ln for ln in lines if ln.strip().lower().startswith("waiting")]
+            waiting = w_[-1].strip() if w_ else ""
+        words = what + (", since %s (%d min)" % (time.strftime("%H:%M", time.localtime(since)), (now - since) // 60)
+                        if since else "") + "."
+        if rob:
+            words += " Robots: " + "; ".join("%s %s" % kv for kv in rob.items()) + "."
+        if waiting:
+            words += " Waiting: " + waiting.rstrip(".") + "."
+        return {"words": words, "running": bool(st.get("running")), "terminal": bool(folder and not st.get("running")),
+                "robots": rob, "waiting": waiting, "since": since}
+
+    def wake_words(self, folder=None):
+        """(e22) The run's wake.json (wake_robots.Waker): {robot: "asleep, waking (next check-in in ~N s)"} while a start
+        waits for sleeping robots; {} otherwise."""
+        folder = folder or self.run_folder()
+        try:
+            with open(os.path.join(folder, "wake.json")) as f:
+                d = json.load(f)
+            if time.time() - float(d.get("t") or 0) > 10.0:
+                return {}
+            return {n: v.get("words") for n, v in (d.get("robots") or {}).items() if not v.get("awake")}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
     def on_run_end(self, refused=False):
         if self.active_practice or not self.adv.get("sleep_when_done", True):
             return False
@@ -1224,6 +1345,8 @@ class Starter:
             subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "pi", "robot_sleep.py"), "sleep",
                             str(ck), "255.255.255.255"], timeout=20, capture_output=True)
             self.sleep_log.append(dict(t=time.time(), why=why))
+            import wake_robots as WR
+            WR.note_sleep(None, ck, why)          # (e22) the next start says when each checks in
             print("%s: every robot sent `sleep %d` (it wakes for 20 s every %d min; robot_sleep.py wake any brings "
                   "it back)" % (why, ck, ck), flush=True)
         except (OSError, subprocess.TimeoutExpired) as e:
@@ -1236,6 +1359,7 @@ class Starter:
                 "mode_words": "PRACTICE: the simulator (no real camera here)" if pr else "ROBOTS: the real robots",
                 "robots": {"n": n, "names": names, "words": rw}, "area": self.area_words(), "map": self.map_words(),
                 "buttons": self.buttons(), "status": self.status(), "advanced": dict(self.adv),
+                "headline": self.headline(),
                 "prefs": self.prefs_state(),
                 "attended_only": bool((self.S.site or {}).get("attended_only")),
                 "typed": self.typed_values(), "sites": self.site_choices(),

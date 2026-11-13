@@ -34,9 +34,10 @@ import sys, time, json, os
 sys.path.insert(0, sys.argv[1])
 import freeroam_fastsim as F, fastsim_realism as R, freeroam_core as FC
 ts = []
+clock = time.thread_time if os.environ.get("BENCH_CPU") == "1" else time.perf_counter
 orig = FC.Controller.tick
 def tick(self, t):
-    a = time.perf_counter(); orig(self, t); ts.append(time.perf_counter() - a)
+    a = clock(); orig(self, t); ts.append(clock() - a)
 FC.Controller.tick = tick
 prof = R.load_profile(sys.argv[2]); Cls = R.make_class(F)
 s = Cls(int(sys.argv[3]), float(sys.argv[4]), profile=sys.argv[2], prof=prof, camera="detections", sensors=True,
@@ -55,8 +56,9 @@ print(json.dumps(dict(ticks=n, mean_ms=round(1000.0 * sum(ts) / n, 3), p50_ms=ro
 '''
 
 
-def run_case(profile, seed, hours, way):
-    env = dict(os.environ, MIRLT_PLAN_BUDGET="derived" if way == "e22" else "every_tick", MIRLT_PLAN_SLOWDOWN="1")
+def run_case(profile, seed, hours, way, cpu=False):
+    env = dict(os.environ, MIRLT_PLAN_BUDGET="derived" if way == "e22" else "every_tick", MIRLT_PLAN_SLOWDOWN="1",
+               BENCH_CPU="1" if cpu else "0")
     env.setdefault("HOME", "/tmp")
     t0 = time.time()
     r = subprocess.run([sys.executable, "-c", ONE, FLEET, profile, str(seed), str(hours)], capture_output=True,
@@ -88,8 +90,13 @@ def main(argv=None):
     ap.add_argument("--quick", action="store_true", help="e22's way only, the measured profile only")
     ap.add_argument("--hours", type=float, default=0.1, help="simulated hours per case (0.1 = about 6,700 ticks)")
     ap.add_argument("--out", default=os.path.join(REPO, "logs", "timing"))
+    ap.add_argument("--cpu", action="store_true", help="time each tick by the CPU time it used (a machine running "
+                    "other work); default: the wall clock, as the loop lives it")
+    ap.add_argument("--seeds", default=None, help="profile:seed,... (default measured:1,harsh:4)")
     a = ap.parse_args(argv)
     cases = [("measured", 1)] if a.quick else [("measured", 1), ("harsh", 4)]
+    if a.seeds:
+        cases = [(q.split(":")[0], int(q.split(":")[1])) for q in a.seeds.split(",")]
     ways = ["e22"] if a.quick else ["e22", "e21"]
     print("Timing the free-roam controller on %s (load %s). Nothing moves. Each case takes 1-3 minutes." % (
         model(), loadavg()))
@@ -97,7 +104,7 @@ def main(argv=None):
     for prof, seed in cases:
         for way in ways:
             print("  %s seed %d, %s's way ..." % (prof, seed, way), flush=True)
-            d = run_case(prof, seed, a.hours, way)
+            d = run_case(prof, seed, a.hours, way, a.cpu)
             res.append(d)
             if "error" in d:
                 print("    FAILED: %s" % d["error"])
@@ -109,6 +116,7 @@ def main(argv=None):
     fn = os.path.join(a.out, "plan-timing-%s.json" % time.strftime("%Y%m%d-%H%M%S"))
     with open(fn, "w") as f:
         json.dump(dict(version=VERSION, model=model(), load=loadavg(), python=sys.version.split()[0],
+                       clock="thread CPU time" if a.cpu else "wall clock",
                        when=time.strftime("%Y-%m-%d %H:%M:%S"), cases=res), f, indent=1)
     ok = [d for d in res if d.get("way") == "e22" and "p99_ms" in d]
     worst = max([d["p99_ms"] for d in ok] or [float("nan")])

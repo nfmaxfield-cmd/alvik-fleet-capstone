@@ -18,6 +18,9 @@ Changelog
   2026-11-12a  first version (Mission Control build)
   2026-11-12e21  pm_cm is the robot's ONE error shape's largest reach (state.json's shape, error_shape.py) when the run
                  writes it, not the firmware's own sd (about 6x too sure: the 12 Nov audit); shape and stage added.
+  2026-11-13e22b (Nick 13 Nov 08:28) a free roam started from the terminal (tmux session freeroam) is shown read-only
+                 (terminal_freeroam_folder: the newest logs/*-freeroam folder whose files changed in the last 15 s);
+                 robots being woken at a start say so (wake.json).
   2026-11-13e22  (Nick 13 Nov) the shape every second: shape_live.json (freeroam.py) gives each robot's shape to draw
                  (shape_draw: its pose, disc, ellipse, seen segment), its stage and whether it is rescuing itself.
 """
@@ -106,6 +109,14 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
             state = json.load(f).get("robots") or {}
     except (OSError, ValueError):
         pass
+    waking = {}
+    try:                                   # (e22) a start waiting for sleeping robots (wake_robots.Waker's wake.json)
+        with open(os.path.join(folder, "wake.json")) as f:
+            wk = json.load(f)
+        if now - float(wk.get("t") or 0.0) <= 10.0:
+            waking = {k: v.get("words") for k, v in (wk.get("robots") or {}).items() if not v.get("awake")}
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     live_shape = {}
     try:                                   # (e22, 7) the shapes every second (freeroam.py's shape_live.json)
         with open(os.path.join(folder, "shape_live.json")) as f:
@@ -152,7 +163,10 @@ def from_freeroam(folder, names_colours, refs, needs=(), now=None):
         draw = ls.get("shape") if isinstance(ls.get("shape"), dict) else None
         pm = (round(float(shp["extent"]), 1) if shp and shp.get("extent") is not None else
               (round(K95_2D * sd, 1) if sd else None))
+        if waking.get(n):
+            src = waking[n]                    # (e22) asleep at the start: being woken, said plainly
         out.append(dict(name=n, ref=refs.get(n, ""), colour=names_colours.get(n), x=x, y=y, th=wrap360(th),
+                        waking=waking.get(n),
                         pm_cm=pm, shape=shp, shape_draw=draw, stage=ls.get("stage") or st.get("stage"),
                         rescue=bool(ls.get("rescue")), seen=fresh, source=src,
                         since_fix_s=round(now - tc, 1) if tc else None, battery=bat.get(n) or st.get("battery"),
@@ -222,6 +236,32 @@ def freeroam_folder(starter):
     return max(c, key=os.path.getmtime) if c else None
 
 
+TERMINAL_FRESH_S = 15.0   # (e22) a free roam folder whose own files changed this recently is a run going now (it writes
+                          # follow.csv ~10 a second and shape_live.json every second). Not a tuning number
+
+
+def terminal_freeroam_folder(repo=None, now=None):
+    """(e22, Nick 13 Nov 08:28: a free roam started from PowerShell, ./run-fleet-pi.sh freeroam, was not on the table
+    page) The newest logs/*-freeroam folder whose own files changed in the last TERMINAL_FRESH_S seconds (a run going
+    now, started from the terminal or anywhere), else None. MIRLT_RUNS_GLOB overrides where to look (tests)."""
+    now = time.time() if now is None else now
+    repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pat = os.environ.get("MIRLT_RUNS_GLOB") or os.path.join(repo, "logs", "*-freeroam*")
+    best = None
+    for d in glob.glob(pat):
+        if not os.path.isdir(d):
+            continue
+        t = 0.0
+        for f in ("shape_live.json", "follow.csv", "camera_track.csv", "wake.json", "events.csv"):
+            try:
+                t = max(t, os.path.getmtime(os.path.join(d, f)))
+            except OSError:
+                pass
+        if now - t <= TERMINAL_FRESH_S and (best is None or t > best[0]):
+            best = (t, d)
+    return best[1] if best else None
+
+
 def table_of(S, folder=None):
     m = getattr(S, "map", None) or {}
     f = m.get("floor") or {}
@@ -278,6 +318,14 @@ def snapshot(starter):
         if folder:
             robots = from_freeroam(folder, colours, refs, st_needs)
             src = "camera_track.csv and follow.csv (free roam's camera fixes and each robot's own pose)"
+    terminal = None
+    if not robots and not (kind and running):
+        terminal = terminal_freeroam_folder()           # (e22) a free roam started from the terminal: read-only here
+        if terminal:
+            folder = terminal
+            robots = from_freeroam(terminal, colours, refs, [])
+            src = ("a free roam started from the terminal (tmux session freeroam), shown read-only: STOP stops it; "
+                   "its folder %s" % os.path.basename(terminal.rstrip("/")))
     for i, r in enumerate(robots):
         r["colour"] = r.get("colour") or ("#2952CC", "#C2410C", "#7A3EC8", "#0E7C86", "#B54708")[i % 5]
     pts = {}
@@ -286,9 +334,9 @@ def snapshot(starter):
             pts[k] = [v[0], v[1]]
     tf = folder or (getattr(S.run, "folder", None) if S.run is not None and starter.tags() else None)
     try:
-        tr = tracks(tf, since_s=60.0 if running else None) if kind and tf else {}
+        tr = tracks(tf, since_s=60.0 if (running or terminal) else None) if (kind or terminal) and tf else {}
     except Exception:  # noqa: BLE001
         tr = {}
     return {"t": time.time(), "running": running, "kind": kind, "table": table_of(S, folder), "points": pts,
             "robots": robots, "tracks": tr, "tracks_words": "the last minute" if running else "the whole run",
-            "source": src, "version": VERSION}
+            "source": src, "terminal": bool(terminal), "terminal_folder": terminal, "version": VERSION}

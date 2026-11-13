@@ -365,3 +365,155 @@ def test_a_standing_robot_31_cm_off_is_corrected_once_its_own_move_shows_the_sig
     assert ev, [e[2] for e in R.events if e[1] == "Center"][-20:]
     assert R.own_gap("Center") < 4.0
     assert all(R.own_gap(n) < 6.0 for n in ("Left", "Right"))        # nobody else corrected onto its spot
+
+
+# -- missions' veer (Nick 13 Nov): it leaves its lane only where its shape stays clear of the edge and others' shapes -----
+def test_a_missions_turn_back_is_checked_with_its_shape_and_the_others_shapes():
+    import types
+    import run_plan as RP
+    cls = [c for c in vars(RP).values() if isinstance(c, type) and hasattr(c, "recover_shape_ok")][0]
+    sh = ES.Shape("A", OT.Trust("A"))
+    sh.anchor(0.0, 60.0, 60.0, 0.0, 2.45)
+    for k in range(20):
+        sh.drive(60.0 + k + 1, 60.0, 0.0, 1.0, 0.0, False)
+    me = types.SimpleNamespace(name="A", out=False, pose=(80.0, 60.0, 0.0), blind=dict(shape=sh))
+    far = types.SimpleNamespace(name="B", out=False, pose=(20.0, 110.0, 0.0), blind=None)
+    rect = (0.0, 0.0, 122.0, 122.0)
+    self_ = types.SimpleNamespace(bots={"A": me, "B": far}, RECOVER_GAP_CM=cls.RECOVER_GAP_CM)
+    ok, why = cls.recover_shape_ok(self_, me, me.blind, 80.0, 60.0, 62.0, 60.0, rect)
+    assert ok, why
+    near = types.SimpleNamespace(name="B", out=False, pose=(66.0, 72.0, 0.0), blind=None)    # beside its way back
+    self_.bots["B"] = near
+    ok, why = cls.recover_shape_ok(self_, me, me.blind, 80.0, 60.0, 62.0, 60.0, rect)
+    assert not ok and "B" in why
+    self_.bots["B"] = far
+    ok, why = cls.recover_shape_ok(self_, me, me.blind, 80.0, 60.0, 118.0, 60.0, rect)       # toward the far edge
+    assert not ok and "edge" in why
+
+
+def test_a_shape_checked_move_at_the_blind_limit_is_not_eased_to_a_stop_the_moment_it_starts():
+    c, out, logs = _ctrl(("A",))
+    r = _place(c, "A", 9.0, 60.0, 0.0, lost=True)          # lost, near the edge: its blind limit
+    assert c.blind_stop(r, c.pos(r), 5.0)
+    for kind in FC.SHAPE_CHECKED_KINDS:
+        r.mode = "move"
+        r.move = dict(kind=kind, cell=None, turn=0.0, L=0.0, v=5.0, t0=c.t, p0=c.pos(r), h0=0.0, h1=0.0,
+                      end=c.pos(r), phase="turn", n=1, drive_id=None, turn_id=None, t_drive=None)
+        c.watch(r)
+        assert r.move is not None and r.move["kind"] == kind, kind
+    r.move["kind"] = "creep"                               # anything else still eases to a stop there
+    c.watch(r)
+    assert r.move is None
+
+
+def test_a_sighting_on_another_robots_own_track_is_ambiguous_even_when_its_own_pose_is_wrong():
+    c, out, logs = _ctrl()
+    rA = _place(c, "A", 40.0, 60.0, 0.0)
+    rB = _place(c, "B", 100.0, 100.0, 0.0)                 # B's own pose is wrong: it is really at 52, 60
+    c.id_hist_add(rB, 0.9, 52.0, 60.0)
+    ok, why = c.id_check(rA, 1.0, 52.3, 60.1)
+    assert not ok and "B's own track" in why
+
+
+def test_a_waiting_reseed_is_checked_again_when_it_lands():
+    c, out, logs = _ctrl()
+    rA = _place(c, "A", 40.0, 60.0, 0.0)
+    _place(c, "B", 47.0, 60.0, 180.0)                       # B now stands on the spot
+    rA.fpose_pending = dict(t_pic=1.0, x=47.0, y=60.0, th=None, sig=1.0, sig_th=3.0, why="re-seed", t0=1.0)
+    n0 = len(out)
+    c.fpose_pending_watch(rA)
+    assert rA.fpose_pending is None and not any("fpose" in t for n, t in out[n0:])
+
+
+# -- waking sleeping robots at a run's start (the 13 Nov 08:14 home run: none found, all asleep) ----------------------
+class _FakeLink:
+    def __init__(self):
+        self.heard, self.sent = set(), []
+
+    def robots(self):
+        return sorted(self.heard)
+
+    def send_name(self, n, c):
+        self.sent.append((n, c))
+        return True
+
+    def send_all(self, c):
+        self.sent.append(("*", c))
+
+    def send_ip(self, ip, c):
+        self.sent.append((ip, c))
+
+
+def test_the_waker_waits_one_check_in_says_when_and_wakes_each_robot_the_moment_it_is_heard(tmp_path):
+    import wake_robots as WR
+    sp = str(tmp_path / "sleep_state.json")
+    clock = [1000.0]
+    WR.note_sleep(None, 10, "the run ended", path=sp, now=1000.0)
+    link = _FakeLink()
+    clock[0] = 1000.0 + 7 * 60.0                        # 7 min after `sleep 10`: its check-in is ~3 min away
+    w = WR.Waker(link, ["Left", "Center"], ["192.168.1.250"], say=lambda *a: None,
+                 status_path=str(tmp_path / "wake.json"), sleep_path=sp, now=lambda: clock[0])
+    assert w.limit == pytest.approx(10 * 60 + WR.AWAKE_S + WR.BOOT_S)
+    assert "asleep, waking (next check-in in ~180 s)" == w.words("Left")
+    w.step()
+    assert ("255.255.255.255", "wake") in link.sent and ("192.168.1.250", "wake") in link.sent
+    d = json.load(open(tmp_path / "wake.json"))
+    assert d["robots"]["Left"]["words"].startswith("asleep, waking")
+    link.heard.add("Left")                              # its check-in is heard: `wake` to it at once
+    clock[0] += 180.0
+    w.step()
+    assert ("Left", "wake") in link.sent and not w.done() and not w.expired()
+    clock[0] += 10 * 60.0 + 31.0
+    assert w.expired()
+
+
+def test_mission_control_says_asleep_waking_instead_of_none_found(tmp_path):
+    import live_view as LV
+    (tmp_path / "wake.json").write_text(json.dumps(dict(t=time.time(), robots={
+        "Left": dict(words="asleep, waking (next check-in in ~120 s)", awake=False)})))
+    rows = LV.from_freeroam(str(tmp_path), {"Left": "#123456"}, {})
+    left = [q for q in rows if q["name"] == "Left"][0]
+    assert left["waking"].startswith("asleep, waking") and "waking" in left["source"]
+    html = open(os.path.join(FLEET, "mission_control_table.html")).read()
+    assert "r.waking ? esc(r.waking)" in html
+
+
+def test_a_free_roam_start_wakes_a_robot_asleep_and_it_joins(tmp_path):
+    """The simulator (fleet_sim models deep sleep: deaf until its check-in, which is a fresh boot): Center starts asleep,
+    checking in 36 s after the start; the free roam waits, wakes it at its check-in, gives it its compass check (a
+    wake is a restart) and it drives with the others."""
+    r = subprocess.run([sys.executable, os.path.join(FLEET, "freeroam.py"), "run", "--dry", "--hours", "0.025",
+                        "--robots", "Left,Center,Right", "--sim-minutes", "30", "--sim-asleep", "Center:1:0.6",
+                        "--dir", str(tmp_path / "run")], capture_output=True, text=True, timeout=600,
+                       env=dict(os.environ, HOME=str(tmp_path), MIRLT_CONF_DIR=str(tmp_path / "conf")))
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out[-1500:]
+    assert "Asleep? Waking them" in out and "Awake: " in out and "Center" in out.split("Awake: ")[1].split("\n")[0]
+    assert "compass checked" in out
+    assert "Center did not start following" not in out
+    assert json.load(open(tmp_path / "run" / "wake.json"))["robots"]["Center"]["awake"]
+
+
+# -- Mission Control (Nick 13 Nov 08:28): a status line, a free roam from the terminal shown, stale requests cleared ------
+def test_a_free_roam_started_from_the_terminal_is_found_by_its_fresh_files(tmp_path, monkeypatch):
+    import live_view as LV
+    old = tmp_path / "20261112-100000-freeroam"
+    new = tmp_path / "20261113-090000-freeroam"
+    for d in (old, new):
+        d.mkdir()
+        (d / "follow.csv").write_text("t,robot\n")
+    os.utime(old / "follow.csv", (time.time() - 3600, time.time() - 3600))
+    monkeypatch.setenv("MIRLT_RUNS_GLOB", str(tmp_path / "*-freeroam*"))
+    assert LV.terminal_freeroam_folder() == str(new)
+    os.utime(new / "follow.csv", (time.time() - 60, time.time() - 60))
+    assert LV.terminal_freeroam_folder() is None
+
+
+def test_the_page_has_a_status_line_and_a_restart_button_always():
+    html = open(os.path.join(FLEET, "mission_control_table.html")).read()
+    assert 'id="statusline"' in html and 'id="restartmc2"' in html and "T.headline" in html
+    assert "LIVE.terminal" in html
+    src = open(os.path.join(FLEET, "start_job.py")).read()
+    assert "def headline(self)" in src and '"headline": self.headline()' in src
+    assert "freeroam-stop" in src                       # STOP reaches a free roam started from the terminal
+    assert "earlier_runs_cleared" in src                # needs-a-hand requests of an earlier run are not shown

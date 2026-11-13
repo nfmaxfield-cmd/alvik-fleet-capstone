@@ -197,6 +197,11 @@ def wait(after, sleep_fn=None, dark=None):
                            capture_output=True, text=True)
         log("SLEEP sent (%s): every robot `sleep %d`; rc %s %s" % (why, ck, r.returncode, (r.stdout or r.stderr or "")
                                                                    .strip()[-200:]))
+        try:
+            import wake_robots as WR
+            WR.note_sleep(None, ck, why)        # (e22) the next start says when each checks in
+        except Exception:  # noqa: BLE001
+            pass
     else:
         sleep_fn(ck)
         log("SLEEP sent (%s)" % why)

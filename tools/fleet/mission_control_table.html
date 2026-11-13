@@ -8,7 +8,7 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second.
+     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
      2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
      evidence, in plain words. -->
 <style>
@@ -78,6 +78,14 @@ details>summary{cursor:pointer}
 </style>
 </head>
 <body>
+<style>
+  .statusline { display:flex; gap:10px; align-items:center; justify-content:space-between; padding:8px 20px; font-size:14px;
+    background:var(--panel); border-bottom:1px solid var(--line, #E3E6EA); }
+  .statusline.on { background:var(--accent-bg, #EEF3FF); }
+  .statusline .slw { min-width:0; overflow-wrap:anywhere; }
+  .statusline button { white-space:nowrap; flex:none; }
+  @media (max-width: 700px) { .statusline { padding:8px 12px; flex-wrap:wrap; } }
+</style>
 <header class="top">
   <span class="brand">Mission Control</span>
   <span class="pill hide-s" id="place" style="max-width:360px;overflow:hidden;text-overflow:ellipsis">...</span>
@@ -89,6 +97,7 @@ details>summary{cursor:pointer}
   <button class="ghost" id="gear">Settings</button>
   <button class="stop" id="stoptop" title="Stops every robot at once">STOP</button>
 </header>
+<div id="statusline" class="statusline" role="status" aria-live="polite"></div>
 <main class="wrap">
   <section class="card" style="padding:14px;min-width:0">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
@@ -148,7 +157,7 @@ function handCheck() {   // a robot needs a hand: a sound now, and again every 2
 
 // ------------------------------------------------------------------ the table
 function mapSVG() {
-  const L0 = LIVE && !st().kind ? Object.assign({}, LIVE, {robots: []}) : LIVE;
+  const L0 = LIVE && !st().kind && !LIVE.terminal ? Object.assign({}, LIVE, {robots: []}) : LIVE;   // (e22) a terminal run: shown
   const L = L0 || {table: (S && S.map && S.map.floor) || {x_min: 0, y_min: 0, x_max: 122, y_max: 122}, points: {}, robots: []};
   const f = L.table, pad = 8, asp = (f.x_max - f.x_min) / Math.max(1, f.y_max - f.y_min), W = asp >= 1.8 ? 1000 : 600;   // a square board is drawn smaller so its names stay readable
   const k = W / (f.x_max - f.x_min + 2 * pad), H = (f.y_max - f.y_min + 2 * pad) * k + 16;
@@ -160,7 +169,7 @@ function mapSVG() {
   if (order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
   for (const [lab, p] of Object.entries(pts)) { const n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []);
     o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? "var(--accent)" : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
-  for (const [n, pts_] of Object.entries((st().kind && L.tracks) || {})) { const c = ((L.robots || []).find(r => r.name === n) || {}).colour || "#5B6474";
+  for (const [n, pts_] of Object.entries(((st().kind || L.terminal) && L.tracks) || {})) { const c = ((L.robots || []).find(r => r.name === n) || {}).colour || "#5B6474";
     if (pts_.length > 1) o += `<polyline points="${pts_.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${c}" stroke-width="${going() ? 1.5 : 2}" stroke-opacity="${going() ? .35 : .7}" stroke-linejoin="round"/>`; }
   for (const r of (L.robots || [])) {
     if (r.x == null || r.y == null) continue;
@@ -229,7 +238,7 @@ function cardsHTML() {
   const rs = st().kind ? ((LIVE && LIVE.robots) || []) : [];
   if (!rs.length) { const names = (T && T.robots && T.robots.names) || (S && S.site && S.site.robots) || [];
     return `<div class="card robot"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
-  return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
+  return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.waking ? esc(r.waking) : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
     <div class="small" style="margin-top:4px">${r.x != null ? `Where: ${Math.round(r.x)}, ${Math.round(r.y)} cm` : "Where: not known yet"}${r.pm_cm != null ? ` <b>± ${r.pm_cm.toFixed(1)} cm</b>` : ""}${r.battery != null ? ` · battery ${esc(r.battery)} %` : ""}</div>
     ${r.shape ? `<div class="small" title="Its one error shape (e21): where it may really be, a cone along its own track. It grows as it drives without a camera fix and shrinks only when a fix is accepted.">Error shape: ${r.shape.forward.toFixed(0)} cm ahead, ${r.shape.back.toFixed(0)} back along its track, ${r.shape.across.toFixed(0)} sideways, plus ${r.shape.iso.toFixed(0)} all round${r.stage ? ` · stage: <b>${esc(r.stage)}</b>` : ""}${r.rescue ? " · rescuing itself (no action needed)" : ""}</div>` : ""}
     <div class="tiny muted">${going() ? (r.seen ? "Seen by " : "") : "When the run ended: "}${esc(r.source)}</div></div>`).join("");
@@ -383,6 +392,13 @@ function render() {
   const saf = (S.settings && S.settings.safety) || {}, nh = Object.values(saf).filter(v => v !== "auto").length;
   $("safepill").textContent = nh ? `Safety: ${nh} set by hand` : "Safety: auto"; $("safepill").className = "pill " + (nh ? "warn" : "ok");
   const cd = T.code || {};
+  // (e22, Nick 13 Nov 08:28) one plain status line, always; Restart Mission Control always there (safe while no run is
+  // going from this page: the button is off then)
+  const hl = (T && T.headline) || {};
+  const slH = `<span class="slw">${esc(hl.words || "Asking Mission Control what is going on...")}</span><button class="ghost tiny" id="restartmc2" ${going() ? 'disabled title="A run is going: Mission Control restarts after it ends"' : 'title="Restart Mission Control (the page reloads; nothing on the robots changes)"'}>Restart Mission Control</button>`;
+  if ($("statusline").dataset.h !== slH) { $("statusline").innerHTML = slH; $("statusline").dataset.h = slH;
+    $("restartmc2").onclick = async () => { try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } }; }
+  $("statusline").className = "statusline" + (hl.running || hl.terminal ? " on" : "");
   $("codebanner").innerHTML = cd.changed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg);margin-top:8px"><b>New code on the Pi.</b> <span class="small">${esc(cd.words || "")}</span> <button class="primary" id="restartmc" ${going() || cd.running ? "disabled" : ""}>Restart Mission Control</button></div>` : "";
   if ($("restartmc")) $("restartmc").onclick = async () => { try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } };
   drawMap();

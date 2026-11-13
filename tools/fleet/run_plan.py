@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_MONITOR = "2026-11-12mc"   # (Mission Control build, 12 Nov) write_live ticks the Pi efficiency monitor's feed (monitor_feed.json: the loop period; read-only)
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
@@ -4171,6 +4171,39 @@ class Coordinator:
                               # half bodies (4.75 x 2) + the 8 cm net, rounded down; chosen. DOE note: not needed,
                               # it is the net
 
+    def recover_shape_ok(self, b, bl, x, y, bx, by, rect):
+        """(e22, Nick 13 Nov: missions' veer "may leave the lane only if its shape stays clear of the edge and others'
+        shapes") The turn-back line from (x, y) to (bx, by) with the robot's error shape grown along it
+        (error_shape.Shape.along_path): at every sample its reach toward each edge, less half its body and its stop, is
+        never worse than where it starts (and the end is inside, or better than the start); and it keeps the reflex
+        gap from every other robot's own shape (a blind one's shape, else its camera's 95 % noise) along the line
+        between them. Returns (ok, why)."""
+        import error_shape as ES_
+        import safety_rules as SRs_
+        sh = bl["shape"]
+        pts = [(x + (bx - x) * k / 10.0, y + (by - y) * k / 10.0) for k in range(1, 11)]
+        ells = sh.along_path(pts)
+        m0 = ES_.rect_margin(rect, x, y, *sh.ellipse()) - SRs_.HALF_DIAG_CM
+        for (px, py), e in zip(pts, ells):
+            m = ES_.rect_margin(rect, px, py, *e) - SRs_.HALF_DIAG_CM - SRs_.stop_cm(5.0)
+            if m < min(0.0, m0) - 0.5:
+                return False, "its error shape would reach the edge on the way back (at %.0f, %.0f)" % (px, py)
+        for o in self.bots.values():
+            if o is b or o.out or o.pose is None:
+                continue
+            ob = getattr(o, "blind", None)
+            osh = ob.get("shape") if isinstance(ob, dict) else None
+            for (px, py), e in zip(pts, ells):
+                d = math.hypot(px - o.pose[0], py - o.pose[1])
+                if d < 1e-6:
+                    return False, "%s stands on its way back" % o.name
+                nx, ny = (o.pose[0] - px) / d, (o.pose[1] - py) / d
+                mine = sh.support(nx, ny, e)
+                theirs = osh.support(-nx, -ny) if osh is not None else 2.45 * 1.0
+                if d - mine - theirs < self.RECOVER_GAP_CM:      # (as the circle check: middles RECOVER_GAP_CM + errors)
+                    return False, "its shape would come within the gap of %s's on the way back" % o.name
+        return True, ""
+
     def recover_blind(self, b, bl, why):
         """(11-05h, the calibration's 11-05c recovery for the missions) A robot no camera has read for too long:
         instead of holding it at once, it drives STRAIGHT BACK along the way it came (a backward drive: no turn, no
@@ -4203,6 +4236,9 @@ class Coordinator:
         ok_, why_ = OB.path_ok([(x, y)] + [(x + (bx - x) * k / 10.0, y + (by - y) * k / 10.0) for k in range(1, 11)],
                                self.BLIND_ERR_BASE_CM + self.BLIND_ERR_PER_CM * bl["dist"], rect,
                                unc_per_cm=self.BLIND_ERR_PER_CM)
+        if ok_ and bl.get("shape") is not None and SG.value("MIRLT_ERROR_SHAPE") == "cone":
+            # (e22, Nick 13 Nov) it leaves its lane only where its shape stays clear of the edge and of the others' shapes
+            ok_, why_ = self.recover_shape_ok(b, bl, x, y, bx, by, rect)
         if not ok_:
             self.log("recover_refused", robot=b.name, why=why_)
             return False
@@ -4686,14 +4722,32 @@ def find_robots(coord, link, args, soft=False):
             for ip in args.robot or []:
                 link.send_ip(ip, "ping")
         time.sleep(0.05)
+    if os.environ.get("MIRLT_WAKE_AT_START", "1") != "0" and not set(names) <= set(link.robots()):
+        # (e22, the 13 Nov 08:14 home run: none found, all asleep after "sleep as soon as a run ends") a robot not heard
+        # may be in deep sleep: woken at its check-in (it says "awake for a check-in"), waited for one whole check-in
+        # interval and its awake window, said plainly (wake.json in the run's folder for Mission Control)
+        import wake_robots as WR
+        out_dir = getattr(args, "out", None) or getattr(args, "session", None)
+        sp = os.path.join(out_dir, "wake.json") if isinstance(out_dir, str) and os.path.isdir(out_dir) else None
+        w = WR.Waker(link, names, args.robot or [], say=print, status_path=sp)
+        print("Not heard yet: %s. Asleep? Waking them: %s" % (
+            ", ".join(sorted(set(names) - set(link.robots()))),
+            "; ".join("%s %s" % (n, w.words(n)) for n in names if n not in link.robots())), flush=True)
+        while not w.done() and not w.expired() and not (soft and set(link.robots()) & set(names) and
+                                                         time.time() - t0 > args.find_s * FIND_ROUNDS_SOFT):
+            coord.drain()
+            w.step()
+            time.sleep(0.05)
+        w.step()
     heard = sorted(link.robots())
     missing = sorted(set(names) - set(heard))
     if soft and set(heard) & set(names):
         return
     if not heard:
-        raise SystemExit("Not heard from: %s. No robot answered at all in %.0f s (pinged every %.0f s): a link "
-                         "problem (this computer's WiFi, or another program talking to the robots), not a robot "
-                         "problem." % (", ".join(missing), args.find_s, PING_EVERY_S))
+        raise SystemExit("Not heard from: %s. No robot answered at all in %.0f s (pinged every %.0f s; asleep robots "
+                         "were woken through a whole check-in): a link "
+                         "problem (this computer's WiFi, or another program talking to the robots), or they are "
+                         "switched off." % (", ".join(missing), args.find_s, PING_EVERY_S))
     raise SystemExit("Not heard from: %s (heard: %s). Are they on, on this WiFi, and named as in the map?"
                      % (", ".join(missing), ", ".join(heard)))
 
