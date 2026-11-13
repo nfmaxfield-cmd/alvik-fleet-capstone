@@ -1,0 +1,30 @@
+measured-1 ok in 88 s
+measured-2 ok in 105 s
+measured-3 ok in 56 s
+measured-4 ok in 71 s
+harsh-1 ok in 34 s
+harsh-2 ok in 36 s
+harsh-3 ok in 29 s
+harsh-4 ok in 36 s
+measured-skew-2 ok in 47 s
+measured-missing_cam-1 ok in 56 s
+measured-wrong_names-2 ok in 71 s
+measured-restart-1 ok in 90 s
+PASS  fix delay median (real 0.59 s): 0.55
+PASS  quiet spells over 1 s per robot-hour (real 371): 358.66
+PASS  pictures a second (real 1.6): 1.4
+PASS  measured: no body contact: [0, 0, 0, 0]
+WARN  measured: bodies never closer than 1 cm (a warning: no contact): [1.73, 3.15, 2.17, 0.12]
+FAIL  measured: no robot off the board: [0, 0, 1, 0]
+PASS  measured: no name swaps: [0, 0, 0, 0]
+FAIL  measured: never still (no stand over 60 s by a robot free to move): [713.4, 24.6, 14.9, 549.0]
+PASS  harsh: body contact in at most a quarter of the runs: 0 of 4
+PASS  harsh: no stand over 120 s by a robot free to move: [[], [], [], []]
+PASS  measured: no run with robots hung at an edge over 120 s in all: [11.6, 6.6, 0.1, 0]
+FAIL  case skew seed 2: no stand over 60 s by a robot free to move: 99.6
+PASS  case missing_cam seed 1: no stand over 60 s by a robot free to move: 44.1
+PASS  case wrong_names seed 2: no robot off the board: 0
+PASS  case restart seed 1: robots hung at an edge 120 s at most in all: 0
+1 warning(s): measured: bodies never closer than 1 cm (a warning: no contact)
+3 check(s) failed
+exit 1

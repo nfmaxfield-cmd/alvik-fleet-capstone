@@ -691,3 +691,17 @@ One line per picture: what it shows (feature or problem), and where it comes fro
 - `2026-11-12/e20-feature-mission-control-camera-trust-card.png`: Mission Control's new Camera trust card: per camera, a little board per job coloured by its state in each square, with the number of checks. **feature**. e20 report section 8
 - `2026-11-12/e20-feature-mission-control-camera-trust-card-in-words.png`: The same card with "In words" open: one plain sentence per camera. **feature**. e20 report section 8
 - `2026-11-12/e20-feature-mission-control-camera-trust-card-full-page.png`: The whole map page (practice, 1440 px) with the Camera trust card under Pi health. **feature**. e20 report section 8
+
+## 2026-11-12 (e21: one error shape and the four stages)
+
+- `2026-11-12/e21-feature-measured-cone-along-and-across-chart.png`: Each robot's error along and across its own track in 786 home stretches with no camera fix, with the 95 % bounds the shape uses: sideways grows with distance, along the track it is one-sided (back). **feature**. e21 report section 1
+- `2026-11-12/e21-feature-error-shape-against-the-e20-circle-chart.png`: A lost robot's possible position after 20, 45 and 70 cm: e21's shape (long back along its track, wide sideways) against e20's circle. **feature**. e21 report section 1
+- `2026-11-12/e21-feature-time-in-each-stage-chart.png`: Share of robot time in run, veer, found and pause-and-search over the 25 e21 runs, by group (measured, harsh, camera faults). **feature**. e21 report section 3
+- `2026-11-12/e21-feature-shape-bound-accuracy-and-planner-cost-chart.png`: Room each bound gives away against the exact gap (the ellipse: 0.2 cm, never unsafe), and the planner's tick scaled to the Pi (the slowest 1 % would overrun the 50 ms loop). **feature**. e21 report section 4
+- `2026-11-12/e21-feature-replay-escape-corrects-sooner-chart.png`: The 11 Nov and earlier home runs replayed: each divergence episode the consistency escape would have ended sooner, by how many seconds; camera mix-ups in red. **feature**. e21 report section 5
+- `2026-11-12/e21-feature-replay-escape-real-runs-terminal.png`: The replay's output: 68 of 147 episodes and 27 of 81 lost spells corrected sooner, by cause. **feature**. e21 report section 5
+- `2026-11-12/e21-problem-simulator-ratchet-own-pose-gap-real-vs-sim-chart.png`: Own pose to camera at each percentile of the time: two real runs, the old simulator (below them), the e21 simulator with e20's code (the ratchet) and with e21's code. **problem**. e21 report section 6
+- `2026-11-12/e21-feature-firmware-filter-host-test-terminal.png`: The firmware filter 2026-11-12e21 compiled on the build machine: 15 checks of the old and the new behaviour. **feature**. e21 report section 7
+- `2026-11-12/e21-problem-25-runs-stands-falls-contacts-e20-vs-e21-chart.png`: 25 hard-simulator runs: the longest stand per run, e20 against e21 with each camera verdict, with falls and contacts marked. **problem**. e21 report section 9
+- `2026-11-12/e21-feature-25-runs-e20-vs-e21-both-verdicts-terminal.png`: The 25-run totals: e20 4 falls, e21 per-camera verdict 8, e21 final (whole verdict) 3; stands and stage shares. **feature**. e21 report section 9
+- `2026-11-12/e21-problem-falls-traced-pose-far-from-truth-terminal.png`: Every fall of both codes traced: most of e21's came with the robot's own pose 30-150 cm from the truth (another robot named as it). **problem**. e21 report section 9
