@@ -2007,11 +2007,15 @@ class Controller:
                     return False                   # another robot may be that spot: the identity rules decide
         fc = r.__dict__.get("fix_cam")
         if self.camtrust is not None and fc and fc[0] and CAMERA_TRUST_BOOK:
+            # (e21 9; the hard simulator, wrong camera names seed 2: an escape onto a mirrored camera's sighting put a robot
+            # in a corner, then over the edge) only a camera TRUSTED for position there may override its own pose this
+            # way; an unproven one leaves it to e19's motion proof
             try:
-                if self.camtrust.state(fc[0], fc[1], "position", x, y) == "distrusted":
+                if self.camtrust.state(fc[0], fc[1], "position", x, y) != "trusted":
+                    self.counts["escape_untrusted_camera"] = self.counts.get("escape_untrusted_camera", 0) + 1
                     return False
             except Exception:  # noqa: BLE001
-                pass
+                return False
         w.clear()
         self.counts["consistent_escapes"] = self.counts.get("consistent_escapes", 0) + 1
         self.log("escapes", dict(t=round(self.t, 2), robot=r.name, d_cm=round(dm, 1), n=need, gate_cm=round(gate, 1),
