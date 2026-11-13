@@ -509,6 +509,10 @@ class Runner:
                             # (e21) its filter's sd (the firmware's real gate) and, from firmware 2026-11-12e21, its
                             # refusals by reason and escapes (old firmware: the first, the rest None)
                             rej = None
+                            try:            # every firmware reports its refused fixes in all (FOLLOW fixes_rejected)
+                                rej = dict(total=int(float(vals[13])))
+                            except (ValueError, IndexError):
+                                rej = None
                             if len(vals) >= 23:
                                 try:
                                     rej = dict(old=int(vals[18]), far=int(vals[19]), hist=int(vals[20]),

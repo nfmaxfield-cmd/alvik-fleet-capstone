@@ -299,7 +299,7 @@ def test_status_tail_and_motor_board_line(tmp_path, monkeypatch):
 
 def test_firmware_version_bumped_and_the_runner_accepts_it():
     ino = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
-    assert ('#define FW_VERSION "2026-11-05' in ino and "2026-10-29b (2 Nov" in ino) and "power::tick()" in ino and "board %s, sensors %lu ms old" in ino
+    assert ('#define FW_VERSION "2026-11-' in ino and "2026-10-29b (2 Nov" in ino) and "power::tick()" in ino and "board %s, sensors %lu ms old" in ino
     sys.path.insert(0, os.path.join(TOOLS, "experiment"))
     src = open(os.path.join(TOOLS, "experiment", "e02.py")).read()
     for name in ("OK_FW", "BORDER_FW", "BACK_FW", "TILT_FW"):

@@ -951,6 +951,8 @@ class Controller:
         except (TypeError, ValueError):
             pass
         if rej:
+            if "far" in rej and "total" not in rej:
+                rej = dict(rej, total=sum(int(rej.get(k, 0)) for k in ("old", "far", "hist", "future")))
             old = r.__dict__.get("fw_rej") or {}
             if any(int(rej.get(k, 0)) != int(old.get(k, 0)) for k in rej):
                 self.log("fw_refusals", dict(t=round(self.t, 2), robot=name, sd_cm=round(r.fw_sd, 2),
@@ -1858,11 +1860,16 @@ class Controller:
         # robots that MUST hold: their middle within the camera's close-pass reach of its shape (the camera could take one
         # for the other while it is found), and not themselves lost
         import tracking_layer as TL_
-        must = r.shape.extent() + TL_.CLOSE_CM
+        brief = self.t - se["t0"] < self.search_window(r)      # "briefly": one search window, then a person is asked
         for o in self.R.values():
             if o is r or o.mode in ("out", "gone", "start") or o.lost is not None or self.pos(o) is None:
                 continue
-            if math.dist(self.pos(o), p) < must:
+            q = self.pos(o)
+            d_ = math.dist(q, p)
+            reach = r.shape.support((q[0] - p[0]) / d_, (q[1] - p[1]) / d_) if d_ > 1e-6 else r.shape.extent()
+            # it MUST hold only when its middle is within the camera's close-pass distance of the searched robot's
+            # shape (the camera could take one for the other), and only briefly
+            if brief and d_ - reach < TL_.CLOSE_CM:
                 if o.name not in se["held"]:
                     se["held"].append(o.name)
                     self.counts["search_holds"] = self.counts.get("search_holds", 0) + 1
@@ -1942,7 +1949,9 @@ class Controller:
         if d <= gate or self.t - (r.__dict__.get("fpose_t") or -1e9) < FAR_AFTER_FPOSE_S:
             w.clear()
             return False
-        w.append((t, off))
+        rj = r.__dict__.get("fw_rej") or {}
+        refused = rj.get("far")             # e21 firmware: its far refusals (old firmware: not known)
+        w.append((t, off, refused))
         del w[:-24]
         w[:] = [q for q in w if t - q[0] <= 4.0]
         mx = sum(q[1][0] for q in w) / len(w)
@@ -1952,6 +1961,26 @@ class Controller:
             w[:] = [q for q in w if math.hypot(q[1][0] - off[0], q[1][1] - off[1]) <= tol]    # a new steady offset
             return False
         dm = math.hypot(mx, my)
+        if refused is not None and w[0][2] is not None and refused <= w[0][2]:
+            # its filter has taken these fixes (no refusal while they came): no ratchet to break; a steady offset of a
+            # driving robot is then its timing, not its pose
+            self.counts["escape_no_refusal"] = self.counts.get("escape_no_refusal", 0) + 1
+            return False
+        if not self.standing_own(r) and r.own is not None:
+            # driving: a steady offset ALONG its track can be the clock (the fix's delay against its own pose's time);
+            # only what the measured delay's spread cannot explain counts (across its track timing explains nothing)
+            hh = math.radians(r.own[3])
+            along = abs(mx * math.cos(hh) + my * math.sin(hh))
+            across = abs(-mx * math.sin(hh) + my * math.cos(hh))
+            h_ = [q for q in r.own_hist if q[0] >= self.t - 1.0]
+            v = math.dist(h_[0][1:3], h_[-1][1:3]) / max(0.2, h_[-1][0] - h_[0][0]) if len(h_) >= 2 else 0.0
+            dt_doubt = max(0.0, self.cam_delay_hi - self.cam_delay) + CLOCK_DEADBAND_S
+            dm = max(across, along - v * dt_doubt)
+            # a driving robot's smaller offsets are e08's re-seed's (over POSE_AGREE_CM for POSE_AGREE_S, no proof
+            # asked): the escape takes only what the far rules would hold back (beyond REACQUIRE_MAX_CM)
+            if dm <= max(gate, REACQUIRE_MAX_CM):
+                self.counts["escape_timing"] = self.counts.get("escape_timing", 0) + 1
+                return False
         p1 = math.exp(-max(0.0, dm - gate) ** 2 / (2.0 * sg * sg)) if dm > gate else 1.0
         need = max(ESCAPE_MIN_N, int(math.ceil(math.log(ESCAPE_ALPHA) / math.log(p1))) if 0.0 < p1 < 1.0 else 10 ** 6)
         if len(w) < need:
@@ -2518,6 +2547,9 @@ class Controller:
                             o0.name
                         dmode = "away"
                         self.counts["doubt_away"] = self.counts.get("doubt_away", 0) + 1
+                    elif self.doubt_deadlock(r, o0):
+                        r.hd_confirm = None                 # (e21) both wait for each other: this one plans as before
+                        return False
                     else:
                         r.busy_until = self.t + self.still_pause(r)
                         r.still_since = self.t              # looked again after the derived pause
@@ -2718,6 +2750,9 @@ class Controller:
             need = self.need_cm(r, BACK_V, True) + L
             crowd = any(math.dist(self.pos(o), p) < PLAN_CC + L for o in self.R.values()
                         if o is not r and self.pos(o) is not None and o.mode != "gone")
+            if crowd and self.doubt_deadlock(r):
+                r.hd_confirm = None                     # (e21) both wait for each other: this one plans as before
+                return
             if crowd:
                 # another robot within reach of a crawl in some direction: it waits for room (they roam on); a move
                 # on a doubtful heading next to a robot is how 08:48 pushed Right off the board
@@ -4762,6 +4797,35 @@ class Controller:
         if fm.escalate(p[0], p[1]):
             self.hazard(r, p, "%d moves failed here" % OB.FailMemory.ESCALATE_N)
         return True
+
+    def doubt_deadlock(self, r, o=None):
+        """(e21; the hard simulator, measured seed 4: Left and Center stood 221 s, each with its heading in doubt, each
+        waiting for room from the other) True when a robot near r also waits with its heading in doubt, both have waited
+        at least a still pause, and r is the one that gives way (the lower priority, then the later name): r then drops
+        its heading check and plans as before (e17's "no room" way), so the other can go."""
+        hc = r.__dict__.get("hd_confirm")
+        if hc is None:
+            return False
+        hc.setdefault("wait_since", self.t)
+        cands = [o] if o is not None else [q for q in self.R.values() if q is not r and self.pos(q) is not None and
+                                           math.dist(self.pos(q), self.pos(r)) < PLAN_CC + HD_CONFIRM_MAX_CM]
+        for q in cands:
+            if q is None or self.t - hc["wait_since"] < self.still_pause(r):
+                continue
+            qc = q.__dict__.get("hd_confirm")
+            if q.__dict__.get("search") is not None or q.lost is not None or getattr(q, "held", None) or (
+                    qc is None and q.mode == "idle" and q.__dict__.get("still_since") is not None and
+                    self.t - q.still_since >= self.still_pause(q)):
+                pass                                     # it is not going to make room: r gives way
+            elif qc is None or q.mode != "idle" or self.t - qc.get("wait_since", self.t) < self.still_pause(q):
+                continue
+            elif (self.prio(r), r.name) < (self.prio(q), q.name):
+                continue                                 # both wait with a doubt: the other one gives way
+            self.counts["doubt_deadlocks_broken"] = self.counts.get("doubt_deadlocks_broken", 0) + 1
+            self.event(r, "heading not confirmed", "%s also waits for room to check its heading: %s gives way and plans "
+                       "as before (the edge rule with its doubt)" % (q.name, r.name))
+            return True
+        return False
 
     def cam_name(self, r):
         """(e21) The camera that made r's last fix (its name for the logs; "" when none is named)."""

@@ -206,7 +206,7 @@ def test_firmware_host_compiles():
     r = subprocess.run(["sh", os.path.join(REPO, "tools", "fwcheck", "check.sh")], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.strip() == "", r.stdout[-2000:]
     src = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
-    assert '#define FW_VERSION "2026-11-05' in src and "2026-10-29b (2 Nov" in src   # 11-05a: save / unsave     # 29b: power telemetry (2 Nov); 29a: `led ... L|R` (the facing check)
+    assert '#define FW_VERSION "2026-11-' in src and "2026-10-29b (2 Nov" in src   # 11-05a: save / unsave     # 29b: power telemetry (2 Nov); 29a: `led ... L|R` (the facing check)
     ex = open(os.path.join(REPO, "firmware", "home_lab", "secrets.example.h")).read()
     assert '#define WIFI_SSID2     "type-the-exact-school-network-name-here"' in ex and "type-the-school-password-here" in ex
 

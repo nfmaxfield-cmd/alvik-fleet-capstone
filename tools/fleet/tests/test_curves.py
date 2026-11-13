@@ -168,7 +168,7 @@ def test_arc_fit_finds_a_curvature_error(monkeypatch):
 def test_firmware_11_05c_curves_syntax_and_mirror():
     ino = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
     import re as _re
-    assert _re.search(r'#define FW_VERSION "(2026-11-05[c-z])"', ino) and 'verb == "farc"' in ino   # 11-05c or newer
+    assert _re.search(r'#define FW_VERSION "(2026-11-(?:05[c-z]|1[0-9][a-z0-9]*))"', ino) and 'verb == "farc"' in ino   # 11-05c or newer
     fol = open(os.path.join(REPO, "firmware", "home_lab", "follow.h")).read()
     assert "s.type == 'R'" in fol and "coast ended" in fol and "dodged obstacle" in fol
     pose = open(os.path.join(REPO, "firmware", "home_lab", "pose.h")).read()

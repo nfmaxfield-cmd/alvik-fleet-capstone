@@ -460,3 +460,18 @@ def test_every_fix_and_sighting_names_its_camera_in_the_run_logs():
     assert "t,robot,x_cm,y_cm,th_deg,arrived,cam,src" in fr
     br = open(os.path.join(FLEET, "cam_bridge.py")).read()
     assert '"why", "src", "cams"]' in br
+
+
+def test_the_11_nov_0858_case_corrected_and_its_180_degree_heading_caught_by_its_next_move():
+    """Right stood at x 46 while its own pose said x 71 with its heading 180 deg off (the lights cannot tell front from
+    back). Its pose is corrected, and the camera's view of its next short move sets its heading: it never drives the
+    wrong way off the board."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import e17_harness as H
+    R = H.Rig({"Right": (46.0, 60.0, 0.0), "Left": (100.0, 100.0, 90.0)}, own_off={"Right": (25.0, 0.0, 180.0)},
+              seed=2, never_still=True, spin_flag=False, lights_off_cm=0.0)
+    R.run(60.0)
+    assert R.c.counts.get("heading_flips_caught", 0) >= 1
+    assert abs(R.off["Right"][2]) < 45.0                         # its own heading near the truth again
+    x, y, _ = R.truth["Right"]
+    assert 6.0 < x < H.BOARD[2] - 6.0 and 6.0 < y < H.BOARD[3] - 6.0

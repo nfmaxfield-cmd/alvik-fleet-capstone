@@ -348,6 +348,9 @@ def _far_rig19(proof, monkeypatch, secs=12.0):
 def test_named_far_beyond_its_doubt_is_proven_by_an_out_and_back_before_any_correction(monkeypatch):
     """Audit H4: "named far" had no upper limit and no motion proof (3 of the 7 falls: 24-91 cm wrong). Now, beyond the
     robot's stated doubt (5 cm here), it drives a short out-and-back first; the 11 Nov 08:26 case still ends corrected."""
+    # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
+    import freeroam_core as FC_
+    monkeypatch.setattr(FC_, "CONSISTENT_ESCAPE", False)
     R = _far_rig19(True, monkeypatch)
     ev = [e for e in R.events if e[1] == "Center"]
     assert not any(e[2] == "CORRECTED" and "named it all along" in e[3] for e in ev)      # never at once
@@ -385,9 +388,12 @@ def test_the_proof_passes_only_when_the_named_sighting_goes_out_and_back_with_th
     assert not done and c.counts.get("proofs_failed") == 1
 
 
-def test_an_unconfirmed_correction_permits_no_reverse_creep_toward_an_edge():
+def test_an_unconfirmed_correction_permits_no_reverse_creep_toward_an_edge(monkeypatch):
     """Audit H4: 5 of the 7 falls were a "creep back" after a wrong correction (no rear sensor). Until the robot's own
     move confirms the corrected pose, a creep never reverses toward an edge."""
+    # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
+    import freeroam_core as FC_
+    monkeypatch.setattr(FC_, "LOST_CREEP", True)          # e17's creep (no edge rule), behind its switch
     import freeroam_core as FC
     sent = []
     c = FC.Controller(["A", "B"], BOARD, lambda n, s: sent.append((n, s)), lambda *a: None)

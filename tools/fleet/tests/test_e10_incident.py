@@ -147,7 +147,15 @@ def test_the_proof_drive_skips_a_robot_at_an_edge():
     assert any(n == "B" and x.startswith("fs") for n, x in sent)
 
 
-def test_the_simulator_reproduces_run_2_and_the_fix_holds():
+def test_the_simulator_reproduces_run_2_and_the_fix_holds(monkeypatch):
+    # (e21) the 7 Nov run 2 reproduction needs e20's trajectories (long straights near an edge): every e21 switch on
+    # its old way, and the simulated robot's e19 blend
+    import freeroam_core as FC_
+    import freeroam_fastsim as FS_
+    for k_, v_ in (("SHAPE", False), ("STAGES", False), ("CONSISTENT_ESCAPE", False), ("SLIP_TAG", False),
+                   ("INWARD_TWO", False), ("LOST_CREEP", True)):
+        monkeypatch.setattr(FC_, k_, v_)
+    monkeypatch.setattr(FS_, "SIM_FW_FILTER", "blend")
     import freeroam_fastsim as S
     kw = dict(dead_robot=False, pi_freeze=False, sensors=True, fw="2026-11-05d", edge_physics=True,
               bottom_zone=True, dropouts=False, camera="detections", scene=dict(tracking="lights"), layer_kw={},

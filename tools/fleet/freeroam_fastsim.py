@@ -1132,6 +1132,11 @@ class Sim:
                 self.next_follow[n] = self.t + 0.1
                 if SIM_FW_FILTER != "blend":
                     self.fw_grow(b)
+                    if hasattr(self.ctrl, "on_fw_state"):     # (e21) its FOLLOW row's sd and refusals by reason
+                        self.ctrl.on_fw_state(n, math.sqrt(b.var), dict(
+                            old=b.rej.get("old", 0), far=b.rej.get("far", 0), hist=b.rej.get("history", 0),
+                            future=0, escapes=self.stats.get("fw_escapes", 0)) if SIM_FW_FILTER == "e21" else
+                            dict(total=sum(b.rej.values())))
                 b.hist.append((self.t, b.ox, b.oy))
                 if len(b.hist) > 40:
                     del b.hist[:10]

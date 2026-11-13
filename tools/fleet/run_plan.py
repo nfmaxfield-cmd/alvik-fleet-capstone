@@ -4081,8 +4081,7 @@ class Coordinator:
                 v_s = bl["dist"] / max(0.2, t - bl["t0"])
                 room = ES_.rect_margin(rect, b.pose[0], b.pose[1], *sh.ellipse()) - SRs_.HALF_DIAG_CM - \
                     SRs_.stop_cm(v_s if v_s > 0.3 else None)
-                err = max(err, sh.extent())
-                ov = -room if room < 0 else 0.0
+                bl["room"] = room
                 if room >= 0 and SG.value("MIRLT_STAGES") == "four" and not bl.get("veered"):
                     f2, k2, c2 = sh.axes_at(sh.s + 27.5, sh.head_doubt_rad())     # freeroam_core.VEER_AHEAD_CM
                     if room - max(0.0, sh.iso() + max(f2, k2, c2) - sh.extent()) < 0:
@@ -4101,7 +4100,9 @@ class Coordinator:
                 why = "with no camera seeing it, its possible-locations circle (body + %.1f cm blind error) reaches " \
                       "%.1f cm past an edge" % (err, ov)
             elif bl.get("shape") is not None and __import__("safety_group").value("MIRLT_BLIND_RULE") != "cap":
-                pass                           # (e21) the shape's own room decided above (ov)
+                if bl["room"] < 0:             # (e21) its error shape's reach toward the nearest edge, body and stop
+                    why = ("with no camera seeing it, its possible error (its error shape: %s, body and stop) could "
+                           "reach an edge (%.1f cm short)" % (bl["shape"].summary()["extent"], -bl["room"]))
             elif __import__("safety_group").value("MIRLT_BLIND_RULE") != "cap":
                 # (e13, Nick 12:51 "never give up", CLAUDE.md) no blind-distance cap: it drives on while its whole
                 # possible error (the blind error + half the body's diagonal + its stop at its blind speed, measured)

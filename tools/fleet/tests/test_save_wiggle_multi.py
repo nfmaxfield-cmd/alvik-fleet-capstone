@@ -64,7 +64,7 @@ def test_sim_robot_save_survives_sleep_and_old_firmware_has_corr_only(tmp_path):
 def test_firmware_save_commands_and_version():
     ino = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
     corr = open(os.path.join(REPO, "firmware", "home_lab", "corr.h")).read()
-    assert '#define FW_VERSION "2026-11-05' in ino and "2026-11-05a (Nick, 5 Nov" in ino    # 11-05b (free roam) kept them
+    assert '#define FW_VERSION "2026-11-' in ino and "2026-11-05a (Nick, 5 Nov" in ino    # 11-05b (free roam) kept them
     for v in ('verb == "save"', 'verb == "unsave"', 'verb == "defaults"', 'verb == "saved"', 'verb == "id"'):
         assert v in ino
     assert "prefs.isKey" in corr and "prefs.clear()" in corr and 'showSaved("at power-on")' in corr

@@ -172,7 +172,9 @@ def test_old_firmware_uses_halt_and_resend():
 
 
 # -------------------------------------------------------------------------------------------- lost by the camera
-def test_dead_reckoning_bubble_grows_and_jump_is_logged():
+def test_dead_reckoning_bubble_grows_and_jump_is_logged(monkeypatch):
+    # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
+    monkeypatch.setattr(FC, "SHAPE", False)
     c, sent, rows = ctrl(names=("Left",))
     place(c, "Left", 60, 60, 0.0)
     c.t = 2.0
@@ -240,7 +242,7 @@ def test_sim_firmware_fspd_fsteer():
     src = open(os.path.join(REPO, "tools", "sim", "fw_follow.py")).read()
     assert '"fspd", "fsteer"' in src and "follow_wd_ms" in src
     ino = open(os.path.join(REPO, "firmware", "home_lab", "home_lab.ino")).read()
-    assert '#define FW_VERSION "2026-11-05' in ino   # 11-05b or newer (11-05c: curves keep fspd / fsteer)
+    assert '#define FW_VERSION "2026-11-' in ino   # 11-05b or newer (11-05c: curves keep fspd / fsteer)
     follow = open(os.path.join(REPO, "firmware", "home_lab", "follow.h")).read()
     assert 'verb == "fspd"' in follow and '"watchdog"' in follow
     r = subprocess.run(["sh", os.path.join(REPO, "tools", "fwcheck", "check.sh")], capture_output=True, text=True)

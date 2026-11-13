@@ -102,7 +102,10 @@ def test_the_switch_restores_the_e16_way(monkeypatch):
 
 
 # -- 1b: two robots unaccounted -> a wiggle, no swap ------------------------------------------------------------------
-def test_two_robots_unaccounted_a_wiggle_names_one_then_elimination_the_other_no_swap():
+def test_two_robots_unaccounted_a_wiggle_names_one_then_elimination_the_other_no_swap(monkeypatch):
+    # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
+    import freeroam_core as FC_
+    monkeypatch.setattr(FC_, "SHAPE", False)
     R = H.Rig({"Left": (31.0, 64.0, 0.0), "Center": (95.0, 100.0, 90.0), "Right": (85.0, 40.0, 180.0)},
               own_off={"Left": (40.0, -20.0, 0.0), "Right": (-40.0, 20.0, 0.0)})     # each own pose near the other
     R.run(20.0)

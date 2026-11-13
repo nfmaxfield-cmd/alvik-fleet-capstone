@@ -585,6 +585,9 @@ def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_
     height) sets it and restarts its error sum at the click's derived accuracy; it drives straight as far as that sum
     and its body allow, a second click gives its heading (+- atan(sigma sqrt 2 / drive)); it moves again; clicks and
     the residual at the next camera fix are logged."""
+    # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
+    import freeroam_core as FC_
+    monkeypatch.setattr(FC_, "SHAPE", False)
     monkeypatch.setattr(FC, "NEVER_STILL", False)      # (e17) held and waiting for the clicks: the switch's old way
     monkeypatch.setattr(FC, "BLIND_BUBBLE", "fixed")   # (e19) the e13 bubble this click test was written on (the record's
     import freeroam_fastsim as S                       # bubble from calibration data is tested in test_e19_audit_fixes)
