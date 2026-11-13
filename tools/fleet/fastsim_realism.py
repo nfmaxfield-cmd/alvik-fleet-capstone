@@ -43,6 +43,9 @@ Version / changelog:
                a guess of its own (a steep angle: noise stretched along its depth; a bump mid-run: its picture turned; a
                dark patch only it has; a third camera), and cam_swap=(t0, t1, a, b): two cameras' names swapped for a spell
                (each picture through the other's calibration: one mirrored left-right, the other top-bottom).
+  fastsim-realism-2026-11-12e21  faults "bumps" (BUMPS_PER_H a robot-hour, each moving the body BUMP_CM one way, its
+               wheels and own pose not: a push, a knock by another robot, a seam) and "slips" (SLIPS_PER_H spells of
+               SLIP_S of fully stuck wheels: the body still while its wheels and own pose drive on), both added to harsh.
 """
 import bisect
 import json
@@ -58,11 +61,12 @@ _AN = os.path.join(os.path.dirname(HERE), "analysis")
 if _AN not in sys.path:
     sys.path.insert(0, _AN)
 
-VERSION = "fastsim-realism-2026-11-12e20"   # e20: cameras named on every sighting; cams=[...] and cam_swap (the simulator breaks the camera guesses). Before: "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
+VERSION = "fastsim-realism-2026-11-12e21"   # e21: two faults (Nick 12 Nov, decision 5): "bumps" (the robot is pushed: its body moves, its wheels do not) and "slips" (stuck wheels: spells of turning wheels and a still body), both in harsh; the simulated robot's own filter is freeroam_fastsim's firmware filter (the ratchet). Before: "fastsim-realism-2026-11-12e20"   # e20: cameras named on every sighting; cams=[...] and cam_swap (the simulator breaks the camera guesses). Before: "fastsim-realism-2026-11-12e19"   # e19: the restart model calls the runner's new restart hooks (on_restart, follow_again). Before: "fastsim-realism-2026-11-12a"
 PROFILE_DIR = os.path.join(HERE, "sim_profiles")
 DEFAULT_MEASURED = "measured-home-2026-11-11-0858.json"
 PROFILES = ("easy", "measured", "harsh")
-HARSH_FAULTS = ("latency2", "bursts", "hung", "calib5", "dark", "skew", "restart", "wrong_names", "missing_cam")
+HARSH_FAULTS = ("latency2", "bursts", "hung", "calib5", "dark", "skew", "restart", "wrong_names", "missing_cam", "bumps",
+                "slips")       # (e21) bumps and slips added
 MERGE_GAP_CM = 3.0          # fastsim_sources.MERGE_GAP_CM (CHOSEN there)
 QUIET_BASE_S = 0.2          # a stall of length L leaves a quiet spell of about L + the quiet when it began; this is
                             # that quiet's typical value (MEASURED: the quiet's 25th percentile 0.08 s on 11 Nov; set so
@@ -72,6 +76,15 @@ NEVER_STILL_S = 5.0         # CHOSEN: a stand longer than this is counted as a n
 
 
 # -- profiles --------------------------------------------------------------------------------------------------------
+# (e21, 5) CHOSEN stresses (not estimates; DOE: no): the 11 Nov runs' measured event jumps run 2-10 cm (cone_fit.json:
+# "felt a robot" p50 1.8, p95 8.1; "hazard" p95 9.9); a bump is drawn 3-10 cm. Rates: about 2 felt / front-stop events a
+# robot-hour at home; the harsh profile triples that.
+BUMPS_PER_H = 6.0
+BUMP_CM = (3.0, 10.0)
+SLIPS_PER_H = 6.0
+SLIP_S = (2.0, 6.0)
+
+
 def qsample(q, rng, scale=1.0):
     """A draw from a quantile summary (realism_measure.quant): piecewise linear between the stored quantiles."""
     pts = [(0.0, q.get("p5", q.get("p50")))]
@@ -268,6 +281,22 @@ def make_class(F):
                     L = max(0.5, qsample(P["slip_len_s"], rng)) if P.get("slip_len_s") else 1.0
                     self.slip[n].append((t, t + L, rng.uniform(0.0, 0.3)))
                     t += L + rng.expovariate(rate)
+            if "slips" in self.faults:                       # (e21, 5) stuck wheels: spells with the body still
+                for n in self.names:
+                    t = rng.expovariate(SLIPS_PER_H / 3600.0)
+                    while t < T:
+                        L = rng.uniform(*SLIP_S)
+                        self.slip[n].append((t, t + L, 0.0))
+                        t += L + rng.expovariate(SLIPS_PER_H / 3600.0)
+            self.bumps = {n: [] for n in self.names}
+            if "bumps" in self.faults:                       # (e21, 5) pushes: the body moves, its wheels do not
+                for n in self.names:
+                    t = rng.expovariate(BUMPS_PER_H / 3600.0)
+                    while t < T:
+                        a = rng.uniform(0, 2 * math.pi)
+                        d = rng.uniform(*BUMP_CM)
+                        self.bumps[n].append([t, d * math.cos(a), d * math.sin(a), False])
+                        t += rng.expovariate(BUMPS_PER_H / 3600.0)
             self.hung_at = None
             if "hung" in self.faults:
                 n = rng.choice(self.names)
@@ -495,6 +524,7 @@ def make_class(F):
         def truth(self):
             if self._real:
                 self._slips()
+                self._bumps()
                 self._restart()
                 k = bisect.bisect_right(self._stall_t0, self.t + F.DT) - 1      # a stall due by the next step
                 if k >= 0 and self.t + F.DT < self.stalls[k][1]:
@@ -515,6 +545,20 @@ def make_class(F):
                         self._prev[n] = (b.x, b.y, b.th)
                         self.m_slip_s[n] = self.m_slip_s.get(n, 0.0) + F.DT
                         break
+
+        def _bumps(self):
+            """(e21, 5) A due push moves the body (truth), not its wheels or its own pose; counted."""
+            for n, b in self.bots.items():
+                for q in getattr(self, "bumps", {}).get(n, ()):
+                    if not q[3] and q[0] <= self.t:
+                        q[3] = True
+                        if b.dead:
+                            continue
+                        b.x += q[1]
+                        b.y += q[2]
+                        if n in self._prev:
+                            self._prev[n] = (b.x, b.y, b.th)
+                        self.stats["bumps"] = self.stats.get("bumps", 0) + 1
 
         def _restart(self):
             R = self.restart

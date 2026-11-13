@@ -46,7 +46,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-VERSION = "fastsim-2026-11-12e19"   # e19 (audit): a hung robot is freed by a drive either way that works its on-board wheel (HANG_FWD_FREES; MIRLT_SIM_HANG_MODEL=e08 the reverse-only model). Before: "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
+VERSION = "fastsim-2026-11-12e21"   # e21 (Nick 12 Nov, decision 5: the simulator must show the ratchet): the simulated robot fuses a fix with the FIRMWARE's own filter (pose.h: its variance growing pose_q_cm 0.01 cm^2 per cm, the gate of 4 sds and at least 3 cm, fix_max_age_ms 1000, a 1.28 s history; refusal reasons counted), MIRLT_SIM_FW_FILTER: "firmware" (default, what the robots run now), "e21" (the e21 firmware: its variance from the record, the Pi's age limit, 3.84 s of history, the escape on the robot), "blend" (before e21: every fix under 1 s at 35 %). Before: "fastsim-2026-11-12e19"   # e19 (audit): a hung robot is freed by a drive either way that works its on-board wheel (HANG_FWD_FREES; MIRLT_SIM_HANG_MODEL=e08 the reverse-only model). Before: "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
 import freeroam_core as FC   # noqa: E402
 
 DT = 0.05
@@ -55,6 +55,10 @@ BOARD = (0.0, 0.0, 122.24, 121.92)
 PACKET_LOSS = 0.03
 TURN_MAX_DPS = 92.0
 V_TOP = 12.5
+SIM_FW_FILTER = os.environ.get("MIRLT_SIM_FW_FILTER", "firmware")   # (e21, 5) the simulated robot's own filter
+FW_PARAMS_OLD = dict(pose_q_cm=0.01, pose_q_deg=0.003, pose_q_dps=0.002, fix_gate=4.0, fix_max_age_ms=1000.0,
+                     hist_ms=1280.0, pose_sd_per_cm=0.0, fix_escape_n=0.0)      # firmware/home_lab params.h 2026-11-05d
+FW_PARAMS_E21 = dict(FW_PARAMS_OLD, fix_max_age_ms=1500.0, hist_ms=3840.0, pose_sd_per_cm=0.04, fix_escape_n=5.0)
 HANG_FWD_FREES = os.environ.get("MIRLT_SIM_HANG_MODEL", "e19") != "e08"   # (e19, the audit: "the hang model cannot free a
                     # robot that backed over: only a reverse frees") a drive EITHER way that works the wheel still on the
                     # board frees it (the e08 reverse rule, made symmetric); "e08": only a reverse frees, as before
@@ -137,6 +141,14 @@ class Bot:
         self.new_fw = new_fw
         self.fw = fw or ("2026-11-05b" if new_fw else "2026-10-29b")
         self.hist = []                              # (t, ox, oy): the firmware fuses a fix against its pose THEN
+        # (e21, 5) the firmware's own filter (pose.h): variances, the last pose counted, refusals by reason, the escape
+        self.fwp = dict(FW_PARAMS_E21 if SIM_FW_FILTER == "e21" else FW_PARAMS_OLD)
+        if SIM_FW_FILTER == "e21":
+            self.fw = "2026-11-12e21"
+        self.var, self.var_th = 1.0, 4.0
+        self.vlast = (x, y, th)
+        self.rej = {}
+        self.esc = []
         self.turn_target = None
         self.started = False
         self.following = True
@@ -465,8 +477,17 @@ class Sim:
             self.up(b, "status", b.fw, int(b.battery))
         elif verb == "fix":
             pass
+        elif verb == "set" and len(parts) >= 3 and parts[1] in getattr(b, "fwp", {}):
+            if SIM_FW_FILTER == "e21":
+                b.fwp[parts[1]] = float(parts[2])       # (e21, 6) the Pi's derived filter settings (new firmware)
+            return
         elif verb == "fpose":
             b.ox, b.oy, b.oth = float(parts[1]), float(parts[2]), float(parts[3])
+            sig = float(parts[4]) if len(parts) > 4 else 0.5
+            sig_th = float(parts[5]) if len(parts) > 5 else 2.0
+            b.var, b.var_th = sig * sig, sig_th * sig_th       # pose.h set()
+            b.vlast = (b.ox, b.oy, b.oth)
+            b.esc = []
             if getattr(b, "hdg_off", None) is not None:
                 b.hdg_off = None                    # (e10) told its heading: the injected error is over
                 self.stats["hdg_fault_cured"] = self.stats.get("hdg_fault_cured", 0) + 1
@@ -1003,13 +1024,34 @@ class Sim:
                     self.ctrl.sent(n)
                     self.down.send(self.t, self.fuse, n, fx, fy, fth, tf)
 
-    def fuse(self, n, fx, fy, fth, tf=None):
+    def fw_grow(self, b):
+        """(e21, 5) pose.h tick(): the variances grow with its own motion since the last count (cm driven, deg turned,
+        seconds), as the firmware's: pose_q_cm per cm (old), or its sd growing pose_sd_per_cm per cm (e21)."""
+        P = b.fwp
+        lx, ly, lth = b.vlast
+        ds = math.hypot(b.ox - lx, b.oy - ly)
+        dth = abs(wrap180(b.oth - lth))
+        if P.get("pose_sd_per_cm", 0.0) > 0:
+            b.var = (math.sqrt(b.var) + P["pose_sd_per_cm"] * ds) ** 2
+        else:
+            b.var += P["pose_q_cm"] * ds
+        b.var_th += P["pose_q_deg"] * dth + P["pose_q_dps"] * 0.1
+        b.vlast = (b.ox, b.oy, b.oth)
+
+    def fw_reject(self, b, why):
+        b.rej[why] = b.rej.get(why, 0) + 1
+        self.stats["fw_rej_" + why] = self.stats.get("fw_rej_" + why, 0) + 1
+        return False
+
+    def fuse(self, n, fx, fy, fth, tf=None, sig=1.0, sig_th=3.0):
         b = self.bots[n]
         if b.dead or getattr(b, "mute", False):
             return
         b.last_rx = self.t                  # any packet keeps its watchdog quiet (follow.h), a refused fix too
         if any(nm == n and t0 <= self.t < t0 + dur for nm, t0, dx, dy, dur in self.own_off):
             return                          # (e08) its fixes refused while its own pose is off
+        if SIM_FW_FILTER != "blend":
+            return self.fuse_fw(b, fx, fy, fth, tf, sig, sig_th)
         hx, hy = b.ox, b.oy
         if tf is not None:                  # the firmware weighs a fix against its own pose at the fix's time
             if self.t - tf > 1.0:           # params.h fix_max_age_ms 1000: older fixes are not used
@@ -1027,10 +1069,69 @@ class Sim:
         # the camera knows where it is: the own pose's heading error is pulled in slowly too (fixes along the line)
         b.oth = wrap180(b.oth + 0.02 * wrap180(b.th - b.oth))
 
+    def fuse_fw(self, b, fx, fy, fth, tf, sig, sig_th):
+        """(e21, 5) The firmware's fix (pose.h fix()): refused when older than fix_max_age_ms ("old"), older than its pose
+        history ("history"), or further than fix_gate of its own sds (and 3 cm) from its own pose at the picture's time
+        ("far"); else blended with the Kalman gain var / (var + sigma^2), the history moving with it. e21 firmware: after
+        fix_escape_n far fixes in a row whose offsets agree (within the gate's sds of the camera), it takes the camera's
+        offset (the escape on the robot)."""
+        P = b.fwp
+        self.fw_grow(b)
+        if tf is not None and (self.t - tf) * 1000.0 > P["fix_max_age_ms"]:
+            return self.fw_reject(b, "old")
+        hx, hy = b.ox, b.oy
+        if tf is not None:
+            if self.t - tf > P["hist_ms"] / 1000.0:
+                return self.fw_reject(b, "history")
+            older = [q for q in b.hist if q[0] <= tf]
+            if not older:
+                return self.fw_reject(b, "history")
+            hx, hy = older[-1][1], older[-1][2]
+        ex, ey = fx - hx, fy - hy
+        e2 = ex * ex + ey * ey
+        S = b.var + sig * sig
+        if e2 > P["fix_gate"] ** 2 * S and e2 > 9.0:
+            n_esc = int(P.get("fix_escape_n", 0) or 0)
+            if n_esc > 0:
+                b.esc.append((ex, ey))
+                del b.esc[:-n_esc]
+                mx = sum(q[0] for q in b.esc) / len(b.esc)
+                my = sum(q[1] for q in b.esc) / len(b.esc)
+                if len(b.esc) >= n_esc and all(math.hypot(q[0] - mx, q[1] - my) <= P["fix_gate"] * sig for q in b.esc):
+                    b.ox, b.oy = b.ox + mx, b.oy + my       # the escape: its own pose was wrong, the camera's offset
+                    b.hist = [(t0, x0 + mx, y0 + my) for t0, x0, y0 in b.hist]
+                    b.var = sig * sig + (mx * mx + my * my) / 4.0
+                    b.vlast = (b.ox, b.oy, b.oth)
+                    b.esc = []
+                    self.stats["fw_escapes"] = self.stats.get("fw_escapes", 0) + 1
+                    return True
+            return self.fw_reject(b, "far")
+        b.esc = []
+        k = b.var / S
+        dx, dy = k * ex, k * ey
+        b.var = (1 - k) * b.var
+        b.ox += dx
+        b.oy += dy
+        b.hist = [(t0, x0 + dx, y0 + dy) for t0, x0, y0 in b.hist]
+        if fth is not None:
+            eth = wrap180(fth - b.oth)
+            Sth = b.var_th + sig_th * sig_th
+            if not (eth * eth > P["fix_gate"] ** 2 * Sth and abs(eth) > 5.0):
+                kt = b.var_th / Sth
+                b.oth = wrap180(b.oth + kt * eth)
+                b.var_th = (1 - kt) * b.var_th
+        # the camera knows where it is: the own pose's heading error is pulled in slowly too (fixes along the line)
+        b.oth = wrap180(b.oth + 0.02 * k / 0.35 * wrap180(b.th - b.oth))
+        b.vlast = (b.ox, b.oy, b.oth)
+        self.stats["fw_used"] = self.stats.get("fw_used", 0) + 1
+        return True
+
     def follow_records(self):
         for n, b in self.bots.items():
             if self.t >= self.next_follow[n] and not b.dead and b.following:
                 self.next_follow[n] = self.t + 0.1
+                if SIM_FW_FILTER != "blend":
+                    self.fw_grow(b)
                 b.hist.append((self.t, b.ox, b.oy))
                 if len(b.hist) > 40:
                     del b.hist[:10]
