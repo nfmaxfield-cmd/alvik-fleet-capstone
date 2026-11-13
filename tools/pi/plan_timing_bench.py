@@ -13,6 +13,9 @@ logs/timing/plan-timing-<date>.json (every number, the Pi's model and load) for 
 
 Fine print: a percentile is the value that share of the ticks stays under; the 99th is the slowest 1 in 100.
 
+BENCH_AS_SLOW_AS=5 (the build machine only): planning paced as if this machine were the Pi (5 x slower), so its ticks x 5
+estimate the Pi's.
+
 Changelog: plan-timing-bench-e22-2026-11-13a first version.
 """
 import argparse
@@ -57,7 +60,7 @@ print(json.dumps(dict(ticks=n, mean_ms=round(1000.0 * sum(ts) / n, 3), p50_ms=ro
 
 
 def run_case(profile, seed, hours, way, cpu=False):
-    env = dict(os.environ, MIRLT_PLAN_BUDGET="derived" if way == "e22" else "every_tick", MIRLT_PLAN_SLOWDOWN="1",
+    env = dict(os.environ, MIRLT_PLAN_BUDGET="derived" if way == "e22" else "every_tick", MIRLT_PLAN_SLOWDOWN=os.environ.get("BENCH_AS_SLOW_AS", "1"),
                BENCH_CPU="1" if cpu else "0")
     env.setdefault("HOME", "/tmp")
     t0 = time.time()

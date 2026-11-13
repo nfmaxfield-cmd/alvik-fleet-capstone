@@ -57,7 +57,7 @@ import fused_pose as FP     # noqa: E402  (e09 Phase B: one filter per robot, fe
 import camera_trust as CT   # noqa: E402  (e20: learned camera trust, heading from motion)
 import error_shape as ES    # noqa: E402  (e21: ONE error shape per robot)
 
-VERSION = "freeroam-2026-11-13e22"   # e22 (Nick 13 Nov 07:03): robots never wait for a person: a never-ending self-rescue ladder after a derived dwell (rescue_step: heading from a short out-and-back, a move that gains room for its shape, else one that keeps its room toward learned camera coverage, else a turn on the spot; questions, NEEDS A HAND and click requests become notes; MIRLT_SELF_RESCUE); a correction, re-seed, "seen again" or escape only from a sighting that is the robot's (id_check: shape exclusivity, motion signature, track continuity; MIRLT_ID_GUARD); the robots' own escape off (MIRLT_FW_ESCAPE); planning paced by its measured cost, the spatial cull, a resumable menu search, the shape fit once a tick (MIRLT_PLAN_BUDGET); a lost robot is no longer held "unsure"; a slip's re-seed not projected by wheel travel that never happened. Before: "freeroam-2026-11-12e21"   # e21 (Nick 12 Nov): ONE error shape per robot (error_shape.Shape: a cone along its own track plus a disc for the error seen and the events it reports; MIRLT_ERROR_SHAPE) read by the plans (reservations carry it: MIRLT_SHAPE_PLAN), the edge rule, the blind stop, corrections and Mission Control; Nick's four stages (run, veer, found, pause and search: MIRLT_STAGES); no creep without the edge rule (MIRLT_LOST_CREEP); the ratchet broken on the Pi (consistency escape, MIRLT_CONSISTENT_ESCAPE) with the heading from its next move; 'inward by both' with two headings (MIRLT_INWARD_TWO_HEADINGS); the firmware filter's settings derived (MIRLT_FW_FILTER_PARAMS). Before: "freeroam-2026-11-12e20"   # e20 (camera trust): every fix says its camera (on_fix cam=); the odometry record learns only from a camera trusted for position there, weighted by that trust (MIRLT_ODO_LEARN_TRUST); heading from motion on every camera (camera_trust.MotionHeading: a camera's straight-drive line with its measured noise across it) as evidence for the cameras, a heading source handed with the next fix, and a heading in doubt settled without a crawl when it is precise enough (MIRLT_MOTION_HEADING). Before: "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
+VERSION = "freeroam-2026-11-13e22c"   # e22c (Nick 13 Nov ~10:00, boxed into a corner): a robot with no move that gains room asks every robot in its way out to step aside, nearest first, held or not (ask_way_out, MIRLT_BOX_ASK); a held robot makes room and takes the ladder. Before: "freeroam-2026-11-13e22b"   # e22b: the ladder's clock restarts only when its own pose really moved (MIRLT_RESCUE_STILL), not on moves planned and then refused. Before: "freeroam-2026-11-13e22"   # e22 (Nick 13 Nov 07:03): robots never wait for a person: a never-ending self-rescue ladder after a derived dwell (rescue_step: heading from a short out-and-back, a move that gains room for its shape, else one that keeps its room toward learned camera coverage, else a turn on the spot; questions, NEEDS A HAND and click requests become notes; MIRLT_SELF_RESCUE); a correction, re-seed, "seen again" or escape only from a sighting that is the robot's (id_check: shape exclusivity, motion signature, track continuity; MIRLT_ID_GUARD); the robots' own escape off (MIRLT_FW_ESCAPE); planning paced by its measured cost, the spatial cull, a resumable menu search, the shape fit once a tick (MIRLT_PLAN_BUDGET); a lost robot is no longer held "unsure"; a slip's re-seed not projected by wheel travel that never happened. Before: "freeroam-2026-11-12e21"   # e21 (Nick 12 Nov): ONE error shape per robot (error_shape.Shape: a cone along its own track plus a disc for the error seen and the events it reports; MIRLT_ERROR_SHAPE) read by the plans (reservations carry it: MIRLT_SHAPE_PLAN), the edge rule, the blind stop, corrections and Mission Control; Nick's four stages (run, veer, found, pause and search: MIRLT_STAGES); no creep without the edge rule (MIRLT_LOST_CREEP); the ratchet broken on the Pi (consistency escape, MIRLT_CONSISTENT_ESCAPE) with the heading from its next move; 'inward by both' with two headings (MIRLT_INWARD_TWO_HEADINGS); the firmware filter's settings derived (MIRLT_FW_FILTER_PARAMS). Before: "freeroam-2026-11-12e20"   # e20 (camera trust): every fix says its camera (on_fix cam=); the odometry record learns only from a camera trusted for position there, weighted by that trust (MIRLT_ODO_LEARN_TRUST); heading from motion on every camera (camera_trust.MotionHeading: a camera's straight-drive line with its measured noise across it) as evidence for the cameras, a heading source handed with the next fix, and a heading in doubt settled without a crawl when it is precise enough (MIRLT_MOTION_HEADING). Before: "freeroam-2026-11-12e19"   # e19 (the Fable audit, 12 Nov): 7/10 ONE owner of wheel_scale (MIRLT_WHEEL_OWNER=pool), curves live from this session's fleet estimate (MIRLT_CURVE_LIVE, curve_live). H4 a correction beyond the robot's stated doubt (stated_doubt: its record from calibration-run data, MIRLT_BLIND_BUBBLE=record for every loss) needs motion proof (MIRLT_MOTION_PROOF: named far proves itself by an out-and-back, proof_watch; an unconfirmed correction permits no reverse toward an edge and does not widen the gate until its own move confirms it); after a restart its pose is sent and a heading check asked (on_restart / boot_watch); camera_test_step while the camera is not trusted. H6 a hung robot is never given up on (MIRLT_HANG_RECOVERY): the opposite of what tilted it first (tilt_cause), forward tries with the tilt stop raised when its nose points inward (recover_forward), growing rounds one derived pause apart, the fail memory per round, the tilt keep-out at the nearest edge, no refused creeps while tilted. H5 the creep token stands only while its holder's creep is under way; a stuck robot (tilted, recovering, its last moves did not move: stuck()) never holds or takes it. Before: "freeroam-2026-11-12e18b"   # e18b (the replay of all 10 home runs): a standing robot named all along beyond its 6 cm fix gate is corrected from the camera (MIRLT_FAR_NAMED_CORRECT); a standing re-seed keeps its own heading unless the camera's is better (MIRLT_RESEED_HEADING_KEEP); curve scales logged, not saved, until Nick decides (MIRLT_CURVE_SCALE_SAVE); the trust record pooled for the fleet (odo_trust, MIRLT_TRUST_FLEET). e18 (Nick 12 Nov decisions): (1) the tracking layer's out-and-back identity drive, made only where no body can touch (outback); (3) a creep with its heading in doubt beside a robot the camera has waits for room or goes straight away when no heading can close the gap; beside one it does not have, half steps at the slowest speed away from where it was last believed to be (MIRLT_DOUBT_NEIGHBOUR); (4) a lost / stray / needs-a-hand robot goes first (reflex priority) to the nearest readable point nobody uses, and a standing robot in its way makes room (MIRLT_LOST_PRIORITY); (5) each robot's odometry trust (odo_trust: shadow dead reckoning against the camera, its own record) gives its lost bubble and allows blind legs (curves through unreadable ground, blind_excursion) only where the predicted error keeps every margin with a way back; checked against the error found when seen again (MIRLT_BLIND_ALLOW); (6) every calibration correction (curves, straight drives) saved at any end by the agreement rules (save_corrections, MIRLT_SAVE_CAL_AT_END). Every safety switch read through safety_group. Before: "freeroam-2026-11-12e17"   # e17 (home 11 Nov, the 08:26 and 08:58 runs): (1d) a camera position the tracking layer named by elimination or a wiggle is a CORRECTION: its pose set from the camera at once (fpose, never rejected by its filter), said "CORRECTED", never "moved in" / REJOINED, and a held robot rejoins on it (MIRLT_CAMERA_CORRECT=0: as e16); (1e) a re-seed is projected to now and never lands while the robot turns (the Pi's copy of its heading is ~0.3 s old: 13-15 deg median jump when it landed mid-turn, MIRLT_RESEED_TURN=0: as before); (2) no driving blind on late fixes: each robot's measured fix age and drift against the room its path has (MIRLT_LATE_FIX=0); after an off-plan heading re-set the next move waits for a short crawl the camera confirms (MIRLT_HEADING_CONFIRM=0); (6) each robot's drift per cm measured from its own corrections. Before: "freeroam-2026-11-11e16"
 VERSION_E16 = "freeroam-2026-11-11e16"   # e16 (home free roam 11 Nov 08:45-08:48, commit 4732a48: Right stopped at an edge and stood; then "REJOINED ... moved in" 1 s after NEEDS A HAND with nobody there, and Center pushed it off): (7) an edge stop reverses along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target), checked against the others' reservations, then re-plans; it holds and asks only when the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: as before); (8a) "moved in" needs evidence: a lift or a sustained camera move past its own measured noise, or its own drive out (MIRLT_REJOIN_EVIDENCE=0: as before); (8b) a robot held or stuck at an edge, or rejoined and not yet driven away, is a fixed obstacle with its uncertainty (own pose against the camera) in every plan and the reflex (MIRLT_PINNED_OBSTACLE=0); (8c) contact: a standing robot the camera sees move past its noise, or whose accelerometer jolts, stops the robots near it; a driving robot whose camera progress falls far below its wheels' stops and backs off; contact.csv (MIRLT_CONTACT_WATCH=0); (8d) a question nobody answers (ASK_WAIT_S) makes the run decide by itself, as an unattended run does (MIRLT_ASK_UNATTENDED=1: keeps asking); (9b) a standing robot's doubt no longer grows with its fix's age (home: "cannot tell whether it is clear of the edge" 22 cm in; MIRLT_STAND_UNC=0). Before: "freeroam-2026-11-10e13b"   # e13b (10 Nov, Nick 13:34): a standing robot (its own odometry shows no motion since its last fix) keeps that fix: never lost while it stands, sparse reads confirm it (MIRLT_STAND_TRUST=0: before); the lost threshold grows only for a camera slower than about 2.5 pictures a second (1.5 x the longest recent gap). e13 (10 Nov): never give up blind (BLIND_RULE edge: a lost robot drives on while its bubble + body + stop cannot reach an edge; BUBBLE_CAP behind MIRLT_BLIND_RULE=cap); stray return (a robot outside the readable area comes back along ground it drove); never give up (a robot held at an edge waits, says it needs a hand and rejoins: EDGE_PARK off); risk-based no-pictures limit per robot
 VERSION_E12 = "freeroam-2026-11-10a"   # 11-10a (e12): the curve-fit maths moved into module functions (fit_arc_points, arc_summary, arc_agree) so the calibration's curve phase uses the very same (free roam's own fitting and saving unchanged); a robot held at an edge for EDGE_PARK_S is parked and said loudly, the others roam on (MIRLT_EDGE_PARK=0: before)
 VERSION_E = "freeroam-2026-11-07e"   # 11-07e (Nick 7 Nov): a robot put down at or over an edge first tries the e08 tilt recovery, a person asked only if that fails (MIRLT_START_EDGE_MODE=wait: always wait)
@@ -374,6 +374,11 @@ SHAPE_CHECKED_KINDS = ("veer step", "search turn", "rescue step", "rescue turn",
                                 # the error shape itself (a gain or never worse; a turn on the spot never moves the middle)
                                 # are not eased to a stop by the blind limit's own check the moment they start (before
                                 # e22 every e21 veer step and search turn was halted at once: "a dropped piece started")
+BOX_ASK = SG.flag("MIRLT_BOX_ASK")   # (e22c, Nick 13 Nov ~10:00: boxed into a corner by two standing robots)
+BOX_CORRIDOR_N = 3                   # (e22c) the way out asked for: 3 body widths long. Chosen; DOE: no (any length
+                                     # that clears a body works; a longer one asks more robots to move)
+RESCUE_TURN_DEG = WIGGLE_DEG / 2.0   # (e22b) a turn the ladder's clock counts as motion: half its smallest turn
+STILL_BY_POSE = SG.value("MIRLT_RESCUE_STILL") != "idle"   # (e22b) the ladder's clock: own pose (default) or idle
 RESCUE_WIGGLE_DEG = WIGGLE_DEG  # (e22, 1d) where its corners could swing over an edge: the find-me wiggle. Reused
 ROOM_CLEAR_CM = 2.0     # (4) CHOSEN: a robot making room for a lost one clears its corridor by this much more. DOE: no
 EXC_MIN_CM = 3.0        # (5) CHOSEN: an excursion shortened below this is refused (the camera's noise is ~1 cm). DOE: no
@@ -886,6 +891,9 @@ class Controller:
         self.silent_out = bool(silent_out)
         self.lead_tab = dict(leads or {})   # {robot: {speed: cm}} its stop lead from its calibration (A5)
         self.tilt_recovery = bool(tilt_recovery)
+        import time as _tm
+        self.tick_t0, self.plans_tick = None, 0   # (e22b) no tick running yet (a step called on its own): never deferred
+        self.plan_slowdown = PLAN_SLOWDOWN       # (e22b) per controller: the simulator sets 0 (its seeds repeat)
         self.heading_watch = bool(heading_watch)
         # (e10, C2) the proven workspace: a ProvenWorkspace (a tuple of its outer limit, with the grid) in place of the
         # board rectangle; None: the rectangle, as before (the switch)
@@ -2276,7 +2284,7 @@ class Controller:
         if len(st) < 100:
             b = 0.5 * TICK_S
         else:
-            hi = sorted(st)[int(0.99 * (len(st) - 1))] * PLAN_SLOWDOWN
+            hi = sorted(st)[int(0.99 * (len(st) - 1))] * self.plan_slowdown
             b = max(0.0, TICK_S - hi)
         self.budget_c = (self.t, b)
         return b
@@ -2296,8 +2304,10 @@ class Controller:
             pc = self.__dict__.get("plan_s") or []
             pe = self.plan_est_c = (self.t, sorted(pc)[int(0.95 * (len(pc) - 1))] if len(pc) >= 20 else 0.0)
         est = pe[1]
-        used = (_tm.perf_counter() - self.tick_t0) * PLAN_SLOWDOWN
-        ok = used + est * PLAN_SLOWDOWN <= self.plan_budget_s()
+        if self.tick_t0 is None:
+            return True
+        used = (_tm.perf_counter() - self.tick_t0) * self.plan_slowdown
+        ok = used + est * self.plan_slowdown <= self.plan_budget_s()
         if not ok:
             self.counts["plans_deferred"] = self.counts.get("plans_deferred", 0) + 1
         return ok
@@ -2323,7 +2333,7 @@ class Controller:
         pl = sum((self.__dict__.get("plan_s") or [])[-self.plans_tick:]) if self.plans_tick else 0.0
         st.append(max(0.0, tot - pl))
         del st[:-2000]
-
+        self.tick_t0 = None                            # (e22b) between ticks nothing is deferred
     # -- (e22, Nick 13 Nov 07:03) never wait for a person: the recovery ladder ---------------------------------------------
     def coverage_learn(self):
         """(e22, 1c) The cameras' coverage, learned (not mapped): every half second each robot's square (ES grid,
@@ -2388,14 +2398,22 @@ class Controller:
         person: the old ask-a-person way is MIRLT_SELF_RESCUE=ask."""
         if not SELF_RESCUE:
             return
-        if r.mode != "idle" or r.move is not None or not self.rescue_free(r):
+        if not self.rescue_free(r):
             r.rescue_still = None
             return
         o = r.own
         st = r.__dict__.get("rescue_still")
-        if st is None:
-            # idle with no move since now (its own pose may still jitter as fixes nudge it: that is not motion)
+        if st is None or (STILL_BY_POSE and (math.hypot(o[1] - st[1], o[2] - st[2]) >= ID_MOVE_CM or
+                                             abs(wrap180(o[3] - st[3])) >= RESCUE_TURN_DEG)):
+            # (e22b) the clock restarts only when its own pose really moved (ID_MOVE_CM, the camera's whole-watch
+            # move; or a turn of half the wiggle): moves that were planned and then refused (e22's missing_cam seed
+            # 1: a reverse refused every 1.5 s for 300 s) no longer restart it. Fixes that nudge its pose by less
+            # than that are not motion either. MIRLT_RESCUE_STILL=idle: e22's first rule (idle ticks only)
             r.rescue_still = (self.t, o[1], o[2], o[3])
+            return
+        if r.mode != "idle" or r.move is not None:
+            if not STILL_BY_POSE:
+                r.rescue_still = None
             return
         if self.t - st[0] < self.rescue_dwell(r) or self.t < r.__dict__.get("rescue_next", -1e9):
             return
@@ -2467,6 +2485,8 @@ class Controller:
                 rung = g["rung"]
         if rung is None and not hd_unknown:
             rung = self.rescue_probe(r, p, h)
+        if rung is None and BOX_ASK:
+            self.ask_way_out(r, p)                     # (e22c) boxed in: the robots in its way out are asked to clear
         if rung is None:
             turn_ok = self.can_turn_here(r) or (SHAPE and self.shape_room(r, p, None) >= 0.0)
             deg = 90.0 if turn_ok else RESCUE_WIGGLE_DEG * (1 if rs["n"] % 2 else -1)
@@ -2785,6 +2805,14 @@ class Controller:
     def pose_unconfirmed(self, r):
         """(e19, audit H4) Its pose rests on a camera correction or re-seed its own move has not confirmed yet, or it is
         stuck (its last moves did not move: its wheels may turn while its body hangs)."""
+        if ID_GUARD and MOTION_PROOF:
+            # (e22; measured seeds 3 and 6: two reverses off the edge with the robot's OWN pose 16 and 34 cm from the
+            # camera's while the identity guard held the correction back) the robot drives in its own frame: while its
+            # own pose and the camera disagree by more than its own filter would accept, its frame is off, and a reverse
+            # (no rear sensor) could go anywhere that far
+            pf = r.__dict__.get("pfuse")
+            if pf is not None and pf.disagree_cm > max(SR.SURE_TOL_CM, self.fw_gate_cm(r)) and r.lost is None:
+                return True
         return MOTION_PROOF and (r.__dict__.get("corr_unconf") is not None or self.stuck(r))
 
     def reverse_ok(self, r, res):
@@ -3898,6 +3926,58 @@ class Controller:
                        "of its way first" % (r.name, tgt[0], tgt[1], o.name))
         return o
 
+    def ask_way_out(self, r, p):
+        """(e22c, Nick 13 Nov ~10:00: two robots stood for a long time and boxed the third into a corner; only the
+        cornered one was ever moved) r has no move that gains room: of the straight ways out (every 30 deg, BOX_CORRIDOR_N
+        body widths long, ending on the board with its body inside), the one with the fewest robots in it (then the one
+        ending farthest from an edge) is its way out, and EVERY robot in it, nearest first, is asked to step out of it
+        (make_room_step), held or not; asked again at each rung until the corridor is open. Returns the robots asked."""
+        if p is None:
+            return []
+        w = 2 * HALF + REFLEX_GAP + (r.shape.extent() if SHAPE else self.unc(r))
+        Lc = BOX_CORRIDOR_N * 2 * HALF + w
+        best = None
+        for k in range(12):
+            a_ = math.radians(30.0 * k)
+            ux, uy = math.cos(a_), math.sin(a_)
+            end = (p[0] + Lc * ux, p[1] + Lc * uy)
+            ed = edge_dist(self.rect, *end)
+            if ed < HALF + 1.0:
+                continue
+            bl = []
+            for o in self.R.values():
+                if o is r or o.mode in ("out", "gone", "start") or self.pos(o) is None:
+                    continue
+                q = self.pos(o)
+                al = (q[0] - p[0]) * ux + (q[1] - p[1]) * uy
+                if al < 0.0 or al > Lc + w:
+                    continue
+                d = abs(-(q[0] - p[0]) * uy + (q[1] - p[1]) * ux)
+                if d < w + (o.shape.extent() if SHAPE else self.unc(o)):
+                    bl.append((al, o))
+            key = (len(bl), -ed)
+            if best is None or key < best[0]:
+                best = (key, end, sorted(bl, key=lambda z: z[0]))
+        if best is None or not best[2]:
+            return []
+        asked = []
+        for al, o in best[2]:
+            mr = o.__dict__.get("make_room")
+            if mr is None or mr.get("for_") != r.name:
+                o.make_room = dict(t=self.t, for_=r.name, a=tuple(p), b=tuple(best[1]),
+                                   w=w + ROOM_CLEAR_CM + (o.shape.extent() if SHAPE else self.unc(o)), boxed=True)
+                self.counts["room_asked_boxed"] = self.counts.get("room_asked_boxed", 0) + 1
+                self.event(o, "makes room", "%s has no move that gains room and its way out to %.0f, %.0f passes here: "
+                           "%s steps out of it" % (r.name, best[1][0], best[1][1], o.name))
+            else:
+                mr["t"] = self.t                       # still in the way: asked again (the 30 s limit restarts)
+            o.busy_until = min(o.busy_until, self.t)
+            asked.append(o.name)
+        self.log("rescue", dict(t=round(self.t, 2), robot=r.name, why="boxed in", rung="ask: " + ",".join(asked),
+                                n=(r.__dict__.get("rescue") or {}).get("n", 0), x=round(p[0], 1), y=round(p[1], 1),
+                                lost=int(r.lost is not None), shape_cm="", room_cm=""))
+        return asked
+
     def make_room_step(self, o):
         """o steps sideways out of a recovering robot's corridor (the side it is already on), as far as the corridor's
         half width needs; the usual plan checks (edges with its doubt, the others' reservations). True when sent."""
@@ -3906,7 +3986,7 @@ class Controller:
             o.make_room = None
             return False
         rr = self.R.get(mr["for_"])
-        if rr is None or not self.recovering(rr):
+        if rr is None or not (self.recovering(rr) or mr.get("boxed")):
             o.make_room = None
             return False
         p, h = self.pos(o), self.heading(o)
@@ -3919,10 +3999,15 @@ class Controller:
         if need <= 0:
             o.make_room = None
             return False
-        for s_ in (sg, -sg):
-            nx, ny = -uy * s_, ux * s_
+        tries = [(sg, 0.0), (-sg, 0.0)]
+        if mr.get("boxed"):
+            tries += [(sg, 1.0), (-sg, 1.0)]           # (e22c) sideways and away from the boxed robot, 45 deg
+        for s_, aw in tries:
+            nx, ny = -uy * s_ + ux * aw, ux * s_ + uy * aw
+            nn = math.hypot(nx, ny)
+            nx, ny = nx / nn, ny / nn
             brg = math.degrees(math.atan2(ny, nx))
-            dist_ = need + 1.0 if s_ == sg else mr["w"] + abs(side) + 1.0
+            dist_ = (need + 1.0 if s_ == sg else mr["w"] + abs(side) + 1.0) * (math.sqrt(2.0) if aw else 1.0)
             back = abs(wrap180(brg - (h + 180.0))) <= 60.0
             turn = 0.0 if back else wrap180(brg - h)
             hd = wrap180(h + 180.0) if back else wrap180(h + turn)
@@ -4745,7 +4830,7 @@ class Controller:
         if not PLAN_BUDGET:
             return False
         import time as _tm
-        return (_tm.perf_counter() - self.tick_t0) * PLAN_SLOWDOWN > self.plan_budget_s()
+        return self.tick_t0 is not None and (_tm.perf_counter() - self.tick_t0) * self.plan_slowdown > self.plan_budget_s()
 
     def _pick_gen(self, r):
         """pick's search, a generator: it yields where the tick's planning time ran out (plan_over)."""
@@ -7761,6 +7846,14 @@ class Controller:
                 self.find_me(r)
             if getattr(r, "held", None):
                 self.held_check(r)                     # (e08, A7) held as an obstacle, checked, rejoins
+                if BOX_ASK and SELF_RESCUE and getattr(r, "held", None) and r.mode == "idle" and r.move is None \
+                        and not r.silent and self.pos(r) is not None and not getattr(r, "tilted", False):
+                    # (e22c, Nick 13 Nov ~10:00) a held robot is never a wall for good: it makes room when asked, and
+                    # it takes the ladder's rungs like any standing robot
+                    if r.__dict__.get("make_room") is not None and t >= r.busy_until:
+                        self.make_room_step(r)
+                    if r.move is None:
+                        self.rescue_watch(r)
                 if r.mode not in ("gone",):
                     self.pump(r)
                 continue

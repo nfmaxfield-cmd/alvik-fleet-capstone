@@ -1,4 +1,4 @@
-"""Build e19 (12 Nov): the Fable audit's fixes (docs/audits/2026-11-12-fable-audit.md), safety first. Each test fails on
+"""(e22: 1 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) Build e19 (12 Nov): the Fable audit's fixes (docs/audits/2026-11-12-fable-audit.md), safety first. Each test fails on
 the code before its fix (main at c79c1df). Simulator, test rig and saved logs only: no robot, no Pi, no camera.
 
     python3 -m pytest tools/fleet/tests/test_e19_audit_fixes.py -q
@@ -345,6 +345,7 @@ def _far_rig19(proof, monkeypatch, secs=12.0):
     return R
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_named_far_beyond_its_doubt_is_proven_by_an_out_and_back_before_any_correction(monkeypatch):
     """Audit H4: "named far" had no upper limit and no motion proof (3 of the 7 falls: 24-91 cm wrong). Now, beyond the
     robot's stated doubt (5 cm here), it drives a short out-and-back first; the 11 Nov 08:26 case still ends corrected."""

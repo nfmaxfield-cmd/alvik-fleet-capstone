@@ -1,4 +1,4 @@
-"""Home free roam (2026-11-05, docs/build-reports/e04-nov05-home-free-roam.md): the controller (freeroam_core.py) and
+"""(e22: 2 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) Home free roam (2026-11-05, docs/build-reports/e04-nov05-home-free-roam.md): the controller (freeroam_core.py) and
 its stress simulator (freeroam_fastsim.py), the firmware 2026-11-05b commands in the simulator, the launcher.
 
     python3 -m pytest tools/fleet/tests/test_freeroam.py -q
@@ -7,6 +7,8 @@ import math
 import os
 import subprocess
 import sys
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET = os.path.dirname(HERE)
@@ -172,6 +174,7 @@ def test_old_firmware_uses_halt_and_resend():
 
 
 # -------------------------------------------------------------------------------------------- lost by the camera
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_dead_reckoning_bubble_grows_and_jump_is_logged(monkeypatch):
     # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
     monkeypatch.setattr(FC, "SHAPE", False)
@@ -341,6 +344,7 @@ def test_camera_delay_and_clock_measured_no_false_lost():
     assert abs(p[0] - xt) < 1.5 and abs(p[1] - 60.0) < 0.5, (p, xt)
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_reacquire_compares_at_the_pictures_time_and_projects_fpose():
     """Real failure: 'seen again' compared a 0.45 s old fix with the pose now (jumps up to 45 cm) and sent that stale
     spot as fpose. Now the jump is measured at the picture's time and the fpose is moved on to now."""

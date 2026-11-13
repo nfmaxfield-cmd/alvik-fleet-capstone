@@ -1,4 +1,4 @@
-"""e08 Phase A (Nick 7 Nov): edge safety and shared watches. One test group per decision A1-A11.
+"""(e22: 3 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) e08 Phase A (Nick 7 Nov): edge safety and shared watches. One test group per decision A1-A11.
 
     python3 -m pytest tools/fleet/tests/test_e08_phase_a.py -q
 """
@@ -7,6 +7,8 @@ import math
 import os
 import re
 import sys
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET = os.path.dirname(HERE)
@@ -61,6 +63,7 @@ def test_a1_disagreement_widens_at_once_not_after_2s():
     assert old.unc_extra() == 0.0                       # the old rule: nothing widened
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a1_controller_uncertainty_includes_the_disagreement_and_reseeds_without_stopping():
     c, sent, rows = ctrl(names=("Center",))
     place(c, "Center", 40.0, 40.0, 0.0)
@@ -149,6 +152,7 @@ def test_a2_questions_hook_round_trip(tmp_path):
     assert SR.open_questions(str(tmp_path)) == []
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a2_unsure_attended_asks_and_holds_alone_moves_inward_or_holds(tmp_path):
     for attended in (True, False):
         asks = SR.Questions(run="t", folder=str(tmp_path / ("a" if attended else "b")))
@@ -318,6 +322,7 @@ def test_a7_silent_robot_held_then_rejoins_old_switch_out():
         assert r.held is None and events(rows, "rejoined")
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a7_heading_held_robot_rejoins_after_a_camera_watched_nudge():
     import rehearse_phase_a as RH
     jobs = {j[0]: j for j in RH.case_runs("c", 0.03) if j[1] == 1}

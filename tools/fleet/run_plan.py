@@ -4722,7 +4722,10 @@ def find_robots(coord, link, args, soft=False):
             for ip in args.robot or []:
                 link.send_ip(ip, "ping")
         time.sleep(0.05)
-    if os.environ.get("MIRLT_WAKE_AT_START", "1") != "0" and not set(names) <= set(link.robots()):
+    sim_sleep = any("--asleep" in str(x) for x in (getattr(args, "sim_arg", None) or []))
+    if os.environ.get("MIRLT_WAKE_AT_START", "1") != "0" and not set(names) <= set(link.robots()) and \
+            (not getattr(args, "dry_run", False) or sim_sleep):
+        # (a dry run's simulated robots sleep only when the simulator is told so: --sim-arg=--asleep ...)
         # (e22, the 13 Nov 08:14 home run: none found, all asleep after "sleep as soon as a run ends") a robot not heard
         # may be in deep sleep: woken at its check-in (it says "awake for a check-in"), waited for one whole check-in
         # interval and its awake window, said plainly (wake.json in the run's folder for Mission Control)

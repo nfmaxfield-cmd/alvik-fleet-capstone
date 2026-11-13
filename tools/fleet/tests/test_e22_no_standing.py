@@ -3,7 +3,8 @@ exclusivity, motion signature, track continuity), the escape's guards, the robot
 (planning paced, the spatial cull, a resumable search), the live error shape for Mission Control, the back reach's
 refit, and the simulator's measured bumps with the edge checked. Offline only.
 
-Changelog: e22-2026-11-13a first version.
+Changelog: e22-2026-11-13a first version. e22b: the ladder's clock is not restarted by moves planned and refused;
+the simulator's seeds do not depend on the machine's speed. e22c: the boxed-in corner (Nick 13 Nov ~10:00).
 """
 import json
 import math
@@ -149,6 +150,40 @@ def test_a_robot_that_stands_takes_a_ladder_rung_after_the_derived_dwell_and_nob
     assert r.move is not None and str(r.move["kind"]).startswith(("rescue", "outback"))
     assert any(tb == "rescue" for tb, row in logs)
     assert not any("NEEDS A HAND" in str(row.get("kind", "")) for tb, row in logs if tb == "events")
+
+
+def test_moves_planned_and_refused_every_second_do_not_keep_the_ladder_away():
+    # (e22b) the 25-run batch, missing_cam seed 1: a reverse refused every 1.5 s for 300 s restarted e22's first clock
+    c, out, logs = _ctrl(("A",))
+    r = _place(c, "A", 60.0, 60.0, 0.0)
+    dwell = c.rescue_dwell(r)
+    every = max(2, int(dwell / 2.0 / 0.1))                    # a refused plan twice in each dwell
+    t = 1.0
+    fired = False
+    for k in range(int((dwell * 3 + 5.0) / 0.1)):
+        t += 0.1
+        c.t = t
+        c.on_follow("A", t, "idle", 60.0, 60.0, 0.0)
+        if k % every == 0:
+            r.mode, r.move = "move", dict(kind="refused")     # planned, then refused: its own pose never moves
+        else:
+            r.mode, r.move = "idle", None
+        c.rescue_watch(r)
+        if r.move is not None and str(r.move.get("kind")).startswith(("rescue", "outback")):
+            fired = True
+            break
+    assert fired
+    assert any(tb == "rescue" for tb, row in logs)
+
+
+def test_the_simulator_never_defers_planning_by_the_machines_clock():
+    import freeroam_fastsim as FS
+    if "MIRLT_PLAN_SLOWDOWN" in os.environ:
+        pytest.skip("MIRLT_PLAN_SLOWDOWN set for this session")
+    s = FS.Sim(1, 0.01) if hasattr(FS, "Sim") else None
+    if s is None:
+        pytest.skip("no Sim class")
+    assert s.ctrl.plan_slowdown == 0.0
 
 
 def test_asking_for_a_click_is_a_note_not_a_wait():
@@ -517,3 +552,59 @@ def test_the_page_has_a_status_line_and_a_restart_button_always():
     assert "def headline(self)" in src and '"headline": self.headline()' in src
     assert "freeroam-stop" in src                       # STOP reaches a free roam started from the terminal
     assert "earlier_runs_cleared" in src                # needs-a-hand requests of an earlier run are not shown
+
+
+def test_no_reverse_while_its_own_frame_is_off_the_cameras():
+    """(measured seeds 3 and 6: reverses off the edge with its own pose 16-34 cm from the camera's) the robot drives in
+    its own frame: while its own pose and the camera disagree beyond its own filter's gate, its pose is unconfirmed (no
+    reverse toward an edge)."""
+    import types
+    c, out, logs = _ctrl(("A",))
+    r = _place(c, "A", 60.0, 60.0, 0.0)
+    r.pfuse = types.SimpleNamespace(disagree_cm=20.0)
+    assert c.pose_unconfirmed(r)
+    r.pfuse = types.SimpleNamespace(disagree_cm=1.0)
+    assert not c.pose_unconfirmed(r)
+
+
+# -- (e22c, Nick 13 Nov ~10:00) two robots stood for a long time and boxed the third into a corner -------------------------
+def _boxed(monkeypatch, on):
+    import freeroam_fastsim as FS
+    monkeypatch.setattr(FC, "BOX_ASK", on)
+    # Left in the corner facing it; Center and Right standing (held: their heading not known) across its way out
+    starts = {"Left": (13.0, 13.0, 225.0), "Center": (31.0, 12.0, 90.0), "Right": (12.0, 31.0, 0.0)}
+    s = FS.Sim(1, 0.05, starts=starts, held={"Center": "heading", "Right": "heading"}, edge_physics=True,
+               sensors=True)
+    s.ctrl.plan_slowdown = 0.0
+    out_t = []
+    p0 = {n: (b.x, b.y) for n, b in s.bots.items()}
+    moved = {"Center": 0.0, "Right": 0.0}
+    otick = s.ctrl.tick
+
+    def tick(t):
+        res = otick(t)
+        b = s.bots["Left"]
+        if not out_t and math.hypot(b.x, b.y) > 45.0:
+            out_t.append(t)
+        for n in moved:
+            moved[n] = max(moved[n], math.dist(p0[n], (s.bots[n].x, s.bots[n].y)))
+        return res
+    s.ctrl.tick = tick
+    summ = s.run()
+    return out_t, moved, summ, s.ctrl
+
+
+def test_a_robot_boxed_into_a_corner_by_two_standing_robots_gets_out_without_a_person(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out_t, moved, summ, c = _boxed(monkeypatch, True)
+    assert out_t, "the cornered robot never got 45 cm out of the corner"
+    assert moved["Center"] > 10.0 and moved["Right"] > 10.0      # both standing robots were moved, not only Left
+    assert summ.get("falls", 0) == 0 and summ.get("contacts", 0) == 0
+    assert c.counts.get("room_made", 0) >= 2
+
+
+def test_the_boxed_corner_reproduced_with_the_old_way(monkeypatch, tmp_path):
+    # MIRLT_BOX_ASK=0: only a lost robot asks, and only the nearest one on its line; held robots never move
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out_t, moved, summ, c = _boxed(monkeypatch, False)
+    assert not out_t and moved["Center"] < 1.0 and moved["Right"] < 1.0

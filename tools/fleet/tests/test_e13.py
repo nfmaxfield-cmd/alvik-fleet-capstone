@@ -1,4 +1,4 @@
-"""e13 (10 Nov 2026): school free roam inside the readable area (stray return), never give up (a held robot waits for a
+"""(e22: 3 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) e13 (10 Nov 2026): school free roam inside the readable area (stray return), never give up (a held robot waits for a
 hand and rejoins), robots sleep 10 min after a run, the risk-based no-pictures limit, camera discovery inside robot
 finding, runs without roof tags, the detector's auto-labelling pipeline, school runs copied to the home Pi."""
 import json
@@ -6,6 +6,8 @@ import math
 import os
 import subprocess
 import sys
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET = os.path.dirname(HERE)
@@ -95,6 +97,7 @@ def _hand_sim(push=True):
     return sim.ctrl, r
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_robot_held_at_an_edge_asks_for_a_hand_and_rejoins_when_moved_in(monkeypatch):
     monkeypatch.setattr(FC, "NEVER_STILL", False)                 # (e17) e13's hold-and-wait is the switch now
     assert not FC.EDGE_PARK                                       # e12's park is the switch now, off by default
@@ -104,6 +107,7 @@ def test_a_robot_held_at_an_edge_asks_for_a_hand_and_rejoins_when_moved_in(monke
     assert r["moving_pct"]["Center"] > 10 and r["moving_pct"]["Left"] > 50 and r["moving_pct"]["Right"] > 50
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_robot_waiting_for_a_hand_is_never_dropped_by_a_timer_and_its_battery_still_ends_it():
     c, r = _hand_sim(False)
     rc = c.R["Center"]
@@ -580,6 +584,7 @@ def test_blind_robot_far_from_edges_drives_on_and_one_near_an_edge_never_closes_
     assert CR_.BLIND_RULE == SG_.value("MIRLT_BLIND_RULE") == "edge"
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_held_robot_is_placed_by_scripted_clicks_and_its_heading_comes_from_a_safe_drive(tmp_path, monkeypatch):
     """Nick 12:56 / 13:01: blind and held near an edge -> asked; a click (projected through the camera model at roof
     height) sets it and restarts its error sum at the click's derived accuracy; it drives straight as far as that sum

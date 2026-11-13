@@ -1,4 +1,4 @@
-"""Build e16, items 7 and 8 (home free roam 20261111-082651-freeroam, commit 4732a48, 08:45-08:48):
+"""(e22: 7 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) Build e16, items 7 and 8 (home free roam 20261111-082651-freeroam, commit 4732a48, 08:45-08:48):
 Right stopped at an edge and stood ("it can still back up but it's not, it's just still"), was unsure near the edge,
 asked 5 times with nobody there, said NEEDS A HAND at 77, 125, then "REJOINED ... moved in" one second later with
 nobody touching it, then Center drove into it and pushed it off. The real sequence replayed on the controller (the
@@ -126,6 +126,7 @@ def _held_right(c, t=1.0, n=12, jitter=0.6):
     return r, c.t
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_no_rejoin_without_evidence_the_home_0848_case():
     c = ctrl()
     r, t = _held_right(c)
@@ -140,6 +141,7 @@ def test_no_rejoin_without_evidence_the_home_0848_case():
     assert c.pinned(r)                                          # 8b: still a fixed obstacle
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_real_hand_move_is_a_rejoin():
     c = ctrl()
     r, t = _held_right(c)
@@ -155,6 +157,7 @@ def test_a_real_hand_move_is_a_rejoin():
     assert c.pinned(r)                                          # rejoined, not driven away yet
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_lift_is_evidence_too():
     c = ctrl()
     r, t = _held_right(c)
@@ -167,6 +170,7 @@ def test_a_lift_is_evidence_too():
     assert c.counts.get("hand_rejoined") == 1
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_the_old_rejoin_behind_the_switch(monkeypatch):
     monkeypatch.setattr(FC, "REJOIN_EVIDENCE", False)
     c = ctrl()
@@ -187,6 +191,7 @@ def test_moved_in_evidence_ignores_jitter():
 
 
 # ------------------------------------------------------------------------------------------------------- 8b
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_pinned_robot_is_kept_clear_with_its_doubt():
     c = ctrl(("Right", "Center"))
     r, t = _held_right(c)
@@ -273,6 +278,7 @@ class Asks:
         pass
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_question_nobody_answers_makes_the_run_decide_by_itself():
     a = Asks()
     c = ctrl(attended=True, questions=a)
@@ -287,6 +293,7 @@ def test_a_question_nobody_answers_makes_the_run_decide_by_itself():
     assert a.n == 1                                              # not asked again: it decides by itself
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_keep_asking_behind_the_switch(monkeypatch):
     monkeypatch.setattr(FC, "ASK_UNATTENDED", True)
     a = Asks()

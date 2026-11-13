@@ -821,7 +821,9 @@ class Runner:
         end = time.time() + 30
         while time.time() < end and not set(self.names) <= set(self.link.robots()):
             self.pump(0.3)
-        if WAKE_AT_START and not set(self.names) <= set(self.link.robots()):
+        if WAKE_AT_START and not set(self.names) <= set(self.link.robots()) and \
+                (not self.a.dry or getattr(self.a, "sim_asleep", None)):
+            # (a dry run's simulated robots sleep only when told so: --sim-asleep)
             # (e22, the 13 Nov 08:14 home run: none found, all asleep from "sleep as soon as a run ends") a robot not
             # heard may be asleep: it is woken at its check-in, waited for one whole check-in interval, and said so
             import wake_robots as WR

@@ -46,7 +46,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-VERSION = "fastsim-2026-11-12e21"   # e21 (Nick 12 Nov, decision 5: the simulator must show the ratchet): the simulated robot fuses a fix with the FIRMWARE's own filter (pose.h: its variance growing pose_q_cm 0.01 cm^2 per cm, the gate of 4 sds and at least 3 cm, fix_max_age_ms 1000, a 1.28 s history; refusal reasons counted), MIRLT_SIM_FW_FILTER: "firmware" (default, what the robots run now), "e21" (the e21 firmware: its variance from the record, the Pi's age limit, 3.84 s of history, the escape on the robot), "blend" (before e21: every fix under 1 s at 35 %). Before: "fastsim-2026-11-12e19"   # e19 (audit): a hung robot is freed by a drive either way that works its on-board wheel (HANG_FWD_FREES; MIRLT_SIM_HANG_MODEL=e08 the reverse-only model). Before: "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
+VERSION = "fastsim-2026-11-13e22b"   # e22b: planning never deferred by this machine's clock unless MIRLT_PLAN_SLOWDOWN is set (the planning pace of e22 made a seed depend on how busy the machine was). Before: "fastsim-2026-11-12e21"   # e21 (Nick 12 Nov, decision 5: the simulator must show the ratchet): the simulated robot fuses a fix with the FIRMWARE's own filter (pose.h: its variance growing pose_q_cm 0.01 cm^2 per cm, the gate of 4 sds and at least 3 cm, fix_max_age_ms 1000, a 1.28 s history; refusal reasons counted), MIRLT_SIM_FW_FILTER: "firmware" (default, what the robots run now), "e21" (the e21 firmware: its variance from the record, the Pi's age limit, 3.84 s of history, the escape on the robot), "blend" (before e21: every fix under 1 s at 35 %). Before: "fastsim-2026-11-12e19"   # e19 (audit): a hung robot is freed by a drive either way that works its on-board wheel (HANG_FWD_FREES; MIRLT_SIM_HANG_MODEL=e08 the reverse-only model). Before: "fastsim-2026-11-10e13"   # e13: nopic (a whole-camera picture outage). No version string before
 import freeroam_core as FC   # noqa: E402
 
 DT = 0.05
@@ -252,6 +252,8 @@ class Sim:
             self.ws = self.make_ws(self.believed)
         self.ctrl = FC.Controller(names, self.believed, self.ctrl_out, self.ctrl_log, seed=seed, lost_mode=lost_mode,
                                   drill=drill, motion=motion, v_min_avoid=v_min, workspace=self.ws, **(ctrl_kw or {}))
+        if "MIRLT_PLAN_SLOWDOWN" not in os.environ:
+            self.ctrl.plan_slowdown = 0.0   # (e22b) planning never deferred by this machine's clock: a seed repeats
         self.disc = None
         self.visits = {}                     # (e10) where each robot's true middle went: 5 cm cells -> seconds
         # (e08) rehearsal injections

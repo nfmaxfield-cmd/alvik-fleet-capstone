@@ -37,7 +37,7 @@ Changelog
 import os
 import sys
 
-VERSION = "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK. Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -206,6 +206,15 @@ SWITCHES = [
      "error shape; else one that keeps its room toward the ground where the cameras find robots best (learned in the "
      "run); else a turn on the spot; again after the dwell. Questions, NEEDS A HAND and click requests become notes in "
      "the log. ask: e13-e21 (held while a person is asked)", "e22"),
+    ("MIRLT_BOX_ASK", "1", "0", "F",
+     "(Nick 13 Nov ~10:00: two standing robots boxed the third into a corner) A robot with no move that gains room asks "
+     "every robot in its way out (the straight way with the fewest robots in it) to step aside, nearest first, held or "
+     "not, again at each ladder rung until the way is open; a held robot makes room and takes the ladder too. 0: only "
+     "a lost robot asks, and only the nearest robot on its line", "e22"),
+    ("MIRLT_RESCUE_STILL", "pose", "idle", "F",
+     "(e22b) The ladder's clock restarts only when the robot's own pose really moved (3 cm, or a turn of half the "
+     "wiggle), so moves planned and then refused every second no longer keep it standing for minutes. idle: e22's first "
+     "rule (the clock restarted by any planned move)", "e22"),
     ("MIRLT_ID_GUARD", "1", "0", "F",
      "(e21's falls: a sighting of another robot or a mirrored camera taken as its own) A correction, re-seed, 'seen "
      "again' or escape beyond the camera's noise only from a sighting that is the robot's: inside its own error shape "

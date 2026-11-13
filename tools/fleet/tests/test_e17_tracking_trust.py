@@ -1,4 +1,4 @@
-"""Build e17 (12 Nov): the tracking layer observes, then trusts (the home 11 Nov runs: Left held 84 min 48 cm from where
+"""(e22: 5 test(s) describing the ways before e22 pin MIRLT_SELF_RESCUE=ask and MIRLT_ID_GUARD=0 through the e22_old_ways fixture in conftest.py.) Build e17 (12 Nov): the tracking layer observes, then trusts (the home 11 Nov runs: Left held 84 min 48 cm from where
 the camera saw it standing), corrections reach the robot, late fixes and doubtful headings, never still (Nick 12 Nov),
 the core layout, the ML hook, frames at 4 a second, a robot with no readable points. No robot, no Pi."""
 import json
@@ -23,6 +23,7 @@ THREE = {"Left": (31.0, 64.0, 0.0), "Center": (90.0, 30.0, 90.0), "Right": (90.0
 
 
 # -- 1a / 1d / 1e: a standing robot whose own pose is far off, the camera steady ----------------------------------------
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 @pytest.mark.parametrize("d", [10.0, 20.0, 30.0, 48.0])
 def test_a_standing_robot_far_from_its_own_pose_is_corrected_from_the_camera_within_seconds(d, monkeypatch):
     monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
@@ -45,6 +46,7 @@ def test_the_old_way_never_takes_it(d):
     assert R.first("CORRECTED", "Left") is None and R.gap("Left") > d - 3.0
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_left_at_1139_lost_with_its_own_pose_48_cm_off_is_corrected_not_held(monkeypatch):
     monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
     # with motion proof (the default since e19): test_e19_audit_fixes.py
@@ -64,6 +66,7 @@ def test_left_at_1139_lost_with_its_own_pose_48_cm_off_is_corrected_not_held(mon
     assert corr and abs(corr[0]["d_cm"] - 48.6) < 3.0
 
 
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_held_robot_that_needed_a_hand_is_CORRECTED_never_REJOINED(monkeypatch):
     monkeypatch.setattr(FC, "MOTION_PROOF", False)   # (e19) e17's way: elimination at once, any distance;
     # with motion proof (the default since e19): test_e19_audit_fixes.py
@@ -102,6 +105,7 @@ def test_the_switch_restores_the_e16_way(monkeypatch):
 
 
 # -- 1b: two robots unaccounted -> a wiggle, no swap ------------------------------------------------------------------
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_two_robots_unaccounted_a_wiggle_names_one_then_elimination_the_other_no_swap(monkeypatch):
     # (e21) this tests the e20 mechanism on its own numbers; the e21 way: test_e21_error_shape.py
     import freeroam_core as FC_
@@ -198,6 +202,7 @@ def test_the_0826_replay_names_right_within_seconds_where_the_old_layer_waited_2
 
 
 # -- 1e: a re-seed never lands mid-turn, and is projected ------------------------------------------------------------
+@pytest.mark.usefixtures("e22_old_ways")   # (e22) the way before e22, kept behind its switches
 def test_a_reseed_waits_for_the_turn_to_end_and_is_projected_to_now():
     sent = []
     c = FC.Controller(["A"], H.BOARD, lambda n, s: sent.append(s), lambda *a: None, pose_source="blend")
