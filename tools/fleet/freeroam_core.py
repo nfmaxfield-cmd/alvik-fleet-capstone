@@ -1782,15 +1782,27 @@ class Controller:
         turn_ok = self.can_turn_here(r)
         heads = [wrap180(h + d) for d in range(0, 360, 30)] if turn_ok else [h, wrap180(h + 180.0)]
         unconf = self.pose_unconfirmed(r)
+        # its shape reaches back along its track up to b_back (stuck wheels): a move gains room for certain only past
+        # that, so the lengths tried reach beyond it (derived from its record)
+        bb = r.shape.axes_fit.get().get("b_back", 0.0) * r.shape.k_cal()
+        Ls = tuple(self.GAIN_L_CM) + (round(1.5 * bb, 1), round(2.0 * bb, 1))
+        sg = self.trust[r.name].cam_sd or 1.0
         best = []
         for hh in heads:
             back = abs(wrap180(hh - (h + 180.0))) <= 1.0 and not turn_ok
-            for L in self.GAIN_L_CM:
+            for L in Ls:
                 ex, ey = p[0] + L * math.cos(math.radians(hh)), p[1] + L * math.sin(math.radians(hh))
                 ell = r.shape.along_path([(ex, ey)], hh if not back else h)[-1]
-                if not back and abs(wrap180(hh - h)) > 30.0:          # the turn on the spot first: its doubt
-                    pass
-                gain = ES.rect_margin(self.rect, ex, ey, *ell) - HALF - SR.stop_cm(BACK_V) - room0
+                stop = SR.stop_cm(BACK_V)
+                g_blind = ES.rect_margin(self.rect, ex, ey, *ell) - HALF - stop - room0
+                if g_blind < -self.GAIN_EPS_CM:
+                    continue                             # never worse if the camera does not find it there
+                # (Nick's veer, at the limit too) the room it expects: found there (the cameras' trust of that ground)
+                # or not
+                P = self.found_chance(ex, ey)
+                g_found = ES.rect_margin(self.rect, ex + r.shape.gx, ey + r.shape.gy, 2.45 * sg, 0.0, 0.0, 0.0) - \
+                    HALF - stop - room0
+                gain = P * g_found + (1.0 - P) * g_blind
                 if gain > self.GAIN_EPS_CM:
                     best.append((gain, hh, L, back))
         best.sort(key=lambda b: -b[0])
@@ -1804,6 +1816,8 @@ class Controller:
             tr = self.shape_on(r, tr, h)
             if not self.keepout_ok(r, tr):
                 continue
+            if L > max(self.GAIN_L_CM) and not self.edge_ok(r, tr, BACK_V, away=True):
+                continue                                 # a long one: its shape never worse along the whole path
             if any(clearance(tr, o.traj, now=self.t) < REFLEX_CC for o in self.others(r)):
                 continue
             return dict(gain=gain, turn=turn, L=L, back=back, tr=tr, h1=hd)

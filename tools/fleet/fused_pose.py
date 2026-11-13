@@ -43,7 +43,7 @@ import numpy as np   # noqa: E402
 
 from ekf import EKF, Noise   # noqa: E402
 
-VERSION = "fused-pose-2026-11-07d"   # d (e10, the coordinator 7 Nov): the uncertainty learns its own shortfall at the end of every camera gap (UNC_LEARN)
+VERSION = "fused-pose-2026-11-12e21"   # e21: a negative covariance from rounding is the floor, not a crash (math domain error in the hard simulator, harsh seed 3). Before: "fused-pose-2026-11-07d"   # d (e10, the coordinator 7 Nov): the uncertainty learns its own shortfall at the end of every camera gap (UNC_LEARN)
 VERSION_C = "fused-pose-2026-11-07c"   # c (e10): late RAW rows used, 95 % uncertainty (K 8)
 D2R = math.pi / 180.0
 
@@ -496,7 +496,7 @@ class FusedPose:
         _, P = self.state(t)
         if P is None:
             return None
-        return math.sqrt(max(P[0, 0], P[1, 1]))
+        return math.sqrt(max(0.0, P[0, 0], P[1, 1]))
 
     def unc_cm(self, t=None):
         """The uncertainty the edge rule and the planner use (cm): K_SIGMA x the 1-sigma position error, never under the
@@ -512,7 +512,8 @@ class FusedPose:
         if P is None:
             return None
         if not self.split_unc or self.p_fix is None:
-            return max(UNC_FLOOR_CM, self.k_sigma * math.sqrt(max(P[0, 0], P[1, 1])))
+            # (e21) a covariance pushed below 0 by rounding (harsh seed 3, a fix with a tiny sigma) is the floor, not a crash
+            return max(UNC_FLOOR_CM, self.k_sigma * math.sqrt(max(0.0, P[0, 0], P[1, 1])))
         # (e10, C4) two parts. The doubt the camera's last fix left (the filter's own posterior: right while the camera
         # sees the robot) x K_TRACK, and the doubt grown SINCE that fix (blind driving, staleness, disagreements) x
         # K_SIGMA, the factor measured on real camera gaps. One factor for both (e09) gave a robot the camera sees 12
