@@ -1,7 +1,7 @@
 """e21 (Nick 12 Nov): one error shape per robot, the four stages, no overlapping shapes, the ratchet broken (Pi and
 firmware), the simulator's firmware filter, per-camera verdicts and the bridge's per-camera sightings. Offline only.
 
-Changelog: e21-2026-11-12a first version.
+Changelog: e21-2026-11-12a first version. e21-2026-11-13b the defaults test: the camera verdict whole, the pair and reverse rules on.
 """
 import math
 import os
@@ -390,7 +390,10 @@ def test_bridge_per_camera_switch_and_twocam_state_carry_each_camera():
 def test_every_e21_switch_is_in_the_safety_group_on_its_automatic_default():
     want = {"MIRLT_ERROR_SHAPE": "cone", "MIRLT_STAGES": "four", "MIRLT_LOST_CREEP": "0", "MIRLT_SHAPE_PLAN": "ellipse",
             "MIRLT_CONSISTENT_ESCAPE": "1", "MIRLT_INWARD_TWO_HEADINGS": "1", "MIRLT_FW_FILTER_PARAMS": "derived",
-            "MIRLT_CAMERA_VERDICT": "per_camera", "MIRLT_BRIDGE_PER_CAMERA": "1"}
+            "MIRLT_CAMERA_VERDICT": "whole", "MIRLT_BRIDGE_PER_CAMERA": "1", "MIRLT_PAIR_STAND_PART": "1",
+            "MIRLT_UNCONF_REVERSE": "1"}
+    # (e21b) the camera verdict is "whole" by default: the per-camera verdict (still one switch away, tested above with
+    # PER_CAMERA set) let robots drive on a faulty camera's names in the 25-run comparison (8 falls against 3)
     for k, v in want.items():
         assert SG.DEFAULT[k] == v, k
 

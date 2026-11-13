@@ -29,11 +29,15 @@ Changelog
   2026-11-12e21  one error shape (e21): MIRLT_ERROR_SHAPE, MIRLT_STAGES, MIRLT_LOST_CREEP (the creep with no edge
                  rule, now off), MIRLT_SHAPE_PLAN, MIRLT_CONSISTENT_ESCAPE, MIRLT_INWARD_TWO_HEADINGS,
                  MIRLT_CAMERA_VERDICT (per camera), MIRLT_BRIDGE_PER_CAMERA, MIRLT_FW_FILTER_PARAMS.
+  2026-11-13e21b MIRLT_CAMERA_VERDICT's automatic default is "whole" (e19's one verdict): in the 25-run comparison the
+                 per-camera verdict let robots drive on a faulty camera's names (8 falls against 3, harsh and wrong-name
+                 runs); per_camera stays one switch away. MIRLT_PAIR_STAND_PART and MIRLT_UNCONF_REVERSE stay on (their
+                 "off" runs: more falls and stands; e21 report section 9).
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -131,9 +135,11 @@ SWITCHES = [
      "line of sightings gives its heading, with a precision from that camera's measured noise across the line and the "
      "distance driven; it is a heading source, evidence for the cameras' trust, and it settles a heading in doubt without "
      "a crawl when it is precise enough. 0: e19 (the crawl)", "e20"),
-    ("MIRLT_CAMERA_VERDICT", "per_camera", "whole", "T F",
-     "(e20's open problem) A camera found wrong is refused alone: only the camera(s) the evidence implicates, and a "
-     "trusted camera's agreement releases it. whole: e19's one verdict for every camera", "e21"),
+    ("MIRLT_CAMERA_VERDICT", "whole", "per_camera", "T F",
+     "A camera found wrong: e19's one verdict refuses every camera's sightings until the evidence clears (the automatic "
+     "default since e21's 25-run comparison: fewer falls). per_camera: (e20's open problem) only the camera(s) the "
+     "evidence implicates are refused, and a trusted camera's agreement releases it; shorter stands, but robots drove "
+     "on a faulty camera's names (more falls in the hard simulator)", "e21"),
     ("MIRLT_BRIDGE_PER_CAMERA", "1", "0", "T",
      "The camera bridge sends each camera's sighting of a robot on its own (its camera named), so every camera earns "
      "its own trust; 0: one merged 'both' sighting when both cameras see it", "e21"),
