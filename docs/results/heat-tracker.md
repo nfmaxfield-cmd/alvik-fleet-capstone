@@ -30,8 +30,16 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261110-185402-visit-robots | none, case cover on (school Pi) | 83.8 / 85.7 | 3 | 12 / 88 / 0 % | 0.0 / 9.5 / - | 1.27 | 0.49 |
 | 20261110-190334-visit-robots | none, case cover off (school Pi) | 81.3 / 83.8 | 9 | 84 / 16 / 0 % | - / - / - | - | - |
 | 20261110-191945-visit-robots | none, case cover off (school Pi) | 81.8 / 83.3 | 10 | 72 / 28 / 0 % | - / - / - | - | - |
+| 20261113-084020-freeroam | none (bare Pi, no cover) | 79.4 / 81.8 | 30 | 100 / 0 / 0 % | 25.0 / 20.0 / - | 0.10 | -0.44 |
 
 ## Readings (newest first)
+- **20261113-084020-freeroam (home free roam on e21, 08:45-12:45, 4 h, three robots, home Pi bare, no cover):** 79.4 C
+  median (max 81.8), never throttled, no time under the soft limit flagged. Heat did not limit this run; work did: all
+  four cores were busy (median 99 / 98 / 88 / 86 %) and the planner's slowest passes took 0.1-10 s against its 0.05 s
+  aim (docs/results/home-2026-11-13/report.md). A fan would not have helped here; e22's paced planning is the fix to test.
+  ![Pi temperature and camera speed, 13 Nov](heat/20261113-084020-freeroam.png)
+  The Pi's temperature and the pictures the camera handled each second, over the run; data: the run's cpu.csv and
+  perf.csv.
 - **20261110-182629, 185402 (cover on) and 190334, 191945 (cover off), the school Pi's evening missions, one robot
   (added 11 Nov by e16; the tracker now reads runs that have cpu.csv but no perf.csv):** cover on, it was throttled
   (clock capped now) 12 % of the 18:26 run and sat at the soft limit 77 %, median 84.2 C; cover off, 0 % throttled and
