@@ -121,7 +121,8 @@ def test_raised_box_kept_out_and_homes_clear(school):
         for k in ko:
             q, inside = PR._nearest_on_poly(__import__("numpy").array(r["start"][:2]), k["polygon"])
             assert not inside and math.hypot(r["start"][0] - q[0], r["start"][1] - q[1]) > 25
-    assert not any("outlet" in w for w in words)
+    # (2026-11-16) the line saying how much room the paths keep from the keep-outs names them too: not a moved sticker
+    assert not any("outlet" in w and not w.startswith("keep-outs (") for w in words)
     s = json.loads(json.dumps(school))
     s["keepouts"][0]["use"] = True                                # the old assumed box, switched back on
     assert any(k["name"] == "raised box" for k in PR.site_keepouts(s))

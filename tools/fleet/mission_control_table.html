@@ -8,7 +8,7 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-16vp (Nick 16 Nov): the run bar and the Settings drawer are redrawn after a click (before: not until the focus left them, so a clicked run type looked unchosen); only typing in a box holds them. Visit points can take a list per robot ("A list per robot" in the run bar: pick a robot, click its stickers; each robot's points and route in its own colour), sent as 'Alpha:P01,P05;Bravo:P11', the form mission_run already took; "One list, shared out" stays the default and works as before (keep features, switch them off). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
+     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-16ko: the site's keep-outs (outlet plates, the middle box) drawn on the map as measured, grey. 2026-11-16vp (Nick 16 Nov): the run bar and the Settings drawer are redrawn after a click (before: not until the focus left them, so a clicked run type looked unchosen); only typing in a box holds them. Visit points can take a list per robot ("A list per robot" in the run bar: pick a robot, click its stickers; each robot's points and route in its own colour), sent as 'Alpha:P01,P05;Bravo:P11', the form mission_run already took; "One list, shared out" stays the default and works as before (keep features, switch them off). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
      2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
      evidence, in plain words. -->
 <style>
@@ -103,7 +103,7 @@ details>summary{cursor:pointer}
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
     <div id="codebanner"></div>
     <div id="map" style="margin-top:8px"></div>
-    <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span>shape = where the robot may really be: its body plus its 95 % error shape, live every second (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
+    <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span><span class="sw" style="background:#98A2B3"></span>a keep-out (outlet plate, box): the robots keep clear of it</span><span>shape = where the robot may really be: its body plus its 95 % error shape, live every second (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
     <p class="caption" id="mapcap"></p>
     <div class="source" id="mapsrc"></div>
   </section>
@@ -168,11 +168,16 @@ function mapSVG() {
   const L = L0 || {table: (S && S.map && S.map.floor) || {x_min: 0, y_min: 0, x_max: 122, y_max: 122}, points: {}, robots: []};
   const f = L.table, pad = 8, asp = (f.x_max - f.x_min) / Math.max(1, f.y_max - f.y_min), W = asp >= 1.8 ? 1000 : 600;   // a square board is drawn smaller so its names stay readable
   const k = W / (f.x_max - f.x_min + 2 * pad), H = (f.y_max - f.y_min + 2 * pad) * k + 16;
+  const k_ = k;
   const X = x => ((x - f.x_min + pad) * k).toFixed(1), Y = y => ((f.y_max + pad - y) * k).toFixed(1);
   const pick = !going() && kind === "visit" && isTags();
   let o = `<svg class="map" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="The table from above with the robots">`;
   o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="var(--table-edge)" stroke-width="1.5" rx="4"/>`;
   const pts = L.points || {};
+  // (2026-11-16) the site's keep-outs (outlet plates, the middle box) as measured, so an order can be planned round them
+  for (const k of ((S && S.site && S.site.keepouts) || [])) { if (k.use === false) continue;
+    const u = k.centre_in ? 2.54 : 1, c = k.centre_in || k.centre_cm, z = k.size_in || k.size_cm; if (!c || !z) continue;
+    o += `<rect x="${X(c[0] * u - z[0] * u / 2)}" y="${Y(c[1] * u + z[1] * u / 2)}" width="${(z[0] * u * k_).toFixed(1)}" height="${(z[1] * u * k_).toFixed(1)}" fill="#98A2B3" fill-opacity=".55" stroke="#475467" stroke-width="1"><title>${esc(k.name || "keep-out")}: the robots keep clear of it</title></rect>`; }
   const each = pick && vpEach;
   if (!each && order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
   if (each) for (const rn of vpNames()) { const l = (lists[rn] || []).filter(p => pts[p]); if (l.length > 1) o += `<polyline points="${l.map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="${vpColour(rn)}" stroke-width="1.8" stroke-dasharray="5 4" opacity=".8"/>`; }

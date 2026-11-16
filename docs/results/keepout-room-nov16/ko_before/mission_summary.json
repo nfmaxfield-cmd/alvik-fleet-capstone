@@ -1,0 +1,573 @@
+{
+ "folder": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras",
+ "conditions": {
+  "restart": {
+   "name": "Alpha",
+   "t": 70.0,
+   "boot_s": 3.0
+  }
+ },
+ "result": "done",
+ "duration_s": 248.88,
+ "planned_s": 94.0,
+ "replans": 7,
+ "robots_out": [
+  {
+   "robot": "Alpha",
+   "why": "restarted mid-run (boot 4C01, was D386): it lost its calibration and its steps",
+   "t_run": 62.25
+  },
+  {
+   "robot": "Alpha",
+   "why": "heard again, but no plan fits it back in (Bravo left without a route)",
+   "t_run": 141.92
+  },
+  {
+   "robot": "Alpha",
+   "why": "heard again, but nothing moved on for 52 s after it rejoined",
+   "t_run": 212.25
+  }
+ ],
+ "plans_refused": 0,
+ "sensor_stops": 0,
+ "confirm_checks": [],
+ "battery": {
+  "Alpha": 95,
+  "Bravo": 91
+ },
+ "start_checks": {
+  "Alpha": {
+   "firmware": "2026-11-13e22",
+   "battery": 96,
+   "boot": "D386",
+   "restarted": false,
+   "stop_limit": {
+    "limit_cm": 12.0,
+    "rule": "cap",
+    "floor_cm": null,
+    "ceiling_cm": 12.0
+   },
+   "place_cm": 4.24,
+   "heading_deg": 0.93,
+   "heading_rule": "measured (facing check); straightened if off"
+  },
+  "Bravo": {
+   "firmware": "2026-11-13e22",
+   "battery": 91,
+   "boot": "45BF",
+   "restarted": false,
+   "stop_limit": {
+    "limit_cm": 12.0,
+    "rule": "cap",
+    "floor_cm": null,
+    "ceiling_cm": 12.0
+   },
+   "place_cm": 4.74,
+   "heading_deg": 1.34,
+   "heading_rule": "measured (facing check); straightened if off"
+  },
+  "facing": {
+   "Alpha": {
+    "heading": -87.68,
+    "off": -177.7,
+    "ok": false
+   },
+   "Bravo": {
+    "heading": 1.19,
+    "off": -88.8,
+    "ok": false
+   }
+  },
+  "settings_resent": 0,
+  "facing-recheck-1": {
+   "Alpha": {
+    "heading": 91.0,
+    "off": 1.0,
+    "ok": true
+   },
+   "Bravo": {
+    "heading": 90.65,
+    "off": 0.7,
+    "ok": true
+   }
+  },
+  "plan_gap": {
+   "closest_cm": 66.17,
+   "pair": [
+    "Alpha",
+    "Bravo"
+   ],
+   "t": 63.2,
+   "start_cm": 80.54,
+   "judged_cm": 66.17,
+   "judged_pair": [
+    "Alpha",
+    "Bravo"
+   ],
+   "judged_t": 63.2
+  },
+  "facing-rejoin-Alpha": {
+   "Alpha": {
+    "heading": -10.68,
+    "off": 0.0,
+    "ok": true
+   }
+  }
+ },
+ "on_problem": "keep_going",
+ "kept_going": [
+  {
+   "kind": "points_reassigned",
+   "robot": "Alpha",
+   "words": "Alpha is held (restarted mid-run (boot 4C01, was D386): it lost its calibration and its steps): its points not done go to the robots still running: Bravo (points P10, P02, P08 to Bravo)",
+   "t_run": 62.25
+  },
+  {
+   "kind": "cam_guard",
+   "robot": "Bravo",
+   "words": "Bravo: the camera and its own pose disagreed by 7.4 cm for 1.0 s: its pose was set to the camera's (the camera is trusted), the run goes on",
+   "t_run": 164.01,
+   "d_cm": 7.41,
+   "cam": [
+    123.53,
+    80.27,
+    -167.0
+   ],
+   "own": [
+    125.34,
+    73.08,
+    -158.99
+   ]
+  },
+  {
+   "kind": "cam_guard",
+   "robot": "Bravo",
+   "words": "Bravo: the camera and its own pose disagreed by 6.5 cm for 1.0 s: its pose was set to the camera's (the camera is trusted), the run goes on",
+   "t_run": 211.5,
+   "d_cm": 6.55,
+   "cam": [
+    159.43,
+    58.34,
+    -0.2
+   ],
+   "own": [
+    160.29,
+    64.83,
+    3.07
+   ]
+  }
+ ],
+ "points": [
+  {
+   "robot": "Bravo",
+   "point": "point P20",
+   "t_run": 23.03,
+   "dwell_s": 8.0,
+   "n_fixes": 45,
+   "t_abs": 1794860763.836,
+   "interrupted": 0,
+   "x": 176.16,
+   "y": 48.84,
+   "plus_minus_cm": 2.4,
+   "source": "one camera (motion)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 175.91,
+   "own_y": 49.5,
+   "own_vs_camera_cm": 0.71,
+   "words": "point P20 (Bravo): \u00b12.4 cm, one camera (motion)",
+   "truth_err_cm": 3.26,
+   "within": false
+  },
+  {
+   "robot": "Alpha",
+   "point": "point P03",
+   "t_run": 32.84,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794860773.646,
+   "interrupted": 0,
+   "x": 13.92,
+   "y": 83.27,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 17.78,
+   "own_y": 82.57,
+   "own_vs_camera_cm": 3.92,
+   "words": "point P03 (Alpha): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 2.44,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P21",
+   "t_run": 46.3,
+   "dwell_s": 8.01,
+   "n_fixes": 48,
+   "t_abs": 1794860787.106,
+   "interrupted": 0,
+   "x": 217.11,
+   "y": 105.58,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 215.26,
+   "own_y": 106.04,
+   "own_vs_camera_cm": 1.91,
+   "words": "point P21 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 4.3,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P12",
+   "t_run": 62.94,
+   "dwell_s": 8.01,
+   "n_fixes": 48,
+   "t_abs": 1794860803.744,
+   "interrupted": 0,
+   "x": 179.63,
+   "y": 103.56,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 177.79,
+   "own_y": 102.84,
+   "own_vs_camera_cm": 1.98,
+   "words": "point P12 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 3.98,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P11",
+   "t_run": 160.45,
+   "dwell_s": 14.25,
+   "n_fixes": 86,
+   "t_abs": 1794860901.25,
+   "interrupted": 1,
+   "x": 148.91,
+   "y": 86.22,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 149.86,
+   "own_y": 82.52,
+   "own_vs_camera_cm": 3.82,
+   "words": "point P11 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 2.88,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P02",
+   "t_run": 178.31,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794860919.11,
+   "interrupted": 0,
+   "x": 71.53,
+   "y": 53.64,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 75.2,
+   "own_y": 54.88,
+   "own_vs_camera_cm": 3.87,
+   "words": "point P02 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 0.91,
+   "within": true
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P08",
+   "t_run": 193.76,
+   "dwell_s": 8.0,
+   "n_fixes": 49,
+   "t_abs": 1794860934.564,
+   "interrupted": 0,
+   "x": 37.54,
+   "y": 58.22,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 41.91,
+   "own_y": 58.52,
+   "own_vs_camera_cm": 4.38,
+   "words": "point P08 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 1.87,
+   "within": false
+  }
+ ],
+ "points_skipped": [
+  {
+   "robot": "Bravo",
+   "point": "point P10",
+   "why": "cannot be reached: point (83.8, 95.2): no room to turn there (0.0 cm clear, needs 8.2)",
+   "t_run": 62.53
+  }
+ ],
+ "points_reassigned": [
+  {
+   "point": "point P10",
+   "frm": "Alpha",
+   "to": "Bravo",
+   "t_run": 62.25
+  },
+  {
+   "point": "point P02",
+   "frm": "Alpha",
+   "to": "Bravo",
+   "t_run": 62.25
+  },
+  {
+   "point": "point P08",
+   "frm": "Alpha",
+   "to": "Bravo",
+   "t_run": 62.25
+  }
+ ],
+ "sim": {
+  "min_body_gap_cm": 12.06,
+  "min_body_gap_at": [
+   "Alpha",
+   "Bravo",
+   183.72
+  ],
+  "collision": false,
+  "min_open_edge_cm": 9.54,
+  "min_open_edge_at": [
+   "Alpha",
+   51.37
+  ],
+  "hung": []
+ },
+ "line_check": {
+  "Alpha": {
+   "p95_cm": 3.92,
+   "within_pct": 90.9,
+   "misses": {
+    "misses": 145,
+    "single": 0,
+    "runs": 3,
+    "in_runs": 145,
+    "longest": 80,
+    "longest_s": 13.2
+   },
+   "sure_share_pct": 100.0,
+   "camera_vs_truth": {
+    "n": 1586,
+    "median_cm": 2.45,
+    "p95_cm": 7.06,
+    "max_cm": 9.69,
+    "within_gate_pct": 86.9
+   }
+  },
+  "Bravo": {
+   "p95_cm": 4.37,
+   "within_pct": 82.5,
+   "misses": {
+    "misses": 266,
+    "single": 0,
+    "runs": 5,
+    "in_runs": 266,
+    "longest": 107,
+    "longest_s": 17.69
+   },
+   "sure_share_pct": 96.0,
+   "camera_vs_truth": {
+    "n": 1519,
+    "median_cm": 3.99,
+    "p95_cm": 10.12,
+    "max_cm": 11.12,
+    "within_gate_pct": 19.1
+   }
+  }
+ },
+ "closest_by_camera": {
+  "centres_cm": 26.68,
+  "bodies_cm": 17.18,
+  "robots": [
+   "Alpha",
+   "Bravo"
+  ],
+  "t": 1794860908.1593
+ },
+ "camera": {
+  "frames": {
+   "overhead": 3274
+  },
+  "robots": {
+   "Alpha": {
+    "reads": 3274,
+    "fixes": 1638,
+    "refused_size": 0,
+    "refused_jump": 0,
+    "both": 0,
+    "lock": 0,
+    "motion": 0,
+    "overhead": 3274
+   },
+   "Bravo": {
+    "reads": 3139,
+    "fixes": 1571,
+    "refused_size": 0,
+    "refused_jump": 0,
+    "both": 0,
+    "lock": 0,
+    "motion": 64,
+    "overhead": 3139
+   }
+  },
+  "farm": null
+ },
+ "frames": "overhead: 3744 pictures in, 1248 kept at the tracking rate (180 MB), clips {'events': 16, 'clips': 7, 'stills': 16, 'thumbs': 6, 'mb': 127.8} (in /tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/frames)",
+ "reached": {
+  "Alpha": [
+   "sync wiggle 1 turn",
+   "sync wiggle 2 stop",
+   "sync wiggle 3 turn back",
+   "sync wiggle 4 stop",
+   "point P03",
+   "at point P03",
+   "home"
+  ],
+  "Bravo": [
+   "sync wiggle 1 turn",
+   "sync wiggle 2 stop",
+   "sync wiggle 3 turn back",
+   "sync wiggle 4 stop",
+   "point P20",
+   "at point P20",
+   "point P21",
+   "at point P21",
+   "point P12",
+   "at point P12",
+   "point P11",
+   "at point P11",
+   "point P02",
+   "at point P02",
+   "point P08",
+   "at point P08",
+   "home"
+  ]
+ },
+ "speed_pinned": {
+  "cruise_cms": 10.0,
+  "turn_dps": 60.0,
+  "confirm_cms": 5.0
+ },
+ "sync_wiggle": {
+  "Alpha": {
+   "parts": [
+    [
+     "sync wiggle 1 turn",
+     1794860740.827,
+     1794860742.436
+    ],
+    [
+     "sync wiggle 2 stop",
+     1794860742.436,
+     1794860743.441
+    ],
+    [
+     "sync wiggle 3 turn back",
+     1794860743.441,
+     1794860745.08
+    ],
+    [
+     "sync wiggle 4 stop",
+     1794860745.08,
+     1794860746.092
+    ]
+   ],
+   "start": 1794860740.827,
+   "end": 1794860746.092
+  },
+  "Bravo": {
+   "parts": [
+    [
+     "sync wiggle 1 turn",
+     1794860740.826,
+     1794860742.489
+    ],
+    [
+     "sync wiggle 2 stop",
+     1794860742.489,
+     1794860743.497
+    ],
+    [
+     "sync wiggle 3 turn back",
+     1794860743.498,
+     1794860745.154
+    ],
+    [
+     "sync wiggle 4 stop",
+     1794860745.154,
+     1794860746.167
+    ]
+   ],
+   "start": 1794860740.826,
+   "end": 1794860746.167
+  }
+ },
+ "exports": {
+  "version": "2026-11-10b",
+  "camera_track": {
+   "file": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/run/camera_track.csv",
+   "rows": {
+    "Alpha": 3274,
+    "Bravo": 3139
+   }
+  },
+  "odometry_raw": {
+   "file": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/run/odometry_raw.csv",
+   "rows": {
+    "Bravo": 13185,
+    "Alpha": 8266
+   },
+   "anchors": {
+    "Alpha": [
+     "segment 1 anchored on its own pose (79.2, 97.6, 84.1 deg) at ms 337392",
+     "segment 2 anchored on its own pose (152.3, 83.0, -87.7 deg) at ms 179089"
+    ],
+    "Bravo": [
+     "segment 1 anchored on its own pose (247.1, 83.1, 1.2 deg) at ms 361510"
+    ]
+   }
+  },
+  "stops": {
+   "file": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/run/stops.csv",
+   "rows": 7
+  }
+ },
+ "camera_moved": [],
+ "pose_timeline": {
+  "file": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/pose_timeline.csv",
+  "rows": {
+   "Bravo, camera tag": 1571,
+   "Alpha, camera tag": 1638,
+   "Bravo, robot's own pose": 2495,
+   "Alpha, robot's own pose": 1467
+  }
+ },
+ "refit": {
+  "background": true,
+  "folder": "/tmp/tmpdte39nk9/mc/runs/20261116-152430-visit-sim-cameras/tagcal_refit",
+  "state": "running"
+ }
+}

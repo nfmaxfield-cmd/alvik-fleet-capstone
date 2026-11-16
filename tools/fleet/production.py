@@ -20,6 +20,11 @@
 
     python3 tools/fleet/production.py --table 396x168 --points 1:40,30 2:300,120 --order Alpha=1,2 --order Bravo=2,1
     python3 tools/fleet/production.py --site school-conference      # the site's typed points, homes, box and orders
+
+Changelog
+  2026-11-16ko  (Nick 16 Nov: school Visit points ran into the outlet plates) the paths keep the edge rule's room from a
+                site's keep-outs (keepout_room_cm: measured track error + stopping distance, 4.1 cm at school), the
+                points stay at their stickers; MIRLT_KEEPOUT_ROOM=body is the way before (the body + 1.5 cm only).
 """
 import argparse
 import copy
@@ -45,6 +50,7 @@ DWELL_S = 3.0            # each production point: the robot stands this long (th
                          # compare). Claude's addition, not asked for: 0 turns it off. DOE note: 0 / 3 / 10 s against
                          # the RFID position's spread at a still robot
 import safety_rules as SR   # noqa: E402
+import safety_group as SG   # noqa: E402
 EDGE_IN_CM = SR.edge_room_cm("missions")   # (e08, A2) the one derived rule (15.8 cm lights; fixed: 17). Before: 17.0
                          # a point closer than this to an open edge (the robot's centre) is moved in to it: Nick's
                          # edge room "everywhere in the mission" (missions.SETTINGS edge_room_cm, 28 Oct 21:27: the
@@ -137,7 +143,7 @@ def clear_keepouts(points, keepouts, r=BODY_R_CM):
 
 
 def site_map(table, names, points=None, gap_cm=HOME_GAP_CM, outline=None, keepouts=None, room_cm=EDGE_IN_CM,
-             home_at=None, keepout_r=BODY_R_CM):
+             home_at=None, keepout_r=BODY_R_CM, plan_keepouts=None):
     """The workspace map of a site's table: the measured rectangle, every side an open edge (a conference table has no
     walls), the production points as spots, each robot's start and park at its home. outline [x0, y0, x1, y1]: the
     table's outline when it is not (0, 0, L, W) (the feel-out moved a side: feel_table.py); table is then ignored.
@@ -160,7 +166,9 @@ def site_map(table, names, points=None, gap_cm=HOME_GAP_CM, outline=None, keepou
         words = words + w2
     m["spots"] = pts
     if keepouts:
-        m["keepouts"] = list(m.get("keepouts") or []) + [dict(k) for k in keepouts]
+        # (2026-11-16) plan_keepouts: the same keep-outs widened for the paths (keepout_room_cm); the points stay where
+        # the stickers are (cleared from the measured outline only)
+        m["keepouts"] = list(m.get("keepouts") or []) + [dict(k) for k in (plan_keepouts or keepouts)]
     m["notes"] = ["production points from the site fit"] + words
     m.setdefault("homes", hs)
     return FM.normalize(m), words
@@ -206,6 +214,58 @@ def site_edge_cm(site):
         tr = site.get("run_tracking") or site.get("tracking") or "lights"
         return SR.edge_room_cm("school" if tr == "tags" else "missions", tracking=tr)
     return EDGE_IN_CM if v is None else float(v)
+
+
+# ---------------------------------------------------------------- (2026-11-16) room round a keep-out
+def keepout_room_cm(site=None, speed=None):
+    """(Nick 16 Nov: school Visit points ran into the outlet plates) The room the paths keep from a site's keep-out (an
+    outlet plate, the middle box, a reference tile) beyond the robot's body and the planner's 1.5 cm safety margin: the
+    one derived edge rule's own terms, without the body the planner already counts (safety_rules.clearance_cm less
+    HALF_DIAG_CM): the measured track error (TRACK_P95_CM, 1.7 cm), the stopping distance at that speed (the largest
+    measured, 2.4 cm, when not known) and the camera's edge bias for the site's tracking (roof tags 0). School: 4.1 cm.
+    Before: 0 (the body and 1.5 cm only), behind the Safety switch MIRLT_KEEPOUT_ROOM=body."""
+    if SG.value("MIRLT_KEEPOUT_ROOM") == "body":
+        return 0.0
+    tr = (site or {}).get("run_tracking") or (site or {}).get("tracking") or "lights"
+    return round(SR.clearance_cm(SR.TRACK_P95_CM, speed, tr, stops_here=True) - SR.HALF_DIAG_CM, 2)
+
+
+def widen_polygon(poly, d, n=16):
+    """A convex keep-out grown by d cm all round (rounded corners): its corners swept by a 16-sided circle drawn round
+    the true one (so the grown outline is never inside the true offset), then the convex hull."""
+    if d <= 0:
+        return [list(map(float, q)) for q in poly]
+    r = d / math.cos(math.pi / n)
+    pts = [(float(x) + r * math.cos(2 * math.pi * k / n), float(y) + r * math.sin(2 * math.pi * k / n))
+           for x, y in poly for k in range(n)]
+    pts = sorted(set(pts))
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for q in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], q) <= 0:
+            lo.pop()
+        lo.append(q)
+    for q in reversed(pts):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], q) <= 0:
+            hi.pop()
+        hi.append(q)
+    return [[round(a, 2), round(b, 2)] for a, b in lo[:-1] + hi[:-1]]
+
+
+def widen_keepouts(keepouts, d):
+    """Each keep-out widened by d cm for the paths; its measured outline kept as "measured_polygon"."""
+    out = []
+    for k in keepouts or []:
+        k2 = dict(k)
+        if d > 0:
+            k2["measured_polygon"] = k["polygon"]
+            k2["polygon"] = widen_polygon(k["polygon"], d)
+            k2["note"] = ("%s; paths keep %.1f cm more (track error + stopping distance, keepout_room_cm)" % (
+                k.get("note") or k.get("source") or "keep-out", d))
+        out.append(k2)
+    return out
 
 
 def turn_room(L, W):
@@ -339,8 +399,13 @@ def site_production(site, names=None, table=None, outline=None, keepouts=None, s
         at = dict(at or {})
         at.update(home_at)                 # (11-05h) homes where the robots were SEEN standing (observe)
     kos = site_keepouts(site) + list(keepouts or [])
+    kroom = keepout_room_cm(site)
     m, w2 = site_map((L, W), names, points=pts, outline=outline, keepouts=kos, room_cm=site_edge_cm(site),
-                     home_at=at, keepout_r=turn_room(L, W))
+                     home_at=at, keepout_r=turn_room(L, W), plan_keepouts=widen_keepouts(kos, kroom))
+    if kos and kroom > 0:
+        w2 = list(w2) + ["keep-outs (%s): the paths keep %.1f cm more than the robot's body from each (its measured track "
+                         "error and stopping distance; MIRLT_KEEPOUT_ROOM=body: as before)" % (
+                             ", ".join(k.get("name", "keep-out") for k in kos), kroom)]
     words = list(words) + list(w2) + SP.flag_seen(pts, seen)
     m["notes"] = ["production points typed (%s)" % os.path.basename(SP.points_file(site))] + words
     homes_ = {r["name"]: r["start"] for r in m["robots"]}

@@ -1,0 +1,8 @@
+vp/ko_before Visit points ended. result done dur 248.88 stops 7 replans 7 out ['Alpha: restarted mid-run (boot 4C01, was D386): it lost its calibra', 'Alpha: heard again, but no plan fits it back in (Bravo left without', 'Alpha: heard again, but nothing moved on for 52 s after it rejoined']
+   Alpha  zone 1 outlet plate  centre 7.2 cm from the plate (body edge about 2.4 cm; corner 0.5 cm)
+   Bravo  middle outlet box    centre 8.8 cm from the plate (body edge about 4.1 cm; corner 2.1 cm)
+   Bravo  zone 1 outlet plate  centre 17.2 cm from the plate (body edge about 12.4 cm; corner 10.5 cm)
+vp/ko_after Visit points ended. result done dur 241.54 stops 8 replans 7 out ['Alpha: restarted mid-run (boot 4C01, was D386): it lost its calibra']
+   Alpha  zone 1 outlet plate  centre 11.8 cm from the plate (body edge about 7.1 cm; corner 5.1 cm)
+   Bravo  middle outlet box    centre 12.3 cm from the plate (body edge about 7.6 cm; corner 5.6 cm)
+   Bravo  zone 1 outlet plate  centre 9.0 cm from the plate (body edge about 4.3 cm; corner 2.3 cm)

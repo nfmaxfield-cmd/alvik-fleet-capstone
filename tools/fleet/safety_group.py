@@ -33,11 +33,13 @@ Changelog
                  per-camera verdict let robots drive on a faulty camera's names (8 falls against 3, harsh and wrong-name
                  runs); per_camera stays one switch away. MIRLT_PAIR_STAND_PART and MIRLT_UNCONF_REVERSE stay on (their
                  "off" runs: more falls and stands; e21 report section 9).
+  2026-11-16ko   MIRLT_KEEPOUT_ROOM: the paths keep the edge rule's room (track error + stopping distance) from a site's
+                 keep-outs, not the body and 1.5 cm only (school Visit points ran into the outlet plates, 16 Nov).
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -206,6 +208,10 @@ SWITCHES = [
      "error shape; else one that keeps its room toward the ground where the cameras find robots best (learned in the "
      "run); else a turn on the spot; again after the dwell. Questions, NEEDS A HAND and click requests become notes in "
      "the log. ask: e13-e21 (held while a person is asked)", "e22"),
+    ("MIRLT_KEEPOUT_ROOM", "edge", "body", "M",
+     "(Nick 16 Nov: school Visit points ran into the outlet plates) The paths keep the edge rule's room from a site's "
+     "keep-outs (outlet plates, the middle box, reference tiles): the robot's body + 1.5 cm, plus its measured track "
+     "error and stopping distance (school: 4.1 cm more). body: the body + 1.5 cm only, as before", "2026-11-16"),
     ("MIRLT_BOX_ASK", "0", "1", "F",
      "(Nick 13 Nov ~10:00: two standing robots boxed the third into a corner) A robot with no move that gains room asks "
      "every robot in its way out (the straight way with the fewest robots in it) to step aside, nearest first, held or "

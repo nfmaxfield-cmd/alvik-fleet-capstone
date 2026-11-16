@@ -1,0 +1,33 @@
+{
+ "asked": "Alpha:P03,P10,P02,P08;Bravo:P20,P21,P12,P11",
+ "lists": {
+  "Alpha": [
+   "P03",
+   "P10",
+   "P02",
+   "P08"
+  ],
+  "Bravo": [
+   "P20",
+   "P21",
+   "P12",
+   "P11"
+  ]
+ },
+ "orders": {
+  "Alpha": [
+   "P03",
+   "P10",
+   "P02",
+   "P08"
+  ],
+  "Bravo": [
+   "P20",
+   "P21",
+   "P12",
+   "P11"
+  ]
+ },
+ "flagged": {},
+ "kept_unreadable": true
+}
