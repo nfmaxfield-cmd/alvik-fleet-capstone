@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-12e18"   # e18 (Nick 12 Nov decision 4): a robot sent to the nearest readable point (no readable points of its own) has the right of way in the plan (the planner's priority_first: the others are planned round it) (MIRLT_LOST_PRIORITY=0: as e17). Before: "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-16vp"   # (Nick 16 Nov) Mission Control's list per robot: a per-robot visit order ('Alpha:P01,P05;Bravo:P11') whose named robot was not found this run no longer stops the run: the robots found run their own lists and the missing one's points are said as not visited (all named robots missing: refused as before); names match whatever their case. Nothing else changed. Before: "2026-11-12e18"   # e18 (Nick 12 Nov decision 4): a robot sent to the nearest readable point (no readable points of its own) has the right of way in the plan (the planner's priority_first: the others are planned round it) (MIRLT_LOST_PRIORITY=0: as e17). Before: "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -266,15 +266,26 @@ def parse_visit_order(spec, robots):
     if not spec:
         return {}
     if ":" in spec:
-        out = {}
+        out, missing = {}, []
+        by_low = {r.lower(): r for r in robots}
         for part in spec.split(";"):
             if not part.strip():
                 continue
             n, _, lst = part.partition(":")
-            n = n.strip()
+            n = by_low.get(n.strip().lower(), n.strip())
+            labs_ = [x for x in (lab(t) for t in lst.split(",")) if x]
             if n not in robots:
-                raise ValueError("no robot %s in this run (robots: %s)" % (n, ", ".join(robots)))
-            out[n] = [x for x in (lab(t) for t in lst.split(",")) if x]
+                # (2026-11-16, Nick: Mission Control's list per robot) a named robot the wiggle did not find this run:
+                # the robots that were found still run their own lists (Observe, then trust: narrow, don't end)
+                missing.append((n, labs_))
+                continue
+            out[n] = labs_
+        if missing and not out:
+            raise ValueError("no robot %s in this run (robots: %s)" % (", ".join(m[0] for m in missing),
+                                                                       ", ".join(robots)))
+        for n, labs_ in missing:
+            say("VISIT ORDER: %s was not found in this run (robots: %s): its points %s are not visited" % (
+                n, ", ".join(robots), ", ".join(labs_) or "(none)"))
         return out
     labs = [x for x in (lab(t) for t in spec.replace(" ", ",").split(",")) if x]
     if len(robots) <= 1:

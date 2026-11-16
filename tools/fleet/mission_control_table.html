@@ -8,7 +8,7 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
+     Changelog: 2026-11-12a first version (Mission Control build). 2026-11-16vp (Nick 16 Nov): the run bar and the Settings drawer are redrawn after a click (before: not until the focus left them, so a clicked run type looked unchosen); only typing in a box holds them. Visit points can take a list per robot ("A list per robot" in the run bar: pick a robot, click its stickers; each robot's points and route in its own colour), sent as 'Alpha:P01,P05;Bravo:P11', the form mission_run already took; "One list, shared out" stays the default and works as before (keep features, switch them off). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
      2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
      evidence, in plain words. -->
 <style>
@@ -123,6 +123,13 @@ details>summary{cursor:pointer}
 "use strict";
 let CTR = null;      // (e20) the Camera trust view
 let S = null, T = null, LIVE = null, PH = null, PLACE = null, kind = null, order = [], keepUnreadable = true;
+// (2026-11-16, Nick) Visit points: one list shared out (as before, the default) or a list per robot (vpEach)
+let vpEach = false, lists = {}, who = null;
+function vpNames() { const n = (T && T.robots && T.robots.names && T.robots.names.length ? T.robots.names : (S && S.site && S.site.robots) || []).slice(); return n.length ? n : ["Alpha", "Bravo"]; }
+function vpColour(n) { return ((S && S.site && S.site.colours) || {})[n] || ((LIVE && LIVE.robots || []).find(r => r.name === n) || {}).colour || ["#2952CC", "#C2410C", "#7A3FD1", "#12805C"][Math.max(0, vpNames().indexOf(n)) % 4]; }
+function vpWho() { const ns = vpNames(); if (!ns.includes(who)) who = ns[0]; return who; }
+function vpSpec() { return vpNames().filter(n => (lists[n] || []).length).map(n => n + ":" + lists[n].join(",")).join(";"); }
+function vpCount() { return vpNames().reduce((a, n) => a + (lists[n] || []).length, 0); }
 let logOpen = false, soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -166,9 +173,12 @@ function mapSVG() {
   let o = `<svg class="map" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="The table from above with the robots">`;
   o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="var(--table-edge)" stroke-width="1.5" rx="4"/>`;
   const pts = L.points || {};
-  if (order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
-  for (const [lab, p] of Object.entries(pts)) { const n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []);
-    o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? "var(--accent)" : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
+  const each = pick && vpEach;
+  if (!each && order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
+  if (each) for (const rn of vpNames()) { const l = (lists[rn] || []).filter(p => pts[p]); if (l.length > 1) o += `<polyline points="${l.map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="${vpColour(rn)}" stroke-width="1.8" stroke-dasharray="5 4" opacity=".8"/>`; }
+  for (const [lab, p] of Object.entries(pts)) { let n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []), fillC = "var(--accent)";
+    if (each) { n = []; fillC = null; for (const rn of vpNames()) (lists[rn] || []).forEach((q, i) => { if (q === lab) { n.push((vpNames().length > 1 ? rn[0] : "") + (i + 1)); fillC = fillC || vpColour(rn); } }); }
+    o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? fillC : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
   for (const [n, pts_] of Object.entries(((st().kind || L.terminal) && L.tracks) || {})) { const c = ((L.robots || []).find(r => r.name === n) || {}).colour || "#5B6474";
     if (pts_.length > 1) o += `<polyline points="${pts_.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${c}" stroke-width="${going() ? 1.5 : 2}" stroke-opacity="${going() ? .35 : .7}" stroke-linejoin="round"/>`; }
   for (const r of (L.robots || [])) {
@@ -199,11 +209,11 @@ function drawMap() {
   $("map").innerHTML = mapSVG();
   $("maptitle").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Plan: click stickers in the order to visit" : "The table") : phase === "after" ? "The table after the run" : "The table now";
   $("mapnote").textContent = LIVE && LIVE.robots && LIVE.robots.length ? `${LIVE.robots.filter(r => r.x != null).length} robot${LIVE.robots.length === 1 ? "" : "s"} on the map` : "";
-  $("mapcap").textContent = phase === "before" ? (kind === "visit" && isTags() ? "Clicked stickers join the order in the bar below; leave it empty and the points are shared out." : "The robots appear here once a run has found them (each by its wiggle or its lights).")
+  $("mapcap").textContent = phase === "before" ? (kind === "visit" && isTags() ? (vpEach ? `Clicked stickers join ${vpWho()}'s list (choose the robot in the bar below); each robot's points and route are in its own colour, numbered by its initial.` : "Clicked stickers join the order in the bar below; leave it empty and the points are shared out.") : "The robots appear here once a run has found them (each by its wiggle or its lights).")
     : "Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is. " + (phase === "after" ? "Lines: where each robot drove (the camera's fixes)." : "Faint lines: where each drove in the last minute.");
   $("mapsrc").textContent = "Measured: each robot's position and its 95 % error" + (LIVE && LIVE.source ? ", from " + LIVE.source : "") + ". Stickers: the site's sticker sheet.";
   $("stickerlegend").classList.toggle("hidden", !isTags());
-  document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; order.push(g.dataset.p); render(); });
+  document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; if (vpEach) { const w = vpWho(); (lists[w] = lists[w] || []).push(g.dataset.p); } else order.push(g.dataset.p); render(); });
 }
 
 // ------------------------------------------------------------------ the rail: needs a hand, robots, Pi health
@@ -308,8 +318,15 @@ function runbarHTML() {
   if (s.kind) return `<b>${esc(s.words || s.title)}</b>${uploadPill(s.upload)}${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun">New run</button><button class="primary" id="again">Run again</button>`;
   const visit = kind === "visit" && isTags();
   return `<span class="kinds">${b.map(x => `<button data-k="${x.kind}" class="${kind === x.kind ? "on" : ""}" ${x.ok ? "" : "disabled"} title="${esc(x.ok ? x.sub : x.why)}">${esc(x.title)}</button>`).join("")}</span>
-    ${visit ? `<div><div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map(p => `<span class="chip">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div></div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
+    ${visit ? `<div><div class="tiny" style="margin-bottom:3px"><label><input type="radio" name="vpmode" id="vpshared" ${vpEach ? "" : "checked"}> One list, shared out</label> &nbsp;<label><input type="radio" name="vpmode" id="vpeach" ${vpEach ? "checked" : ""}> A list per robot</label></div>${vpEach ? vpEachHTML() : `<div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map(p => `<span class="chip">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div>`}</div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
     ${uploadPill(T && T.upload)}<span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"}>Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</button>`;
+}
+function vpEachHTML() {   // (2026-11-16) a row per robot: choose whose list the map's clicks join; its chips, Undo, Clear
+  const w = vpWho();
+  return vpNames().map(n => { const l = lists[n] || [];
+    return `<div class="chips" style="align-items:center;margin-top:2px"><button class="ghost tiny" data-who="${esc(n)}" style="padding:1px 8px;${n === w ? `border:2px solid ${vpColour(n)};font-weight:700` : ""}" title="Clicks on the map add to this robot's list"><span class="dot" style="background:${vpColour(n)}"></span>${esc(n)}${n === w ? " (adding)" : ""}</button>${l.map(p => `<span class="chip" style="border-color:${vpColour(n)}">${esc(p)}</span>`).join("") || `<span class="tiny muted">no points: it stays where it is</span>`}${l.length ? ` <button class="ghost tiny" data-vpundo="${esc(n)}" style="padding:1px 8px">Undo</button><button class="ghost tiny" data-vpclear="${esc(n)}" style="padding:1px 8px">Clear</button>` : ""}</div>`; }).join("")
+    + (vpCount() ? "" : `<div class="tiny muted" style="margin-top:2px">No points chosen yet: Start shares the points out as usual.</div>`)
+    + `<div class="tiny muted" style="margin-top:2px">Names are given at the start by each robot's wiggle (a robot keeps its name at this site). A named robot not found runs nothing; the others run their lists.</div>`;
 }
 function uploadPill(u) { if (!u) return ""; const c = {uploaded: "ok", failed: "bad", uploading: "warn", "will upload": "ok", off: "warn", practice: ""}[u.state] ?? "";
   return `<span class="pill ${c}" title="Settings > This run">${esc(u.words)}</span>`; }
@@ -317,9 +334,14 @@ function wireRunbar() {
   document.querySelectorAll("[data-k]").forEach(x => x.onclick = () => { kind = x.dataset.k; store("mc_kind", kind); render(); });
   if ($("undo")) $("undo").onclick = () => { order.pop(); render(); };
   if ($("clear")) $("clear").onclick = () => { order = []; render(); };
+  if ($("vpshared")) $("vpshared").onchange = () => { vpEach = false; store("mc_vp_each", "off"); render(); };
+  if ($("vpeach")) $("vpeach").onchange = () => { vpEach = true; store("mc_vp_each", "on"); render(); };
+  document.querySelectorAll("[data-who]").forEach(x => x.onclick = () => { who = x.dataset.who; render(); });
+  document.querySelectorAll("[data-vpundo]").forEach(x => x.onclick = () => { (lists[x.dataset.vpundo] || []).pop(); render(); });
+  document.querySelectorAll("[data-vpclear]").forEach(x => x.onclick = () => { lists[x.dataset.vpclear] = []; render(); });
   if ($("start")) $("start").onclick = startRun;
   if ($("again")) $("again").onclick = () => { kind = st().kind || kind; startRun(); };
-  if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; order = []; render(); };
+  if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; order = []; lists = {}; render(); };
   if ($("stopbar")) $("stopbar").onclick = stopAll;
   if ($("goon")) $("goon").onclick = async () => { if (!confirm("Carry on without the robots that have not answered STOP? Only if they are switched off, asleep or away from the table.")) return; try { T = await api("/api/start/stop_go_on", {}); render(); } catch (e) { flash(e.message, true); } };
   if ($("logbtn")) $("logbtn").onclick = () => { logOpen = !logOpen; render(); };
@@ -337,7 +359,8 @@ async function startRun() {
   let clear_space = !!pr;
   if (!pr && T.clear_space && T.clear_space.words) clear_space = confirm(T.clear_space.words);
   const body = {kind, attended, clear_space};
-  if (kind === "visit" && order.length) { body.order = order.join(","); body.keep_unreadable = keepUnreadable; }
+  if (kind === "visit" && vpEach && vpCount()) { body.order = vpSpec(); body.keep_unreadable = keepUnreadable; }   // (2026-11-16) a list per robot
+  else if (kind === "visit" && !vpEach && order.length) { body.order = order.join(","); body.keep_unreadable = keepUnreadable; }
   dismissed = null;
   try { await api("/api/start/run", body); flash(pr ? "Practice started (the simulator)" : "Started"); LIVE = null; await startLoad(); } catch (e) { flash(e.message, true); }
 }
@@ -382,6 +405,8 @@ $("gear").onclick = () => openDrawer(false);
 $("safepill").onclick = () => openDrawer(true);
 
 // ------------------------------------------------------------------ render + polling
+function typingIn(sel) { const a = document.activeElement; if (!a || !a.closest || !a.closest(sel)) return false;
+  return a.tagName === "TEXTAREA" || a.tagName === "SELECT" || (a.tagName === "INPUT" && !["checkbox", "radio", "button", "submit"].includes((a.type || "").toLowerCase())); }
 function render() {
   if (!S || !T) return;
   $("place").textContent = (S.site && S.site.title) || "Home";
@@ -409,8 +434,11 @@ function render() {
   $("logcard").classList.toggle("hidden", !logOpen);
   if (logOpen) $("logcard").innerHTML = `<div style="display:flex;justify-content:space-between"><b>The run's last lines</b><button class="ghost tiny" id="logclose" style="padding:1px 8px">Close</button></div><pre class="mono" style="white-space:pre-wrap;max-height:260px;overflow:auto;margin:6px 0 0">${esc((st().lines || []).join("\n"))}</pre><div class="tiny muted">Folder: ${esc(st().folder || "")}</div>`;
   if ($("logclose")) $("logclose").onclick = () => { logOpen = false; render(); };
-  if (!(document.activeElement && document.activeElement.closest && document.activeElement.closest(".runbar"))) { $("runbar").innerHTML = runbarHTML(); wireRunbar(); }
-  if (drawerOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest("#drawer"))) { $("drawer").innerHTML = drawerHTML(); wireDrawer(); }
+  // (2026-11-16) redrawn unless someone is TYPING in it: a clicked button or tick box keeps the focus, and the old guard
+  // (any focus inside) left the bar showing the previous choice until a click elsewhere (Nick 13 Nov 08:04, "I can't
+  // select free roam")
+  if (!typingIn(".runbar")) { $("runbar").innerHTML = runbarHTML(); wireRunbar(); }
+  if (drawerOpen && !typingIn("#drawer")) { $("drawer").innerHTML = drawerHTML(); wireDrawer(); }
   soundLabel(); handCheck();
 }
 async function stateLoad() { try { S = await api("/api/state"); } catch (e) { flash("Mission Control is not answering: " + e.message, true); } }
@@ -420,7 +448,7 @@ async function healthLoad() { try { PH = await api("/api/pi_health"); } catch (e
 async function camTrustLoad() { try { CTR = await api("/api/camera_trust"); } catch (e) { return; } render(); }
 async function placeLoad() { try { const r = await fetch("/api/place"); if (r.ok) PLACE = await r.json(); } catch (e) { return; } render(); }
 (async () => {
-  kind = store("mc_kind"); await stateLoad(); await startLoad();
+  kind = store("mc_kind"); vpEach = store("mc_vp_each") === "on"; await stateLoad(); await startLoad();
   if (!kind || !(T.buttons || []).some(b => b.kind === kind && b.ok)) kind = ((T.buttons || []).find(b => b.ok) || {}).kind || null;
   if (S && S.site && !S.site.colours) S.site.colours = {};
   await liveLoad(); healthLoad(); placeLoad(); camTrustLoad();

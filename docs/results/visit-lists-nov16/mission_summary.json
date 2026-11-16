@@ -1,0 +1,625 @@
+{
+ "folder": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras",
+ "conditions": {
+  "restart": {
+   "name": "Alpha",
+   "t": 70.0,
+   "boot_s": 3.0
+  }
+ },
+ "result": "done",
+ "duration_s": 236.53,
+ "planned_s": 102.6,
+ "replans": 8,
+ "robots_out": [
+  {
+   "robot": "Alpha",
+   "why": "restarted mid-run (boot 4C01, was D386): it lost its calibration and its steps",
+   "t_run": 63.68
+  },
+  {
+   "robot": "Alpha",
+   "why": "heard again, but nothing moved on for 27 s after it rejoined",
+   "t_run": 169.48
+  }
+ ],
+ "plans_refused": 0,
+ "sensor_stops": 0,
+ "confirm_checks": [],
+ "battery": {
+  "Alpha": 95,
+  "Bravo": 91
+ },
+ "start_checks": {
+  "Alpha": {
+   "firmware": "2026-11-13e22",
+   "battery": 96,
+   "boot": "D386",
+   "restarted": false,
+   "stop_limit": {
+    "limit_cm": 12.0,
+    "rule": "cap",
+    "floor_cm": null,
+    "ceiling_cm": 12.0
+   },
+   "place_cm": 4.25,
+   "heading_deg": 0.92,
+   "heading_rule": "measured (facing check); straightened if off"
+  },
+  "Bravo": {
+   "firmware": "2026-11-13e22",
+   "battery": 91,
+   "boot": "45BF",
+   "restarted": false,
+   "stop_limit": {
+    "limit_cm": 12.0,
+    "rule": "cap",
+    "floor_cm": null,
+    "ceiling_cm": 12.0
+   },
+   "place_cm": 4.75,
+   "heading_deg": 1.34,
+   "heading_rule": "measured (facing check); straightened if off"
+  },
+  "facing": {
+   "Alpha": {
+    "heading": -87.05,
+    "off": -177.1,
+    "ok": false
+   },
+   "Bravo": {
+    "heading": 1.25,
+    "off": -88.8,
+    "ok": false
+   }
+  },
+  "settings_resent": 0,
+  "facing-recheck-1": {
+   "Alpha": {
+    "heading": 90.77,
+    "off": 0.8,
+    "ok": true
+   },
+   "Bravo": {
+    "heading": 90.66,
+    "off": 0.7,
+    "ok": true
+   }
+  },
+  "plan_gap": {
+   "closest_cm": 25.11,
+   "pair": [
+    "Alpha",
+    "Bravo"
+   ],
+   "t": 48.35,
+   "start_cm": 80.54,
+   "judged_cm": 25.11,
+   "judged_pair": [
+    "Alpha",
+    "Bravo"
+   ],
+   "judged_t": 48.35
+  },
+  "facing-rejoin-Alpha": {
+   "Alpha": {
+    "heading": 72.12,
+    "off": -0.1,
+    "ok": true
+   }
+  }
+ },
+ "on_problem": "keep_going",
+ "kept_going": [
+  {
+   "kind": "points_reassigned",
+   "robot": "Alpha",
+   "words": "Alpha is held (restarted mid-run (boot 4C01, was D386): it lost its calibration and its steps): its points not done go to the robots still running: Bravo (points P14, P17 to Bravo)",
+   "t_run": 63.68
+  },
+  {
+   "kind": "cam_guard",
+   "robot": "Alpha",
+   "words": "Alpha: the camera and its own pose disagreed by 0.0 cm for 1.0 s: its pose was set to the camera's (the camera is trusted), the run goes on",
+   "t_run": 143.16,
+   "d_cm": 0.03,
+   "cam": [
+    77.51,
+    56.62,
+    -32.5
+   ],
+   "own": [
+    77.49,
+    56.6,
+    74.17
+   ]
+  },
+  {
+   "kind": "cam_guard",
+   "robot": "Alpha",
+   "words": "Alpha: the camera and its own pose disagreed by 9.0 cm for 1.0 s: its pose was set to the camera's (the camera is trusted), the run goes on",
+   "t_run": 148.37,
+   "d_cm": 8.99,
+   "cam": [
+    109.75,
+    58.61,
+    3.7
+   ],
+   "own": [
+    106.27,
+    66.9,
+    19.72
+   ]
+  },
+  {
+   "kind": "cam_guard",
+   "robot": "Bravo",
+   "words": "Bravo: the camera and its own pose disagreed by 6.1 cm for 1.0 s: its pose was set to the camera's (the camera is trusted), the run goes on",
+   "t_run": 168.82,
+   "d_cm": 6.08,
+   "cam": [
+    115.05,
+    49.99,
+    -5.1
+   ],
+   "own": [
+    118.1,
+    55.25,
+    -0.52
+   ]
+  }
+ ],
+ "points": [
+  {
+   "robot": "Bravo",
+   "point": "point P20",
+   "t_run": 23.27,
+   "dwell_s": 8.0,
+   "n_fixes": 47,
+   "t_abs": 1794857166.98,
+   "interrupted": 0,
+   "x": 176.22,
+   "y": 48.66,
+   "plus_minus_cm": 2.4,
+   "source": "one camera (motion)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 175.89,
+   "own_y": 49.49,
+   "own_vs_camera_cm": 0.89,
+   "words": "point P20 (Bravo): \u00b12.4 cm, one camera (motion)",
+   "truth_err_cm": 3.26,
+   "within": false
+  },
+  {
+   "robot": "Alpha",
+   "point": "point P01",
+   "t_run": 28.48,
+   "dwell_s": 8.01,
+   "n_fixes": 48,
+   "t_abs": 1794857172.187,
+   "interrupted": 0,
+   "x": 26.96,
+   "y": 30.2,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 30.43,
+   "own_y": 31.76,
+   "own_vs_camera_cm": 3.8,
+   "words": "point P01 (Alpha): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 2.22,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P11",
+   "t_run": 37.16,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794857180.872,
+   "interrupted": 0,
+   "x": 150.52,
+   "y": 82.66,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 149.84,
+   "own_y": 82.53,
+   "own_vs_camera_cm": 0.69,
+   "words": "point P11 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 2.9,
+   "within": false
+  },
+  {
+   "robot": "Alpha",
+   "point": "point P08",
+   "t_run": 44.66,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794857188.368,
+   "interrupted": 0,
+   "x": 38.05,
+   "y": 57.66,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 41.93,
+   "own_y": 58.43,
+   "own_vs_camera_cm": 3.96,
+   "words": "point P08 (Alpha): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 1.85,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P10",
+   "t_run": 53.15,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794857196.854,
+   "interrupted": 0,
+   "x": 82.48,
+   "y": 97.04,
+   "plus_minus_cm": 1.9,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 83.79,
+   "own_y": 95.23,
+   "own_vs_camera_cm": 2.23,
+   "words": "point P10 (Bravo): \u00b11.9 cm, one camera (overhead)",
+   "truth_err_cm": 1.4,
+   "within": true
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P03",
+   "t_run": 151.09,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794857294.796,
+   "interrupted": 0,
+   "x": 14.69,
+   "y": 86.12,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 17.79,
+   "own_y": 82.46,
+   "own_vs_camera_cm": 4.8,
+   "words": "point P03 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 2.46,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P14",
+   "t_run": 176.08,
+   "dwell_s": 8.24,
+   "n_fixes": 49,
+   "t_abs": 1794857319.783,
+   "interrupted": 1,
+   "x": 115.05,
+   "y": 49.99,
+   "plus_minus_cm": 1.8,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 115.05,
+   "own_y": 49.99,
+   "own_vs_camera_cm": 0.0,
+   "words": "point P14 (Bravo): \u00b11.8 cm, one camera (overhead)",
+   "truth_err_cm": 1.51,
+   "within": true
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P17",
+   "t_run": 205.79,
+   "dwell_s": 8.0,
+   "n_fixes": 48,
+   "t_abs": 1794857349.496,
+   "interrupted": 0,
+   "x": 112.98,
+   "y": 117.98,
+   "plus_minus_cm": 1.9,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 112.36,
+   "own_y": 115.58,
+   "own_vs_camera_cm": 2.48,
+   "words": "point P17 (Bravo): \u00b11.9 cm, one camera (overhead)",
+   "truth_err_cm": 2.61,
+   "within": false
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P17",
+   "t_run": 213.8,
+   "dwell_s": 8.01,
+   "n_fixes": 48,
+   "t_abs": 1794857357.502,
+   "interrupted": 0,
+   "x": 112.98,
+   "y": 117.98,
+   "plus_minus_cm": 1.9,
+   "source": "one camera (overhead)",
+   "two_camera_share": 0.0,
+   "since_fix_cm": 0.0,
+   "since_fix_s": 0.0,
+   "own_x": 112.36,
+   "own_y": 115.58,
+   "own_vs_camera_cm": 2.48,
+   "words": "point P17 (Bravo): \u00b11.9 cm, one camera (overhead)",
+   "truth_err_cm": 2.61,
+   "within": false
+  }
+ ],
+ "points_skipped": [
+  {
+   "robot": "Bravo",
+   "point": "point P14",
+   "why": "cannot be reached: point (118.1, 55.2): no room to turn there (0.0 cm clear, needs 8.2)",
+   "t_run": 63.99
+  }
+ ],
+ "points_reassigned": [
+  {
+   "point": "point P14",
+   "frm": "Alpha",
+   "to": "Bravo",
+   "t_run": 63.68
+  },
+  {
+   "point": "point P17",
+   "frm": "Alpha",
+   "to": "Bravo",
+   "t_run": 63.68
+  }
+ ],
+ "sim": {
+  "min_body_gap_cm": 14.07,
+  "min_body_gap_at": [
+   "Alpha",
+   "Bravo",
+   240.29
+  ],
+  "collision": false,
+  "min_open_edge_cm": 10.3,
+  "min_open_edge_at": [
+   "Bravo",
+   169.59
+  ],
+  "hung": []
+ },
+ "line_check": {
+  "Alpha": {
+   "p95_cm": 3.86,
+   "within_pct": 54.4,
+   "misses": {
+    "misses": 689,
+    "single": 1,
+    "runs": 4,
+    "in_runs": 688,
+    "longest": 481,
+    "longest_s": 80.16
+   },
+   "sure_share_pct": 100.0,
+   "camera_vs_truth": {
+    "n": 1511,
+    "median_cm": 2.87,
+    "p95_cm": 7.16,
+    "max_cm": 9.75,
+    "within_gate_pct": 86.6
+   }
+  },
+  "Bravo": {
+   "p95_cm": 4.72,
+   "within_pct": 54.1,
+   "misses": {
+    "misses": 665,
+    "single": 0,
+    "runs": 5,
+    "in_runs": 665,
+    "longest": 577,
+    "longest_s": 96.17
+   },
+   "sure_share_pct": 96.2,
+   "camera_vs_truth": {
+    "n": 1450,
+    "median_cm": 2.46,
+    "p95_cm": 9.1,
+    "max_cm": 11.01,
+    "within_gate_pct": 65.4
+   }
+  }
+ },
+ "closest_by_camera": {
+  "centres_cm": 28.72,
+  "bodies_cm": 19.22,
+  "robots": [
+   "Alpha",
+   "Bravo"
+  ],
+  "t": 1794857367.7058
+ },
+ "camera": {
+  "frames": {
+   "overhead": 3123
+  },
+  "robots": {
+   "Alpha": {
+    "reads": 3123,
+    "fixes": 1564,
+    "refused_size": 0,
+    "refused_jump": 0,
+    "both": 0,
+    "lock": 0,
+    "motion": 0,
+    "overhead": 3123
+   },
+   "Bravo": {
+    "reads": 3002,
+    "fixes": 1503,
+    "refused_size": 0,
+    "refused_jump": 0,
+    "both": 0,
+    "lock": 0,
+    "motion": 58,
+    "overhead": 3002
+   }
+  },
+  "farm": null
+ },
+ "frames": "overhead: 3580 pictures in, 1194 kept at the tracking rate (172 MB), clips {'events': 15, 'clips': 6, 'stills': 15, 'thumbs': 5, 'mb': 109.7} (in /tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/frames)",
+ "reached": {
+  "Alpha": [
+   "sync wiggle 1 turn",
+   "sync wiggle 2 stop",
+   "sync wiggle 3 turn back",
+   "sync wiggle 4 stop",
+   "point P01",
+   "at point P01",
+   "point P08",
+   "at point P08",
+   "home"
+  ],
+  "Bravo": [
+   "sync wiggle 1 turn",
+   "sync wiggle 2 stop",
+   "sync wiggle 3 turn back",
+   "sync wiggle 4 stop",
+   "point P20",
+   "at point P20",
+   "point P11",
+   "at point P11",
+   "point P10",
+   "at point P10",
+   "point P03",
+   "at point P03",
+   "point P14",
+   "at point P14",
+   "point P17",
+   "at point P17",
+   "home"
+  ]
+ },
+ "speed_pinned": {
+  "cruise_cms": 10.0,
+  "turn_dps": 60.0,
+  "confirm_cms": 5.0
+ },
+ "sync_wiggle": {
+  "Alpha": {
+   "parts": [
+    [
+     "sync wiggle 1 turn",
+     1794857143.932,
+     1794857145.564
+    ],
+    [
+     "sync wiggle 2 stop",
+     1794857145.564,
+     1794857146.569
+    ],
+    [
+     "sync wiggle 3 turn back",
+     1794857146.569,
+     1794857148.203
+    ],
+    [
+     "sync wiggle 4 stop",
+     1794857148.203,
+     1794857149.212
+    ]
+   ],
+   "start": 1794857143.932,
+   "end": 1794857149.212
+  },
+  "Bravo": {
+   "parts": [
+    [
+     "sync wiggle 1 turn",
+     1794857143.932,
+     1794857145.621
+    ],
+    [
+     "sync wiggle 2 stop",
+     1794857145.621,
+     1794857146.625
+    ],
+    [
+     "sync wiggle 3 turn back",
+     1794857146.625,
+     1794857148.29
+    ],
+    [
+     "sync wiggle 4 stop",
+     1794857148.29,
+     1794857149.299
+    ]
+   ],
+   "start": 1794857143.932,
+   "end": 1794857149.299
+  }
+ },
+ "exports": {
+  "version": "2026-11-10b",
+  "camera_track": {
+   "file": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/run/camera_track.csv",
+   "rows": {
+    "Alpha": 3123,
+    "Bravo": 3002
+   }
+  },
+  "odometry_raw": {
+   "file": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/run/odometry_raw.csv",
+   "rows": {
+    "Bravo": 12559,
+    "Alpha": 7658
+   },
+   "anchors": {
+    "Bravo": [
+     "segment 1 anchored on its own pose (247.1, 83.1, 1.2 deg) at ms 360253"
+    ],
+    "Alpha": [
+     "segment 1 anchored on its own pose (77.5, 56.6, 114.6 deg) at ms 337106",
+     "segment 2 anchored on its own pose (152.3, 83.0, -87.0 deg) at ms 177812"
+    ]
+   }
+  },
+  "stops": {
+   "file": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/run/stops.csv",
+   "rows": 9
+  }
+ },
+ "camera_moved": [],
+ "pose_timeline": {
+  "file": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/pose_timeline.csv",
+  "rows": {
+   "Bravo, camera tag": 1503,
+   "Alpha, camera tag": 1564,
+   "Bravo, robot's own pose": 2374,
+   "Alpha, robot's own pose": 1391
+  }
+ },
+ "refit": {
+  "background": true,
+  "folder": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras/tagcal_refit",
+  "state": "running"
+ }
+}

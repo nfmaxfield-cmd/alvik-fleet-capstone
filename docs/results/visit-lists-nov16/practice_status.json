@@ -1,0 +1,27 @@
+{
+ "running": false,
+ "kind": "visit",
+ "title": "Visit points",
+ "practice": true,
+ "lines": [
+  "  Alpha 0/0  Bravo 1/8",
+  "POINT point P17 (Bravo): \u00b11.9 cm, one camera (overhead)",
+  "  Alpha 0/0  Bravo 2/8",
+  "POINT point P17 (Bravo): \u00b11.9 cm, one camera (overhead)",
+  "Bravo: after its turn the camera did not agree within 1.5 cm in 3 s (one camera (overhead), 2.5 cm apart): driving on, as before the pause",
+  "  Alpha 0/0  Bravo 4/8",
+  "  Alpha 0/0  Bravo 6/8",
+  "all robots done"
+ ],
+ "elapsed_s": 324.0,
+ "points": 9,
+ "questions": [],
+ "words": "Visit points ended.",
+ "folder": "/tmp/tmpyw7deflu/mc/runs/20261116-142433-visit-sim-cameras",
+ "upload": {
+  "on": true,
+  "state": "practice",
+  "words": "Practice: nothing is uploaded",
+  "link": null
+ }
+}
