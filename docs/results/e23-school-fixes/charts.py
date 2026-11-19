@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""(e23) The report's charts, from the numbers beside this file. usage: charts.py REPO OUT_DIR [ACCEPTANCE_DIR]"""
+"""(e23) The report's charts, from the numbers beside this file. usage: charts.py REPO OUT_DIR [ACCEPTANCE_DIR]
+Version 2 (2026-11-19, finishing): chart 4, the acceptance runs (acceptance/acceptance.json). Version 1: charts 1 to 3."""
 import glob, json, math, os, sys
 import matplotlib
 matplotlib.use("Agg")
@@ -98,5 +99,45 @@ if ACC:
              "than this machine, like the Pi (docs/results/e23-school-fixes/acceptance).", fontsize=7, color=GREY)
     fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(os.path.join(OUT, "e23-feature-planning-time-per-replan.png"), dpi=130)
+    plt.close(fig)
+# ---- 4. (19 Nov) the acceptance runs: points truly reached, the code before e23 against e23, case by case -----------
+TABLE = os.path.join(HERE, "acceptance", "acceptance.json")
+if os.path.exists(TABLE):
+    rows = json.load(open(TABLE))
+    cases = []
+    for r in rows:
+        c = r["case"].split("-", 1)[1]
+        if c not in cases:
+            cases.append(c)
+    by = {(r["case"].split("-", 1)[0], r["case"].split("-", 1)[1]): r for r in rows}
+    words = {"school20": "School Pi stand-in\n20 + 20 points\n(late pictures, slow planning)",
+             "school4": "School Pi stand-in\n4 + 4 points\n(late pictures, slow planning)",
+             "rejoin": "A robot restarts 120 s in\n20 + 20 points\n(slow planning)",
+             "plain": "Nothing made to go wrong\n20 + 20 points"}
+    fig, ax = plt.subplots(figsize=(10.5, 5.0))
+    w = 0.36
+    for k, c in enumerate(cases):
+        for j, (code, col, name) in enumerate((("old", RED, "before e23 (f4acc77)"), ("new", BLUE, "e23"))):
+            r = by.get((code, c))
+            if not r:
+                continue
+            x = k + (j - 0.5) * w
+            ax.bar(x, r["asked"], w * 0.92, color="none", edgecolor=GREY, lw=1, zorder=2)
+            ax.bar(x, r["truly_reached"], w * 0.92, color=col, zorder=3, label=name if k == 0 else None)
+            fc = len(r["false_credits"])
+            ax.text(x, r["asked"] + 0.6, "%d of %d%s" % (r["truly_reached"], r["asked"],
+                                                        "\n%d false credit%s" % (fc, "" if fc == 1 else "s") if fc else ""),
+                    ha="center", va="bottom", fontsize=8)
+    ax.set_xticks(range(len(cases)))
+    ax.set_xticklabels([words.get(c, c) for c in cases], fontsize=8)
+    ax.set_ylabel("Points (grey outline: asked; filled: truly reached)")
+    ax.set_ylim(0, 50)
+    ax.legend(fontsize=8, frameon=False, loc="upper right")
+    ax.set_title("Acceptance in the simulator: points the robots truly stood at, the code before e23 against e23", fontsize=10)
+    fig.text(0.01, 0.005, "Measured: the simulator's true robot positions during each recorded stop against the site's point positions "
+             "(run/sim/truth.csv; one run per bar, same seed for both codes;\ndocs/results/e23-school-fixes/acceptance/acceptance.json, "
+             "acc_table.py).", fontsize=7, color=GREY)
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    fig.savefig(os.path.join(OUT, "e23-feature-acceptance-points-truly-reached.png"), dpi=130)
     plt.close(fig)
 print("charts written to", OUT)

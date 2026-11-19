@@ -38,11 +38,13 @@ Changelog
   2026-11-19e23  the fixes for Jay-Sun's school runs of 16 / 18 Nov: MIRLT_STOP_UNNAMED, MIRLT_CAMERA_PROBE,
                  MIRLT_MOVE_CHECK, MIRLT_IMPROVE_SKIP_OVER, MIRLT_PLAN_AHEAD, MIRLT_POINT_CREDIT, MIRLT_OLD_FIX,
                  MIRLT_EDGE_SLOW_END, MIRLT_BIND_CAMS, MIRLT_WAKE_WAIT, MIRLT_VISIT_UNSEEN.
+  2026-11-19e23b MIRLT_VEER_AT_POINT (found while finishing e23): a robot standing in its dwell at a point is not sent
+                 on the veer stage's early turn-back when the camera loses it.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-19e23b"   # e23b: MIRLT_VEER_AT_POINT. Before: "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -346,6 +348,11 @@ SWITCHES = [
     ("MIRLT_EDGE_SLOW_END", "1", "0", "M",
      "The last part of a leg that ends inside the edge rule's room is driven at the slow speed, so the stop is short "
      "and fixes arrive before the edge. 0: the leg's speed to its end", "e23"),
+    ("MIRLT_VEER_AT_POINT", "stand", "recover", "M",
+     "A robot standing in its dwell at a point when the camera loses it is not sent on the veer stage's early "
+     "turn-back: it has not moved, and where the camera last read it is where it stands. Its stops (its possible error "
+     "reaching an edge) still apply, and the veer stage applies again once it drives on unseen. recover: it turns and "
+     "drives about 10 cm away mid-dwell (school 18 Nov: 6 of 36 veers; the dwell then ended off the point)", "e23"),
     ("MIRLT_BIND_CAMS", "run", "one", "M C",
      "Naming the robots by their wiggle reads roof tags with every camera the run uses. one: camera 1 only (school 18 "
      "Nov 14:27: a robot standing where only camera 2 sees it could not be named)", "e23"),

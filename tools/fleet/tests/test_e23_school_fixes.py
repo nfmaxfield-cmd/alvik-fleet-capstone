@@ -634,6 +634,80 @@ def test_a_dwell_finished_away_from_the_point_is_judged_against_the_point_not_th
     assert c.points[0]["reached"] is True and "at point 1" in c.done_labels
 
 
+def _dwelling(c, n="Alpha"):
+    """Robot n's steps done up to its first dwell at a point; returns (index of the dwell step, the step)."""
+    steps = c.steps(n)
+    i = next(k for k, s_ in enumerate(steps) if s_.get("type") == "wait" and str(s_.get("label") or "").startswith("at point"))
+    b = c.bots[n]
+    if not b.stat:
+        b.stat = [{"status": "pending"} for _ in steps]
+    for k in range(i):
+        b.stat[k]["status"] = "done"
+    return i, steps[i]
+
+
+def test_a_robot_standing_in_its_dwell_is_not_sent_on_the_veer_turn_back(monkeypatch):
+    """School 18 Nov: 6 of the 36 veers took a robot out of its dwell at a point (4 in the 17:09 run). Simulator with
+    late pictures (19 Nov): each 1.5 s stall sent a dwelling robot 10 cm away from its point."""
+    mm, plan = production_plan()
+    c = coord(mm, plan)
+    i, stp = _dwelling(c)
+    b = c.bots["Alpha"]
+    assert RP.Coordinator.standing_at_point(c, b, {"dist": 0.0}) is True
+    assert RP.Coordinator.standing_at_point(c, b, {"dist": 0.4}) is True         # the gyro's own wobble
+    assert RP.Coordinator.standing_at_point(c, b, {"dist": 6.0}) is False        # it has driven on, unseen
+    b.stat[i]["status"] = "done"                                                 # the dwell is over: the drive is next
+    assert RP.Coordinator.standing_at_point(c, b, {"dist": 0.0}) is False
+    b.stat[i]["status"] = "pending"
+    b.stat[i - 1]["status"] = "sent"                                             # still on its way to the point
+    assert RP.Coordinator.standing_at_point(c, b, {"dist": 0.0}) is False
+    # the veer stage itself (blind_watch), a point 22 cm from two edges, the camera silent for 5 s
+    def watch(standing, switch=True):
+        monkeypatch.setattr(RP, "VEER_AT_POINT_STAND", switch)
+        pts = {"1": [22.0, 22.0], "2": [320.0, 120.0], "3": [120.0, 50.0], "4": [280.0, 50.0], "5": [60.0, 60.0],
+               "6": [340.0, 60.0]}
+        c2 = coord(*production_plan(points=pts))
+        c2.t_run = RP.now() - 30.0
+        j, stp2 = _dwelling(c2)
+        if not standing:
+            c2.bots["Alpha"].stat[j - 1]["status"] = "sent"
+        b2 = c2.bots["Alpha"]
+        b2.pose = (stp2["to"][0], stp2["to"][1], 0.0)
+        b2.cam_t, b2.last_cam = RP.now() - 5.0, list(b2.pose)
+        sent = []
+        c2.recover_blind = lambda b_, bl, why: sent.append(why) or True
+        RP.Coordinator.blind_watch(c2)
+        return [e for e, _ in c2.logged if e in ("veer", "veer_not_at_point")], sent
+    assert watch(True) == (["veer_not_at_point"], [])                 # standing in its dwell: it stays
+    ev, sent = watch(False)                                           # on its way to the point: the veer stage
+    assert ev == ["veer"] and len(sent) == 1
+    ev, sent = watch(True, switch=False)                              # the old way behind the switch
+    assert ev == ["veer"] and len(sent) == 1
+    monkeypatch.setattr(RP, "VEER_AT_POINT_STAND", True)
+    assert SG.DEFAULT["MIRLT_VEER_AT_POINT"] == "stand" and SG.OLD["MIRLT_VEER_AT_POINT"] == "recover"
+    assert RP.VEER_AT_POINT_STAND is True
+    assert "`MIRLT_VEER_AT_POINT`" in open(os.path.join(REPO, "docs", "how-to", "safety-group.md")).read()
+
+
+def test_a_point_is_not_moved_to_the_end_of_the_list_while_the_robot_dwells_at_it():
+    """Simulator, 19 Nov: Bravo's recovery began 0.5 s into its dwell at P24; "P24 moved to the end of its list" took
+    the dwell alone out of the list, every later item shifted by one against the steps in progress, and the next
+    re-plan made P25's dwell at P24's place, 57 cm from P25, and never drove to P25."""
+    mm, plan = production_plan()
+    c = coord(mm, plan)
+    c.t_run = RP.now() - 30.0
+    i, stp = _dwelling(c)
+    before = [v.get("label") if isinstance(v, dict) else v for v in c.plan["robots"]["Alpha"]["visit_order"]]
+    assert RP.Coordinator.defer_current_point(c, "Alpha", "the camera lost its tag") == (None, None)
+    assert [v.get("label") if isinstance(v, dict) else v for v in c.plan["robots"]["Alpha"]["visit_order"]] == before
+    assert any(e == "point_defer_not_at_point" for e, _ in c.logged)
+    # on the way to the point (its drive not done) it is moved to the end, as before
+    c.bots["Alpha"].stat[i - 1]["status"] = "sent"
+    lab, how = RP.Coordinator.defer_current_point(c, "Alpha", "the camera lost its tag")
+    after = [v.get("label") if isinstance(v, dict) else v for v in c.plan["robots"]["Alpha"]["visit_order"]]
+    assert how == "deferred" and lab == stp["label"][3:] and after != before and sorted(map(str, after)) == sorted(map(str, before))
+
+
 def test_the_reach_tolerance_is_derived_and_a_missed_stop_is_not_done():
     c = _point_coord()
     derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(None))
