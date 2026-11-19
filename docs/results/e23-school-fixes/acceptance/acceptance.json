@@ -1,0 +1,445 @@
+[
+ {
+  "case": "old-school20",
+  "options": "old-school20:5:late=20,1.5:slow=6:skew=0",
+  "code": "before e23 (f4acc77)",
+  "result": "done",
+  "crashed": "KeyError: 'Bravo'",
+  "duration_s": 59.73,
+  "planned_s": 306.5,
+  "asked": 40,
+  "credited": 6,
+  "truly_reached": 6,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 0.4,
+  "said_not_reached": 0,
+  "skipped": 0,
+  "completed": false,
+  "standing_s": 71.0,
+  "standing_raw_s": 101.0,
+  "replans": 1,
+  "replan_median_s": 5.34,
+  "replan_sum_s": 5.3,
+  "robots_out": 1,
+  "rejoins": 1,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 73.78,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 11.09,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 12.8,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": null
+ },
+ {
+  "case": "new-school20",
+  "options": "new-school20:5:late=20,1.5:slow=6:skew=0",
+  "code": "e23",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 790.91,
+  "planned_s": 316.0,
+  "asked": 40,
+  "credited": 34,
+  "truly_reached": 34,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 1.7,
+  "said_not_reached": 5,
+  "skipped": 4,
+  "completed": false,
+  "standing_s": 926.1,
+  "standing_raw_s": 1156.2,
+  "replans": 47,
+  "replan_median_s": 4.54,
+  "replan_sum_s": 237.7,
+  "robots_out": 22,
+  "rejoins": 22,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 9.37,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 6.7,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 8.8,
+  "keepout": "zone 4 outlet plate (Bravo)",
+  "plan_ahead": {
+   "on": true,
+   "points_each": 60,
+   "replans_points_s": [
+    [
+     20,
+     6.286
+    ],
+    [
+     19,
+     6.422
+    ],
+    [
+     30,
+     11.525
+    ],
+    [
+     27,
+     6.522
+    ],
+    [
+     25,
+     6.838
+    ],
+    [
+     8,
+     4.473
+    ],
+    [
+     24,
+     6.405
+    ],
+    [
+     7,
+     4.132
+    ],
+    [
+     24,
+     8.696
+    ],
+    [
+     23,
+     6.89
+    ],
+    [
+     5,
+     4.349
+    ],
+    [
+     18,
+     5.461
+    ],
+    [
+     3,
+     4.329
+    ],
+    [
+     17,
+     4.662
+    ],
+    [
+     13,
+     4.539
+    ],
+    [
+     11,
+     3.83
+    ],
+    [
+     9,
+     3.791
+    ],
+    [
+     8,
+     3.21
+    ],
+    [
+     8,
+     3.1
+    ],
+    [
+     4,
+     2.544
+    ]
+   ],
+   "cost": {
+    "fixed_s": 2.129,
+    "s_per_point": 0.2159,
+    "how": "fitted to this run's 20 re-plans"
+   }
+  }
+ },
+ {
+  "case": "old-school4",
+  "options": "old-school4:6:late=20,1.5:slow=6:skew=0:pts=4",
+  "code": "before e23 (f4acc77)",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 85.42,
+  "planned_s": 84.5,
+  "asked": 8,
+  "credited": 8,
+  "truly_reached": 7,
+  "false_credits": [
+   {
+    "robot": "Bravo",
+    "point": "P24",
+    "off_cm": 10.4,
+    "ruler_cm": 5.5,
+    "dwell_s": 0.1
+   }
+  ],
+  "worst_true_stop_off_cm": 0.3,
+  "said_not_reached": 0,
+  "skipped": 0,
+  "completed": false,
+  "standing_s": 100.1,
+  "standing_raw_s": 135.1,
+  "replans": 4,
+  "replan_median_s": 2.89,
+  "replan_sum_s": 11.6,
+  "robots_out": 1,
+  "rejoins": 1,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 75.86,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 6.6,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 12.6,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": null
+ },
+ {
+  "case": "new-school4",
+  "options": "new-school4:6:late=20,1.5:slow=6:skew=0:pts=4",
+  "code": "e23",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 98.44,
+  "planned_s": 87.0,
+  "asked": 8,
+  "credited": 7,
+  "truly_reached": 7,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 0.4,
+  "said_not_reached": 0,
+  "skipped": 1,
+  "completed": false,
+  "standing_s": 119.4,
+  "standing_raw_s": 154.4,
+  "replans": 5,
+  "replan_median_s": 3.28,
+  "replan_sum_s": 15.4,
+  "robots_out": 3,
+  "rejoins": 2,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 76.31,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 6.6,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 12.6,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": {
+   "on": true,
+   "points_each": 2,
+   "replans_points_s": [
+    [
+     1,
+     2.468
+    ],
+    [
+     1,
+     3.347
+    ]
+   ],
+   "cost": {
+    "fixed_s": 1.53,
+    "s_per_point": 1.3772,
+    "how": "the school Pi's line scaled to this run's 2 re-plans"
+   }
+  }
+ },
+ {
+  "case": "old-rejoin",
+  "options": "old-rejoin:4:restart=Bravo@120:slow=6:skew=0",
+  "code": "before e23 (f4acc77)",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 596.56,
+  "planned_s": 306.5,
+  "asked": 40,
+  "credited": 40,
+  "truly_reached": 40,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 0.4,
+  "said_not_reached": 0,
+  "skipped": 3,
+  "completed": true,
+  "standing_s": 737.7,
+  "standing_raw_s": 937.8,
+  "replans": 5,
+  "replan_median_s": 6.59,
+  "replan_sum_s": 31.9,
+  "robots_out": 1,
+  "rejoins": 1,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 21.59,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 6.75,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 12.0,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": null
+ },
+ {
+  "case": "new-rejoin",
+  "options": "new-rejoin:4:restart=Bravo@120:slow=6:skew=0",
+  "code": "e23",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 643.75,
+  "planned_s": 316.0,
+  "asked": 40,
+  "credited": 40,
+  "truly_reached": 40,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 0.4,
+  "said_not_reached": 0,
+  "skipped": 0,
+  "completed": true,
+  "standing_s": 828.0,
+  "standing_raw_s": 1023.2,
+  "replans": 13,
+  "replan_median_s": 2.83,
+  "replan_sum_s": 39.3,
+  "robots_out": 4,
+  "rejoins": 4,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 21.39,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 6.74,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 11.8,
+  "keepout": "middle outlet box (Alpha)",
+  "plan_ahead": {
+   "on": true,
+   "points_each": 60,
+   "replans_points_s": [
+    [
+     4,
+     3.492
+    ],
+    [
+     2,
+     2.622
+    ],
+    [
+     2,
+     2.825
+    ],
+    [
+     2,
+     2.371
+    ],
+    [
+     2,
+     3.122
+    ],
+    [
+     2,
+     2.438
+    ],
+    [
+     2,
+     2.384
+    ],
+    [
+     2,
+     3.2
+    ],
+    [
+     2,
+     2.576
+    ],
+    [
+     2,
+     2.674
+    ],
+    [
+     2,
+     3.246
+    ],
+    [
+     2,
+     3.138
+    ],
+    [
+     18,
+     5.247
+    ]
+   ],
+   "cost": {
+    "fixed_s": 2.501,
+    "s_per_point": 0.1551,
+    "how": "fitted to this run's 13 re-plans"
+   }
+  }
+ },
+ {
+  "case": "old-plain",
+  "options": "old-plain:1:skew=0",
+  "code": "before e23 (f4acc77)",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 302.48,
+  "planned_s": 306.5,
+  "asked": 40,
+  "credited": 40,
+  "truly_reached": 40,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 4.5,
+  "said_not_reached": 0,
+  "skipped": 0,
+  "completed": true,
+  "standing_s": 177.7,
+  "standing_raw_s": 377.8,
+  "replans": 0,
+  "replan_median_s": null,
+  "replan_sum_s": 0,
+  "robots_out": 0,
+  "rejoins": 0,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 60.96,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 8.7,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 10.1,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": null
+ },
+ {
+  "case": "new-plain",
+  "options": "new-plain:1:skew=0",
+  "code": "e23",
+  "result": "done",
+  "crashed": null,
+  "duration_s": 308.76,
+  "planned_s": 316.0,
+  "asked": 40,
+  "credited": 40,
+  "truly_reached": 40,
+  "false_credits": [],
+  "worst_true_stop_off_cm": 4.5,
+  "said_not_reached": 0,
+  "skipped": 0,
+  "completed": true,
+  "standing_s": 178.3,
+  "standing_raw_s": 378.4,
+  "replans": 0,
+  "replan_median_s": null,
+  "replan_sum_s": 0,
+  "robots_out": 0,
+  "rejoins": 0,
+  "did_not_move": 0,
+  "closest_two_bodies_cm": 60.82,
+  "contact": false,
+  "closest_body_to_open_edge_cm": 8.7,
+  "hung_over_edge": [],
+  "closest_middle_to_keepout_cm": 10.1,
+  "keepout": "zone 1 outlet plate (Alpha)",
+  "plan_ahead": {
+   "on": true,
+   "points_each": null,
+   "replans_points_s": [],
+   "cost": {
+    "fixed_s": 0.4,
+    "s_per_point": 0.36,
+    "how": "the school Pi's (nothing measured in this run yet)"
+   }
+  }
+ }
+]

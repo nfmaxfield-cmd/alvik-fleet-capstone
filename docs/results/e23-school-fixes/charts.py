@@ -80,7 +80,8 @@ if ACC:
             continue
         v = [r["cpu_s"] for r in rs.get("replans") or [] if r.get("cpu_s") is not None]
         if v:
-            series.append((name.replace("-", "\n", 1), v, RED if name.startswith("old") else BLUE))
+            series.append((name.replace("old-", "before e23\n", 1).replace("new-", "e23\n", 1), v,
+                           RED if name.startswith("old") else BLUE))
     fig, ax = plt.subplots(figsize=(max(9.5, 1.1 * len(series)), 4.8))
     import random
     rng = random.Random(1)
@@ -95,10 +96,11 @@ if ACC:
     ax.set_ylabel("Time to work out one re-plan (s)")
     ax.set_yscale("log")
     ax.set_title("Planning time of every re-plan (a dot each; the bar is the median): the Pi's real run, then the simulator runs", fontsize=10)
-    fig.text(0.01, 0.005, "Measured: cpu_s of every re-plan in each run's run_plan_summary.json. Simulator runs named 'slow' plan 6 times slower "
-             "than this machine, like the Pi (docs/results/e23-school-fixes/acceptance).", fontsize=7, color=GREY)
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(os.path.join(OUT, "e23-feature-planning-time-per-replan.png"), dpi=130)
+    fig.text(0.01, 0.005, "Measured: cpu_s of every re-plan in each run's run_plan_summary.json. The simulator runs shown were slowed to 6 times "
+             "this machine's planning time; the Pi's real re-plans were still about 3 times slower\n(school20, school4: late pictures "
+             "too; rejoin: a robot restarts; docs/results/e23-school-fixes/acceptance).", fontsize=7, color=GREY)
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    fig.savefig(os.path.join(OUT, "e23-problem-planning-time-per-replan.png"), dpi=130)
     plt.close(fig)
 # ---- 4. (19 Nov) the acceptance runs: points truly reached, the code before e23 against e23, case by case -----------
 TABLE = os.path.join(HERE, "acceptance", "acceptance.json")

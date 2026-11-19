@@ -1,0 +1,327 @@
+# e23: fixes for Jay-Sun's school runs of 16 and 18 Nov (19 Nov)
+
+Built on `f4acc77`, simulator and logs only. Nothing was run on robots, Pis or cameras. Nick approved "fix every cause"
+on 19 Nov 11:59. Built in two sittings (the second finished the acceptance runs and fixed what they found).
+
+## Premise
+
+The analysis of Jay-Sun's 25 school runs (`docs/results/school-2026-11-18/report.md`) found eight causes, A to H, for
+the two-robot Visit points runs that did not complete. This build fixes each one, with a test that fails on the code
+before it and passes after, and checks the whole in the simulator on 20 + 20 and 4 + 4 point lists against the code
+before it. Those runs found four more faults (I to L below); they are fixed here too.
+
+## Data
+
+### 1. What was fixed
+
+Each fix keeps its old way behind a Safety group switch (decided automatically; `docs/how-to/safety-group.md`).
+
+| Cause | What changed | Switch (old way) | Test in `tools/fleet/tests/test_e23_school_fixes.py` |
+|---|---|---|---|
+| A. Stop before the robots are named never finished | A robot known only by a slot name is settled by the first `stop` that went out with the log port read. Stop pressed again joins the running watch. A new Start ends the watch and waits for port 5005. | `MIRLT_STOP_UNNAMED=wait` | `test_a_stop_before_the_robots_are_named_ends_after_one_answered_stop`, `test_stop_during_start_up_then_start_again_real_school_site`, `test_a_new_start_ends_the_watch_and_the_log_port_is_free` |
+| B. Start hung opening cameras | Only USB cameras that no program holds are opened, each in a child process with a time limit; "LOOKING FOR CAMERAS" and what was found or skipped is printed. | `MIRLT_CAMERA_PROBE=e13` | `test_a_camera_that_blocks_on_open_does_not_hang_the_start`, `test_only_usb_cameras_nobody_holds_are_opened` |
+| C. Crash when a robot rejoins mid-planning, shown as "done" | The plan made without the robot is dropped and made again with it. Any exception in the run gives the result "crashed: ...". | none (a crash has no old way worth keeping) | `test_a_robot_that_rejoins_while_a_plan_without_it_is_made_does_not_crash`, `test_a_crash_in_the_run_is_reported_as_crashed_never_done` |
+| D. Slow re-plans and false "did not move" | The step is judged from where it started; a step whose own pose ended at its target is done; the camera votes only with a picture newer than the step's end. Fixed-order lists are planned a few points ahead where that fits the re-plan's budget: a re-plan's time is taken as a fixed part plus a part per point, fitted to the run's own re-plans; where the fixed part alone is over the budget, the whole list is planned as before. No improvement try after an over-budget plan. | `MIRLT_MOVE_CHECK=e22`, `MIRLT_PLAN_AHEAD=all`, `MIRLT_IMPROVE_SKIP_OVER=0` | `test_the_real_false_verdicts_of_18_nov_are_now_moved_and_the_true_ones_stay`, `test_a_replan_of_a_long_fixed_order_list_plans_a_few_points_and_loses_none`, `test_points_ahead_come_from_the_measured_planning_cost` |
+| E1. Naming used camera 1 only | The binding's tag bridge and motion finding use every camera the run uses. | `MIRLT_BIND_CAMS=one` | `test_the_bindings_bridge_reads_every_camera_the_run_uses` |
+| E2. Unseen points kept silently | One loud WARNING line in the run log and a red box in Mission Control (on the map page too, since the practice screenshot showed it only on the old page). | `MIRLT_VISIT_UNSEEN=quiet` | `test_visit_points_outside_every_camera_are_warned_about_loudly` |
+| E3. Points credited that were not reached | A stop counts only when the robot's best position is within the point's tolerance; otherwise "NOT REACHED" with the distance. A fix too old for the robot is carried forward by its own motion. The end of a leg inside the edge rule's room is driven at 5 cm/s. | `MIRLT_POINT_CREDIT=always`, `MIRLT_OLD_FIX=send`, `MIRLT_EDGE_SLOW_END=0` | `test_a_stop_far_from_its_point_is_not_credited`, `test_a_fix_too_old_for_the_robot_is_carried_forward_not_refused`, `test_a_leg_that_ends_inside_the_edge_rules_room_is_finished_slowly` |
+| F. Robots asleep; card full | The wait follows the site's check-in (school: 60 min) and says so, with how to wake a robot now. The card-full refusal lists the exact steps. | `MIRLT_WAKE_WAIT=fixed` | `test_the_wait_for_sleeping_robots_follows_the_sites_check_in`, `test_the_card_full_refusal_says_exactly_how_to_free_space` |
+| G. Site file pins swapped | `AL-E7DC` tag 3, `AL-EB54` tag 4; old values kept in a note. A pin the wiggle contradicts is logged ("PIN DISAGREES") and the wiggle wins. | none | `test_the_schools_typed_pins_match_what_the_robots_say`, `test_a_pin_that_the_wiggle_contradicts_is_logged_and_the_wiggle_wins` |
+| H. Pi load with two cameras | Measured from the logs (section 4). No camera or core setting was changed. | – | – |
+| I. A robot standing at a point was sent on the "veer" turn-back when pictures stalled (found in acceptance; 6 of the 36 veers in the 18 Nov logs) | A robot standing in its dwell that has not moved since the camera lost it stays. Its stops still apply, and the veer stage applies again once it drives on unseen. | `MIRLT_VEER_AT_POINT=recover` | `test_a_robot_standing_in_its_dwell_is_not_sent_on_the_veer_turn_back` |
+| J. "Point moved to the end of its list" while the robot stood at it shifted the whole list by one (found in acceptance) | A point is moved only while the robot is on its way to it. | none (a list error) | `test_a_point_is_not_moved_to_the_end_of_the_list_while_the_robot_dwells_at_it` |
+| K. A stop was judged against the pause step's place, not the point's (found in acceptance) | The stop is judged against the point's own place from the map's lists. | part of `MIRLT_POINT_CREDIT` | `test_a_dwell_finished_away_from_the_point_is_judged_against_the_point_not_the_pause_step` |
+| L. A run ended "done" while points handed to a finished robot waited for a re-plan (found in acceptance) | The run is not over while such a re-plan is due. | none | `test_the_run_is_not_done_while_handed_over_points_wait_for_a_replan_that_is_due` |
+
+Of the 37 new tests, 35 fail on `f4acc77`; the other two pin behaviour that was kept (a held log port is still
+waited for; the old watch behind its switch). The list is in `docs/results/e23-school-fixes/old_code_tests.txt`.
+
+### 2. The move check on the real verdicts
+
+![The 29 verdicts of 18 Nov judged again](../screenshots/2026-11-19/e23-feature-move-check-on-the-real-verdicts.png)
+
+Each mark is one verdict the school runs logged; green ones are now taken as moved, and the four red ones, where the robot's own pose ended 3 cm or more short of the step's target, still fail.
+
+- The logs hold 19 "did NOT move" and 10 "not physically possible" verdicts.
+- In 25 of them the robot's own pose ended at the step's target (within 2.5 cm along the step's line). e23 takes all 25 as moved.
+- The 4 that stay failed: three are Bravo at the zone 4 outlet plate (16:11, 24 cm short), one is a step reported done in 0.03 s with 3.4 cm still to go (18:06).
+- Seven of the 10 "not physically possible" verdicts were steps the robot had already passed when they were sent (0.3 to 4.5 cm beyond the target), so the robot reported them done in 0.02 s.
+
+### 3. Acceptance in the simulator
+
+One simulator run per row, the same seed for both codes, run one at a time. "Truly reached" is measured from the
+simulator's true robot positions during each recorded stop, not from what the run credited itself (`acc_table.py`).
+
+![Points truly reached in each acceptance run, before e23 and e23](../screenshots/2026-11-19/e23-feature-acceptance-points-truly-reached.png)
+
+Each pair of bars is one test case run on the code before e23 (red) and on e23 (blue); the outline is the number of points asked and the filling is how many the robots truly stood at.
+
+| Case | Code | How it ended | Truly reached / asked | False credits | Crashed | Run time (s) | Standing outside stops (s, both robots) | Re-plans (median s) | Closest two bodies (cm) | Closest body to an open edge (cm) | Closest robot middle to a keep-out (cm) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| School Pi stand-in, 20 + 20 | before | said "done" at 60 s | 6 / 40 | 0 | **yes**: `KeyError: 'Bravo'` in `finish_replan` | 60 | 71 | 1 (5.3) | 73.8 | 11.1 | 12.8 |
+| | e23 | done | **34 / 40** | 0 | no | 791 (planned 316) | 926 | 47 (4.5) | 9.4 | 6.7 | 8.8 |
+| School Pi stand-in, 4 + 4 | before | done | 7 / 8 (said 8) | 1 (P24, 10.4 cm off) | no | 85 | 100 | 4 (2.9) | 75.9 | 6.6 | 12.6 |
+| | e23 | done | 7 / 8 (said 7) | 0 | no | 98 | 119 | 5 (3.3) | 76.3 | 6.6 | 12.6 |
+| A robot restarts 120 s in, 20 + 20, slow planning | before | done | 40 / 40 | 0 | no | 597 | 738 | 5 (6.6) | 21.6 | 6.8 | 12.0 |
+| | e23 | done | 40 / 40 | 0 | no | 644 | 828 | 13 (2.8) | 21.4 | 6.7 | 11.8 |
+| Nothing made to go wrong, 20 + 20 | before | done | 40 / 40 | 0 | no | 302 | 178 | 0 | 61.0 | 8.7 | 10.1 |
+| | e23 | done | 40 / 40 | 0 | no | 309 | 178 | 0 | 60.8 | 8.7 | 10.1 |
+| Stop pressed before the robots are named (stop watcher alone, 5 min) | before | never finished | – | – | – | – | – | – | – | – | – |
+| | e23 | finished at once | – | – | – | – | – | – | – | – | – |
+
+- **School Pi stand-in:** both simulated cameras freeze for 1.5 s every 20 s and the next picture arrives that old; every re-plan takes 6 times as long as on this machine; one clock for cameras and Pi; camera 2 on.
+- **Stop case:** the watcher sent 101 `stop` messages in 5 minutes on the code before e23 and was still sending; e23 sent 1 and finished.
+- **The 18 Nov crash, reproduced and passed:** the code before e23 crashed on the stand-in exactly as school runs 21 and 25 did, and said "done". e23 met the same moment 9 times in its run ("rejoined while a plan made without it was being worked out") without a crash.
+- **No robot touched another or hung over an edge in any run** (simulator's own check), and no robot's middle came nearer than 8.8 cm to a keep-out (a body reaches at most 6.7 cm from its middle).
+
+Where e23 missed:
+
+1. **20 + 20 on the stand-in is not complete: 34 of 40, in 2.5 times the planned time.** Not reached, each said so by the run and none tried again:
+   - P24 and P11: the veer turn-back began as the robot arrived, and its stop was made 12 and 15 cm from the point.
+   - P04 and P26: the robot stood at the point and the new rule kept the veer stage off it, but the edge rule's own stop then sent it 10 cm inward. Its position doubt read 13.8 cm (Alpha) and 61.9 cm (Bravo) although neither had moved. Why the doubt was that large for a standing robot was not traced.
+   - P12: its drive ended 7.6 cm from the point by the camera.
+   - P15: skipped ("no room to turn there") after it was handed to the other robot.
+2. **The veer stage still fires on every picture stall for a moving robot near an edge:** 32 turn-backs in that run, each followed by a re-plan (47 re-plans). The two bodies came within 9.4 cm of each other (plans are refused under 8 cm).
+3. **The restart case got slower, not better:** 644 s against 597 s, 13 re-plans against 5, 90 s more standing. Both reached 40 of 40.
+4. **4 + 4 on the stand-in:** the same 7 of 8 truly reached; e23 says 7 and names the missed point, the code before said 8. e23 took 13 s longer.
+5. **e23 still says "done" when points were not reached** (it lists them underneath).
+
+Not covered by these runs: causes B, E1, F and G (tests only), and the Stop case inside Mission Control with robots answering under their WiFi names (practice mode's simulated robots answer as Alpha and Bravo; the practice Stop during start-up and second Start worked, screenshots below).
+
+![Planning time of every re-plan: the Pi's real run and the simulator runs](../screenshots/2026-11-19/e23-problem-planning-time-per-replan.png)
+
+Each dot is the time one re-plan took; the simulator's slowed re-plans (2.5 to 11 s) are still about a third of the school Pi's on 18 Nov (10 to 19 s), so the stand-in is milder than the Pi on planning.
+
+Mission Control in practice mode (school site, camera 1 only as in the repo's site file):
+
+![Stop pressed twice while the run was starting](../screenshots/2026-11-19/e23-feature-stop-during-start-up-stopped.png)
+
+Stop pressed twice 7 s after Start, before the robots were named: 2.5 s later the page says every robot confirmed and nothing is running.
+
+![The second Start runs, with the warning about points no camera of the run sees](../screenshots/2026-11-19/e23-feature-second-start-runs-with-unseen-points-warning.png)
+
+Start pressed again 3 s after that: the second run is going, and the red box names Bravo's two points that camera 1 cannot see.
+
+![A crashed run is said as crashed](../screenshots/2026-11-19/e23-feature-crashed-run-is-said-as-crashed.png)
+
+What the page says for a crash: this is the finished practice run with its summary rewritten to the words of the 18 Nov crash, not a real crash.
+
+### 4. The Pi with two cameras (cause H)
+
+![Pictures read per camera and core load through 18 Nov](../screenshots/2026-11-19/e23-problem-pi-load-two-cameras.png)
+
+Camera 1's pictures per second fell through the day while core 0, which runs the recorder for both cameras, stood at 100 % in every run, including the cool one-camera runs.
+
+Measured from the run folders (`picture_age.py`, `cpu_share.py`, `drain_lag.py`, `open_times.py` in `docs/results/e23-school-fixes`):
+
+- **Recorder:** core 0 was at 100 % (median) in all 12 runs with a `cpu.csv`, from 13:01 on, at 75 °C and before any throttling. The recorder used 92 to 98 % of that one core with one camera and with two.
+- **Tag bridge:** camera 1 was read 8.7 times a second at 13:01, 4.3 to 6.0 with two robots and one camera, 2.9 to 4.4 after camera 2 joined, and 1.6 to 2.6 in the last three runs. Camera 2 was read 4.1 to 9.1 times a second.
+- **Picture age when read:** median 0.15 to 0.27 s with one camera, 0.29 to 0.40 s for camera 1 with two. Pictures older than 1 s: none before 16:00, 4 to 6 % for camera 1 in the last three runs.
+- **Run program:** it handled each robot report within 0.01 s (median) in every run, 0.5 s at worst. It was not the slow part.
+- **Planner:** `run_plan` used 23 to 40 % of core 1 in most runs and 80 to 93 % in the two runs that re-planned most (17:54, 18:06).
+- **Throttling:** the processor clock's median was 1726 to 1775 MHz in the throttled runs against 1800 MHz, about 4 % slower.
+
+What a fan would fix: the 4 % clock loss and the "throttled" flags. What it would not fix: core 0 at 100 % for the recorder, the bridge reading camera 1 two to three times less often than camera 2, and slow planning (fixed here by D).
+
+This reading is my own, from timing in the logs; nothing was measured on the Pi for this build.
+
+## Conclusion
+
+These are my own conclusions from the tests and the simulator runs; nothing here was run on the robots.
+
+1. **The two faults that ended the 20-point runs at school are fixed, and shown fixed in the simulator.** The simulator's school stand-in crashed the old code the way runs 21 and 25 crashed; e23 ran through 9 such moments. The Stop storm is gone at the watcher (101 messages against 1).
+2. **Stops are now counted honestly.** No e23 run credited a stop the robot was not at; the old code did once in four runs and said 8 of 8.
+3. **e23 is not yet a complete 20 + 20 run under late pictures.** It reached 34 of 40 in 2.5 times the planned time. The main remaining cause is the turn-back on each picture stall; a point is lost when one begins as the robot arrives at it or stands at it near an edge.
+4. **e23 brought no gain where nothing was wrong or a robot restarted,** and cost 8 % more time in the restart case.
+5. **Worth putting on the school Pi:** in no case did e23 truly reach fewer points than the code before it, and the crash, the Stop storm, the camera hang (tests only) and the false credits are the faults that stopped Jay-Sun's runs.
+
+## What's next
+
+1. Update the school Pi (steps below) and repeat a 20 + 20 run with Jay-Sun in the room. That run is the acceptance that counts.
+2. Decide questions 1 to 3 below; they are the next build (a not-reached point tried again; the veer stage under picture stalls; what "done" says).
+3. Trace why a standing robot's position doubt was 14 and 62 cm when pictures stalled, and whether late pictures are being learned as odometry error (logs of the stand-in run; no robot needed).
+4. Repeat the four simulator cases over 10 or more seeds each; one seed per case is not a rate.
+5. A designed experiment on the simulator, at the Pi's measured planning cost, for how many points to plan ahead (question 4).
+6. Run the Pi timing bench with two cameras and each core layout (`./run-fleet-pi.sh bench`), to decide whether the recorder should get a second core when camera 2 is on.
+7. Calibrate AL-1DC0's wheels at school. On the leg to P33 its own distance count read 15 to 20 % short against camera 2 over the last 50 cm (inferred from `follow.csv` against `bridge/fixes.csv`; the cause is not known).
+
+## School Pi: update steps (Nick)
+
+On the laptop, click the **Tailscale** icon near the clock and switch the account to **joincapstonedb**. Then open
+**PowerShell**. Type each box, press Enter, and wait for the line to finish.
+
+```
+ssh nick@100.72.183.28
+```
+
+Type the Pi's password if it asks. You should see a line ending in `$`.
+
+```
+cd ~/alvik-fleet-capstone
+```
+
+```
+git status --short
+```
+
+You should see either nothing, or one line ` M tools/fleet/sites/school-conference.json` (camera 2 was switched on in that file on this Pi). If you see nothing, skip the two `git stash` boxes below. If you see any other line, stop here and send me that screen.
+
+```
+git stash
+```
+
+You should see `Saved working directory and index state`.
+
+```
+git pull
+```
+
+You should see `Fast-forward` and a list of files, among them `tools/fleet/tests/test_e23_school_fixes.py`.
+
+```
+git stash pop
+```
+
+You should see `Auto-merging tools/fleet/sites/school-conference.json` and no line with `CONFLICT`. If a line says `CONFLICT`, stop here and send me that screen.
+
+```
+git log --oneline -1
+```
+
+You should see one line that ends with `e23 20: build report, acceptance in the simulator, screenshots`. The seven characters in front of it are that commit's short name; the code it carries was last changed in commit `006354b`.
+
+```
+python3 tools/fleet/safety_group.py show | tail -1
+```
+
+You should see `Safety group: every switch on its automatic default (95 switches; tools/fleet/safety_group.py show)`.
+
+```
+./run-fleet-pi.sh space --move
+```
+
+You should see finished run folders listed as moved to the USB drive and the card's free space after (it was 0.81 GB on 18 Nov; a run needs 0.55 GB).
+
+```
+./run-fleet-pi.sh mc-stop
+```
+
+You should see the `$` line again (Mission Control is closed; a run it had going is stopped first).
+
+```
+./run-fleet-pi.sh mc
+```
+
+You should see a line with `:8095` in it. The address in front of it may be the Pi's address on the school network; use the one below.
+
+In the laptop's browser (still on the **joincapstonedb** Tailscale account), open `http://100.72.183.28:8095/table`. You should see Mission Control with the table's map. When a run starts, its log (the **Log** button) now shows a line `LOOKING FOR CAMERAS: ...` followed by `CAMERAS FOUND (...)`.
+
+No firmware changed in this build: nothing to flash.
+
+## Until the Pi is updated (Jay-Sun)
+
+- After pressing Stop while a run is still starting, restart Mission Control before the next run.
+- If nothing new appears within 30 s of Start, press Stop, restart Mission Control, and start again.
+- Keep lists to 5 points or fewer per robot.
+- Place both robots in camera 1's half at Start, and keep camera 2 on.
+- "Done" may be wrong on this version: check the list of stops against the list asked.
+- Wake the robots by hand (power button off and on) before Start if they have been idle for more than 10 minutes.
+
+## Questions for Nick
+
+Substantive:
+
+1. **The veer turn-back on picture stalls.** At school on 18 Nov the veer stage fired 36 times; in the stand-in run it fired 32 times, each a 10 to 15 cm drive back and a re-plan. I changed one case only: a robot standing at a point now stays (switch `MIRLT_VEER_AT_POINT`). That changes a stage you approved on 13 Nov, so: is it right? And for a moving robot, should it (a) stay as it is, (b) turn back only when its error shape no longer clears the edge at its present speed, instead of looking 27.5 cm ahead, or (c) slow down first and turn back only if pictures stay away?
+2. **A point said "NOT REACHED" is not tried again.** Should the robot go back to it straight away, go back to it at the end of its list (as a point whose tag was lost on the way is), or leave it?
+3. **What should a run say when points were not reached?** It now says "done" and lists them. An alternative is "ended: 34 of 40 points reached".
+4. **Points planned ahead.** Where a re-plan's fixed part is over its budget, e23 plans the whole list (as before e23). Planning 2 points each made a re-plan about half as long in the stand-in (17.6 s against 36 to 47 s), but in the first sitting's restart run it came with 6 points lost, with other faults still present then. A designed experiment (1 / 2 / 3 / all, at the Pi's planning cost, 10 seeds) would settle it; it is on the list unless you would rather choose.
+5. **Camera 2 in the repo's site file is still off**, yet the 18 Nov runs used it from 15:03, so the school Pi's copy of that file must differ from the repo's (I have not seen the Pi's copy). That is why the update steps set the file aside and restore it. Should the repo's school site say camera 2 is on?
+
+Other:
+
+6. The stand-in's stall pattern (both cameras, 1.5 s every 20 s) and its 6 times slower planning are my choices from the 18 Nov numbers. The Pi's real re-plans were about 3 times slower still. Is that stand-in close enough, or should it be set from the per-picture timing in `bridge/detect_times.csv`?
+7. The Stop case could not be shown through Mission Control in practice mode, because the simulated robots answer as Alpha and Bravo. Worth adding simulated robots that answer under WiFi names?
+
+## Appendix A: chosen and derived numbers
+
+| Number | Value | Where it comes from | Should a designed experiment set it? |
+|---|---|---|---|
+| Camera-open time limit | 3 x the longest open on record: 4.8 s | 153 opens in the 25 run logs (median 0.64 s, 95th percentile 0.95 s, longest 1.59 s); each Pi's own opens raise the record | The factor 3 is **[chosen]**. No: a hung open never returns |
+| Child start allowance | 20 s | **[chosen]**: time for a child Python to load OpenCV before its open is timed | No |
+| "At its target" | 1 cm + 2.45 x the robot's own stated position sd | The firmware's arrival window and the robot's own FOLLOW row | No (definitions) |
+| Late move check kept | 5 s | **[chosen]** bookkeeping: after that the blind rules have the robot | No |
+| Planning cost before the first measurement | 0.4 s fixed + 0.36 s per point | School Pi: the medians for 4 + 4 points (3.3 s) and 20 + 20 points (14.8 s) give (14.8 - 3.3) / 32 per point and the rest fixed | No (a measurement; scaled by the run's first re-plans, fitted from its third) |
+| "Fixed part over the budget: plan the whole list" | a rule, no number | **[chosen]**: fewer points cannot bring such a re-plan under its budget, and each extra re-plan pays the fixed part again | **Yes**, with the row below |
+| Points planned ahead, at least | 2 per robot | **[chosen]**: the point it drives to and the next | **Yes**: 1 / 2 / 3 against standing time and points reached, simulator at the Pi's planning cost |
+| Points planned ahead, at most | 60 per robot ("the whole list") | **[chosen]**: more points than any list so far | No |
+| "Has not moved" for a robot standing at a point | 2 cm of its own driving since the camera lost it | The existing interrupted-dwell limit (`DWELL_STILL_CM`, Nick's "about 2 cm") | No |
+| Re-plan spacing past the re-plan cap | 5 s | Existing **[chosen]** guard; a run now waits it out when handed-over points depend on it | No |
+| Reach tolerance of a stop | 2.9 cm + the stop's own ± | Measured drive-end errors (`TRACK_P95_CM` 1.7 across, stop 2.4 along) | No |
+| Oldest fix a robot takes | its own `fix_max_age_ms`, else 1.0 s | Firmware default before e21 | No |
+| Pi-to-robot message time | 0.07 s | 99th percentile of 8,476 pose rows of the 18:06 run | No (a measurement) |
+| Slow-end room | derived clearance at the tour's speed + speed x the oldest fix the robot takes: 20.5 cm at 10 cm/s, 25.8 cm at 15 cm/s | `safety_rules.slow_end_room_cm` | The 1 s term follows the firmware. A designed experiment on speed near an edge is worth running (report of 18 Nov) |
+| Slow-end speed | 5 cm/s | The slowest speed the stopping distance was measured at | Yes, with the room above |
+| Simulator: planning slowed | 6 x | **[chosen]**; it gave re-plans of 2.5 to 11 s against the Pi's 10 to 19 s | No (a simulator condition; question 6) |
+| Simulator: late pictures | 1.5 s stall every 20 s, both cameras | **[chosen]** from 18 Nov: stalls of about 1.5 s, 4 to 6 % of camera 1's pictures older than 1 s in the last three runs | Better measured than tested: set it from `bridge/detect_times.csv` |
+| Acceptance ruler for "truly reached" | the larger of 2.9 cm + the stop's own ± and 5.5 cm | The tolerance e23 derives for a stop (drive-end errors; the school's measured stop scatter) | No |
+| Acceptance: "standing" | true speed under 0.5 cm/s | **[chosen]**: well under the slowest drive (4 cm/s) | No |
+
+## Appendix B: how to reproduce
+
+```
+cd tools/fleet && HOME=$(mktemp -d) python3 -m pytest -q -p no:cacheprovider tests/test_e23_school_fixes.py
+python3 docs/results/e23-school-fixes/seed_runs.py . /tmp/e23acc new-school20:5:late=20,1.5:slow=6:skew=0 \
+    new-school4:6:late=20,1.5:slow=6:skew=0:pts=4 new-rejoin:4:restart=Bravo@120:slow=6:skew=0 new-plain:1:skew=0
+python3 docs/results/e23-school-fixes/acc_table.py /tmp/acc.json /tmp/acc.md /tmp/e23acc/new-school20 /tmp/e23acc/new-school4
+python3 docs/results/e23-school-fixes/stop_case.py .
+python3 docs/results/e23-school-fixes/mc_shots.py . docs/screenshots/2026-11-19 /tmp/e23mc
+python3 -I docs/results/e23-school-fixes/picture_age.py <the 25 run folders>
+```
+
+`seed_runs.py` switches camera 2 on for the run (`run_two_cameras.py`), as it was at school on 18 Nov; the repo's site
+file still says `cameras.side.use false`. Run one case at a time: two at once share the simulator's ports.
+
+The runs of the code before e23 used a copy of `f4acc77` with two additions that are not part of it: the simulator's
+late pictures (`tools/sim/tag_cam.py` and the `--sim-late` option copied in) and the planner slowed from outside (a
+wrapper that waits 5 times the planning time after each re-plan). The numbers behind the table are in
+`docs/results/e23-school-fixes/acceptance/` (`acceptance.json`, `acceptance.md`, `stop_case.jsonl`); the run folders
+themselves are not in the repo. The e23 runs were made at commit `56567c4`; the code after it (`006354b`) adds only the map page's warning box and a guard for a test set-up, neither of which a run uses.
+
+## Appendix C: Claude's review of this build
+
+1. **The acceptance runs changed the build.** The first runs of e23 were worse than the code before it in one case (34 of 40 against 40 of 40 with a restart and slow planning) and ended one run "done" with 25 points not visited. Four faults came out of that (I to L) and the points-ahead rule was changed. The table above is from the code after those fixes; it is one run per case.
+2. **One seed per case.** Nothing here is a rate. The 34 of 40 could be 30 or 38 on another seed.
+3. **I changed an approved safety stage without asking** (a robot standing at a point is not sent on the veer turn-back). It is behind a switch and its stops are untouched, but it is my call, not Nick's: question 1.
+4. **Three misses are known and not fixed:** a not-reached point is never tried again; a moving robot near an edge is still turned back on every picture stall; and a standing robot's position doubt read 14 and 62 cm at the moment pictures stalled, which I did not trace. In that run each robot's odometry record had a turn-on-the-spot term 4 to 12 times larger than in the run with nothing wrong (0.21 and 0.59 against 0.05), so late pictures may be being read as odometry error; that is a lead, not a finding. I stopped there because the first two need a decision (questions 1 and 2) and the third needs its own look.
+5. **The stand-in is my construction.** It reproduced the 18 Nov crash, which is some evidence it is like the Pi; its planning is still about 3 times faster than the Pi's was.
+6. **Causes B, E1, F and G are covered by tests only,** with stand-ins for the cameras and the robots. The camera-open hang in particular has never been seen to pass on the Pi.
+7. **The new "not over while handed-over points wait" rule can lengthen a run:** if that re-plan can never be made, the run now goes on to its time limit instead of ending early.
+8. **The crash screenshot is staged** (a finished run's summary rewritten), and the first practice screenshot showed that the red warning box was missing from the map page; it was added and the picture retaken.
+9. **Tests:** the full fleet suite (`tools/fleet/tests`) on the final code: 1199 passed, 10 skipped, 2 passed that were expected to fail. Its first run today had 4 failures with one cause (the new standing-at-point check met a test set-up with no plan); fixed and run again in full. Pi suite: 137 passed. Analysis suite: 16 passed. Simulator suite: 122 passed, 2 failed (`tools/sim/tests/test_follow.py`, the two tests on late and old fixes); they fail the same way on `f4acc77` and were left alone.
+
+## Sweep 1: new tests that may now be needed
+
+1. Each acceptance case over 10 or more seeds, both codes, so reached points and run time become rates.
+2. A real two-robot 20 + 20 run at school after the Pi update, at 10 cm/s (the school report's test 9).
+3. Simulator: a recovery that begins as the robot arrives at a point; once a not-reached point is tried again, that it is reached.
+4. A robot that ends its dwell while still unseen: the veer stage must apply again as it drives on (tested standing and moving, not the change-over).
+5. Handed-over points whose re-plan can never be made: the run ends at its time limit and says which points were left.
+6. Mission Control, in a browser test: the red warning box shows on `/` and `/table` (checked today by screenshot and by a text test only).
+7. Stop before naming through Mission Control with simulated robots that answer under WiFi names.
+8. The camera-open time limit on the real Pi with camera 2 plugged in (stubs only so far).
+9. The stand-in at the Pi's real planning cost (about 3 times slower than today's).
+10. The Pi bench with two cameras: fix gap and picture age per core layout (from the school report).
+
+## Sweep 2: possible inaccuracies
+
+1. **Simulator stand-in** (stall 1.5 s every 20 s on both cameras together, planning 6 times slower): chosen from the 18 Nov summaries, not fitted to per-picture timing. A designed experiment is not the tool; measuring `bridge/detect_times.csv` is.
+2. **One run per case, one seed.** Differences of a few points or a few per cent in time are within what another seed could give.
+3. **"6 of 36 veers took a robot out of its dwell"** counts veers logged while a point's pause step had started and not ended; the robot may still have been settling in some.
+4. **Planning cost seed (0.4 s + 0.36 s a point)** comes from two medians of one afternoon on a hot Pi. Each run refits its own; the first two or three re-plans of a run use the scaled seed.
+5. **Points planned ahead (at least 2) and the whole-list rule** are chosen. A designed experiment should set them (question 4).
+6. **The simulated robots** do not have AL-1DC0's 15 to 20 % short distance count or the real table's slip; the edge and plate distances above are the simulator's.
+7. **The old-code runs** needed the two additions named in Appendix B; I believe they do not change its behaviour otherwise, and did not test that separately.
+8. **"Truly reached"** uses the site file's typed point positions and a 5.5 cm ruler; a stop finished after 0.1 s counts the same as a 5 s one.
+9. **Cause H** (section 4) is read from timing in the logs; nothing was measured on the Pi.
+10. **The move-check result** takes the robot's own pose as the truth for 25 verdicts; spinning wheels would fool it.
+11. **The update steps' stash boxes** assume the Pi's only local change is camera 2 in the school site file. That comes from the first sitting's draft; I did not find it stated in the run folders, so the steps say what to do if `git status` shows anything else.

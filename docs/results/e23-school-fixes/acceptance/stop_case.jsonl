@@ -1,0 +1,2 @@
+{"code": "before e23 (f4acc77)", "minutes": 5.0, "stop_messages_sent": 101, "last_stop_sent_at_s": 300.0, "watch_finished_at_s": null, "phase": "stopping", "robots": [["Alpha", "no answer"], ["Bravo", "no answer"]]}
+{"code": "e23", "minutes": 5.0, "stop_messages_sent": 1, "last_stop_sent_at_s": 0.0, "watch_finished_at_s": 0.0, "phase": "stopped", "robots": [["Alpha", "confirmed"], ["Bravo", "confirmed"]]}

@@ -3,7 +3,7 @@
 way for the code before e23 and for e23, from the SIMULATOR'S TRUTH (run/sim/truth.csv), not from what the run
 credited itself.
     acc_table.py OUT.json OUT.md FOLDER [FOLDER ...]
-Version 1 (2026-11-19).
+Version 2 (2026-11-19): a crash is read from the run's own output (the code before e23 says "done" after one).
 
   asked            points on the two lists
   credited         different points the run recorded a stop for
@@ -116,19 +116,29 @@ def one(folder):
     rp = rs.get("replans") or []
     cpu = [r["cpu_s"] for r in rp if r.get("cpu_s") is not None]
     res = str(ms.get("result") or rs.get("result") or ("no summary" if not rs else "?"))
+    # a crash is read from the run's own output (the code before e23 says "done" after one)
+    crash = None
+    try:
+        out_ = open(os.path.join(folder, "mission_stdout.txt"), errors="replace").read().splitlines()
+    except OSError:
+        out_ = []
+    for k, l in enumerate(out_):
+        if l.startswith("Traceback (most recent call last)"):
+            crash = next((x.strip() for x in out_[k + 1:k + 60] if x and not x.startswith((" ", "\t"))), "traceback")
+            break
     capped = os.path.exists(os.path.join(folder, "CAPPED.txt"))
     row = {
         "case": os.path.basename(os.path.normpath(folder)), "options": case.get("case"),
         "code": "e23" if os.path.basename(os.path.normpath(folder)).startswith("new") else "before e23 (f4acc77)",
         "result": res + (" (stopped by the runner at its 25 min cap)" if capped else ""),
-        "crashed": res.startswith("crashed") or bool(rs.get("crash")),
+        "crashed": crash or (res if res.startswith("crashed") else None) or ((rs.get("crash") or {}).get("why")),
         "duration_s": rs.get("duration_s"), "planned_s": rs.get("planned_makespan_s"),
         "asked": len(asked), "credited": len(credited & set(asked)) if asked else len(credited),
         "truly_reached": len(true_ok & set(asked)) if asked else len(true_ok),
         "false_credits": false_cr, "worst_true_stop_off_cm": round(worst, 1),
         "said_not_reached": len(rs.get("points_not_reached") or []),
         "skipped": len(rs.get("points_skipped") or []),
-        "completed": bool(res == "done" and asked and len(true_ok & set(asked)) == len(asked)),
+        "completed": bool(res == "done" and not crash and asked and len(true_ok & set(asked)) == len(asked)),
         "standing_s": round(max(0.0, stand - dwell_true), 1), "standing_raw_s": round(stand, 1),
         "replans": len(rp), "replan_median_s": round(statistics.median(cpu), 2) if cpu else None,
         "replan_sum_s": round(sum(cpu), 1), "robots_out": len(rs.get("robots_out") or []),
@@ -153,7 +163,7 @@ def main():
         L.append("| " + " | ".join(str(v) for v in (
             r["case"], r["code"], r["result"], "%s (%s)" % (r["duration_s"], r["planned_s"]),
             "%d / %d" % (r["truly_reached"], r["asked"]), r["credited"], len(r["false_credits"]),
-            "yes" if r["crashed"] else "no", r["standing_s"], "%d (%s)" % (r["replans"], r["replan_median_s"]),
+            ("yes: %s" % r["crashed"]) if r["crashed"] else "no", r["standing_s"], "%d (%s)" % (r["replans"], r["replan_median_s"]),
             r["robots_out"], r["closest_two_bodies_cm"], r["closest_body_to_open_edge_cm"],
             "%s: %s" % (r["closest_middle_to_keepout_cm"], r["keepout"]))) + " |")
     open(out_md, "w").write("\n".join(L) + "\n")
