@@ -756,9 +756,23 @@ def impossible(length_cm, took_s):
         took_s < abs(length_cm) / PHYS_MAX_CMS
 
 
+ARRIVE_CM = 1.0           # the firmware's arrival window for a drive step (follow.h: a drive ends within about 1 cm of
+#                           its target along the line). A definition of the firmware's, not chosen here. No DOE
+ARRIVE_SD_K = 2.45        # ... plus the robot's own stated position doubt at 95 % (2-D: 2.45 sd)
+
+
+def at_target(end_off_cm, own_sd_cm=None):
+    """(e23) Did a drive step's own pose end at its target? Within the firmware's arrival window plus the robot's own
+    stated 95 % position doubt (pos_sd from its FOLLOW row; none stated: the window alone). School 18 Nov: the 18 false
+    "did NOT move" steps ended 0.1-3 cm from their targets."""
+    if end_off_cm is None:
+        return False
+    return float(end_off_cm) <= ARRIVE_CM + ARRIVE_SD_K * max(0.0, float(own_sd_cm or 0.0))
+
+
 def move_outcome(length_cm, took_s, wheel_cm=None, accel_rolling=None, gyro_deg=None, turn_deg=0.0,
                  front_change_cm=None, front_expect_cm=None, line_changed=None, cam_moved_cm=None, cam_fresh=False,
-                 robot_info=""):
+                 robot_info="", end_off_cm=None, own_sd_cm=None):
     """(3', Nick 5 Nov 21:11: move outcome by evidence fusion) Did a move happen? Each independent signal votes
     (0 = did not move, 1 = moved) with its own weight; no single one decides, except physical impossibility.
       wheel_cm        what the wheels counted (its LEG record / own pose), weight 1: wheels can spin on the spot
@@ -780,6 +794,11 @@ def move_outcome(length_cm, took_s, wheel_cm=None, accel_rolling=None, gyro_deg=
         return dict(verdict="impossible", score=0.0, used=["time"], blind_ok=False,
                     words="%.0f cm in %.2f s is not physically possible: a robot-side refusal or failure%s" % (
                         L, took_s, (" (it said: %s)" % robot_info) if robot_info else ""))
+
+    if end_off_cm is not None and at_target(end_off_cm, own_sd_cm) and not (cam_fresh and cam_moved_cm is not None):
+        # (e23) its own pose ended at the step's target and no picture newer than the step's end says otherwise
+        return dict(verdict="moved", score=1.0, used=["own pose at its target"], blind_ok=False,
+                    words="moved (its own pose ended %.1f cm from the step's target)" % float(end_off_cm))
 
     def vote(name, v, w):
         nonlocal num, den

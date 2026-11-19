@@ -47,7 +47,7 @@ for p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recognit
 
 import calib_run as CR   # noqa: E402
 
-VERSION = "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn remembered across runs (tag_heading_store); a heading check that loses its tag is tried again where the tag reads (stand longer, longer window), then the remembered turn, then the finding stroke; record yaw_state / yaw_how (MIRLT_TAG_HEADING_MEMORY=0: per run only; MIRLT_HEADING_CHECK=once: the check once, as before). Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (said in its note). Before: "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
+VERSION = "2026-11-19e23"   # e23 (school 18 Nov): the binding's bridge and the motion finding use every camera the run uses (run_for_mission side=; MIRLT_BIND_CAMS=one: camera 1 only); the wait for sleeping robots follows the site's own check-in interval and says it (wake_wait_min; MIRLT_WAKE_WAIT=fixed: 3 min and "every 10 min"); a typed pin that the wiggle contradicts is logged with both values and the wiggle wins (pin_disagreements). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn remembered across runs (tag_heading_store); a heading check that loses its tag is tried again where the tag reads (stand longer, longer window), then the remembered turn, then the finding stroke; record yaw_state / yaw_how (MIRLT_TAG_HEADING_MEMORY=0: per run only; MIRLT_HEADING_CHECK=once: the check once, as before). Before: "2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (said in its note). Before: "2026-11-10e14"   # e14: every robot found by its own small move first (motion_find.run_finding: anywhere on
 #   the table, with or without a tag that reads; brought back to where tags read; a robot with no tag that reads kept
 #   as "tagless" with its motion position and heading); the wiggle only for robots the finding did not bind.
 #   MIRLT_CAMERA_DISCOVERY=off: the wiggle alone (before e14). e13: the camera check (camera_feed) before binding
@@ -191,6 +191,34 @@ def clear_space_ok(cl, dry_truth=None):
     return False
 
 
+def wake_wait_min(site, wake_min=3.0, dry=False, now=None, path=None):
+    """(e23, school 18 Nov 12:54: robots asleep, the start gave up after 3 min, the check-in is hourly) (minutes the
+    start waits for sleeping robots, the check-in interval it says). DERIVED from the site's own sleep check-in
+    (wake_robots: the interval the robots were last put to sleep with, else the site's sleep_checkin_min): until the
+    next check-in when the Pi knows when they were put to sleep, else one whole interval; plus the awake window and
+    the boot (wake_robots.wait_limit_s). Never shorter than the wait asked for. A dry run, or MIRLT_WAKE_WAIT=fixed:
+    the wait as asked (3 min) and no interval."""
+    import safety_group as SG
+    if dry or SG.value("MIRLT_WAKE_WAIT") == "fixed":
+        return float(wake_min), None
+    import wake_robots as WR
+    ck = WR.checkin_min(site, "", path)
+    whole = WR.wait_limit_s(ck)
+    nx = WR.next_checkin_s("", now, path)
+    wait_s = whole if nx is None else min(whole, nx + WR.AWAKE_S + WR.BOOT_S)
+    return max(float(wake_min), wait_s / 60.0), ck
+
+
+def pin_disagreements(expect, bound, wifi_of=None):
+    """(e23) [(robot, WiFi name, pinned tag, tag the wiggle found)] where a pin (typed in the site file, or kept by the
+    Pi) said one roof tag and the robot's own wiggle turned another. The wiggle wins (the binding uses `bound`)."""
+    out = []
+    for n, t in sorted((expect or {}).items()):
+        if n in bound and bound[n] is not None and t is not None and int(bound[n]) != int(t):
+            out.append((n, (wifi_of or {}).get(n) or n, int(t), int(bound[n])))
+    return out
+
+
 def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder=None, log=say, by=None,
                  rename_ok=None, state_dir=None, min_firmware=None, use_pins=None, heading_check=True, cams=None,
                  rm=None, heading_store=None):
@@ -206,6 +234,10 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
     if state_dir is None:
         state_dir = (folder or "") if dry else ((site or {}).get("conf_dir") or "")
     auto = list(slots) in (["auto"], [])
+    wake_min, ck_min = wake_wait_min(site, wake_min, dry)          # (e23) the site's own sleep check-in
+    if ck_min is not None and wake_min > 3.0 + 1e-6:
+        log("ROBOTS ASLEEP? If none answers, the start keeps trying for up to %.0f min: %s" % (
+            wake_min, CR.checkin_words(ck_min)))
     if auto:
         # (11-05h, Observe then trust) however many robots are on the table: the camera counts the roof tags there
         # and the run waits (up to wake_min) for that many robots to answer; slots are named after the site's robots,
@@ -213,14 +245,15 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         n_tags = len(eye.seen_ids(2.0)) if eye is not None else 0
         log("AUTO: the camera sees %d roof tag%s on the table: waiting for %s robot%s to answer" % (
             n_tags, "" if n_tags == 1 else "s", n_tags or "any", "" if n_tags == 1 else "s"))
-        found = CR.discover(link, list(ips), wake_min, dry, count=n_tags)
+        found = CR.discover(link, list(ips), wake_min, dry, count=n_tags, checkin_min=ck_min)
         slots = auto_slots(site, len(found))
     else:
-        found = CR.discover(link, list(ips), wake_min, dry, count=len(slots))
+        found = CR.discover(link, list(ips), wake_min, dry, count=len(slots), checkin_min=ck_min)
     if not found:
-        raise CR.BindError("no robot answered on the WiFi (wake and status to %s for %.0f min). Is it switched on and "
+        raise CR.BindError("no robot answered on the WiFi (wake and status to %s for %.0f min%s). Is it switched on and "
                            "on the school WiFi? `python3 tools/pi/robot_sleep.py wake any` wakes one from any address."
-                           % (", ".join(ips) or "the broadcast", wake_min))
+                           % (", ".join(ips) or "the broadcast", wake_min,
+                              "" if ck_min is None else "; " + CR.checkin_words(ck_min)))
     log("Found: %s" % ", ".join("%s at %s" % kv for kv in found.items()))
     robots = [CR.Robot(link, n, ip) for n, ip in found.items()]
     # (Nick, 5 Nov 11:00) older firmware: refused before anything moves (switch calibration.min_firmware)
@@ -315,6 +348,13 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         b.update(CR.bind_by_wiggle(rest, eye, wiggle_deg=float(w["deg"]), pause_s=float(w["pause_s"]), log=log,
                                    expect={k: v for k, v in expect.items() if k in {r.name for r in rest}},
                                    check_deg=CR.PIN_CHECK_DEG, notes=notes))
+    # (e23, observe then trust) a pin is a starting guess: where the robot's own move turned ANOTHER roof tag than its
+    # pin said, the move wins (b holds what turned), said loudly and kept in the record
+    pin_changes = pin_disagreements(expect, b, {rb.name: wifi.get(rb.ip) for rb in robots})
+    for n_, w_, was_, got_ in pin_changes:
+        log("PIN DISAGREES: %s (%s) was pinned to roof tag %d, but its own move turned tag %d: tag %d is used (the "
+            "robot's move wins); the Pi's pin is updated. If the site file's tags.pins says %d, correct it" % (
+                n_, w_, was_, got_, got_, was_))
     # (5 Nov 11:00) a roof tag on the table that no robot of this run claimed (a third robot, asleep or not in the
     # run): the run would not know it is there. Refused (switch tags.unclaimed: refuse / ignore)
     claimed = set(b.values())
@@ -439,6 +479,8 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
            "yaw_how": {assign[n]: v for n, v in yaw_how.items() if n in assign},       # motion / unknown, and how
            "tagless": {assign[n]: tl for n, tl in tagless.items() if n in assign},   # (e14) found by motion, no tag
            "found_by_motion": bool(mres),
+           "pin_disagreed": [{"robot": n_, "wifi_name": w_, "pinned_tag": was_, "tag": got_}
+                             for n_, w_, was_, got_ in pin_changes],        # (e23) the wiggle won over these pins
            "auto": auto,
            "empty_slots": [s for s in slots if s not in assign.values()]}
     for p in ([os.path.join(folder, "binding.json")] if folder else []) + \
@@ -484,9 +526,11 @@ def MF_on():
     return MF.enabled()
 
 
-def real_cams(site, calib=""):
+def real_cams(site, calib="", side=None):
     """(e14) Every camera the Pi can open for robot finding by motion (camera_discovery.find_cameras): the recorder's
-    streams, then /dev/video cameras it does not hold; the first stream with the setup's camera model."""
+    streams, then /dev/video cameras it does not hold; the first stream with the setup's camera model. (e23) side:
+    (camera 2's stream, its model file) when the run uses camera 2: that stream gets camera 2's model, so a robot
+    only camera 2 sees is placed on the table too."""
     import camera_discovery as CD
     from cameras import CameraModel
     tc = os.path.join(site.get("conf_dir") or os.path.expanduser("~/.config/mirlt"), "tagcal")
@@ -495,20 +539,33 @@ def real_cams(site, calib=""):
         model = CameraModel.load(cal) if os.path.exists(cal) else None
     except Exception:  # noqa: BLE001
         model = None
-    found = CD.find_cameras()
+    found = CD.find_cameras(log=say)        # (e23) says what it looks for, finds and skips; never hangs on a camera
+    smodel, sport = None, None
+    if side and side[0] and side[1] and os.path.exists(side[1]):
+        try:
+            smodel, sport = CameraModel.load(side[1]), str(side[0]).rpartition(":")[2]
+        except Exception:  # noqa: BLE001
+            smodel = None
     grabs = [CD.Grabber(c["src"]) for c in found]
-    cams = [CD.CamInfo(c["name"], g.grab, model if (k == 0 and c["kind"] == "stream") else None)
+    cams = [CD.CamInfo(c["name"], g.grab, model if (k == 0 and c["kind"] == "stream") else
+                       (smodel if (smodel is not None and c["kind"] == "stream" and
+                                   str(c["src"]).rpartition(":")[2] == sport) else None))
             for k, (c, g) in enumerate(zip(found, grabs))]
     return cams, [g.close for g in grabs]
 
 
 def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=(), log=say, rename_ok=None,
-                    use_pins=None, rm=None, heading_store=None):
+                    use_pins=None, rm=None, heading_store=None, side=None):
     """mission_run's step before its bridge (real robots): a tag bridge of its own on the recorder's pictures with
-    every listed and spare tag id, the binding, the bridge stopped. Returns the record."""
+    every listed and spare tag id, the binding, the bridge stopped. Returns the record. (e23) side: (camera 2's
+    stream, its model file) when the run uses camera 2: the binding reads both cameras, as the run will."""
     import argparse
     os.makedirs(folder, exist_ok=True)
-    a = argparse.Namespace(calib=calib, stream=stream)
+    import safety_group as SG
+    if SG.value("MIRLT_BIND_CAMS") == "one":
+        side = None
+    a = argparse.Namespace(calib=calib, stream=stream, side_stream=(side or ("", ""))[0],
+                           side_calib=(side or ("", ""))[1])
     bp, _cal, _h = CR.start_bridge(a, site, folder)
     link = eye = None
     try:
@@ -516,7 +573,7 @@ def run_for_mission(site, slots, folder, stream="127.0.0.1:8000", calib="", ips=
         eye = CR.Eye(folder, CR.FIX_PORT)
         time.sleep(2.0)
         CR.feed_refusal(eye)        # (e13) every camera sending new pictures before the binding blames anything else
-        cams, closers = real_cams(site, calib) if MF_on() else ([], [])
+        cams, closers = real_cams(site, calib, side) if MF_on() else ([], [])
         try:
             return bind_for_run(site, slots, link, eye, ips=ips, folder=folder, log=log, rename_ok=rename_ok,
                                 use_pins=use_pins, cams=cams, rm=rm, heading_store=heading_store)

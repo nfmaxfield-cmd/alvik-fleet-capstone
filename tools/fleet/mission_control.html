@@ -1120,7 +1120,8 @@ function startScreen() {
   const corners = T.corners_needed ? `<div class="corners"><b>One thing to do first: click the table's corners</b><p style="margin:6px 0 12px">${esc(T.corners_needed)} It takes a minute and is only needed once here.</p><button class="p" id="gocorners">Show me the picture to click</button></div>` : "";
   const bigs = `<div class="bigs">${T.buttons.map(b => `<button data-run="${b.kind}" ${(!b.ok || going) ? "disabled" : ""} title="${esc(b.ok ? b.sub : b.why)}"><b>${esc(b.title)}</b><span>${esc(b.ok ? b.sub : b.why)}</span></button>`).join("")}</div>`;
   const stat = st.kind ? `<div class="card statusbox"><div class="between"><h2>${esc(st.title)}${st.practice ? " (practice)" : ""}</h2><span class="muted small">${st.elapsed_s != null ? fmt(st.elapsed_s) : ""}</span></div>
-    <p style="margin:6px 0;font-size:15px">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
+    <p style="margin:6px 0;font-size:15px${st.crashed ? ";color:var(--red);font-weight:600" : ""}">${esc(st.words || "")}${st.points ? " Points done: " + esc(String(st.points)) + "." : ""}</p>
+    ${st.visit_warning ? `<div class="corners" id="visitwarn" style="border-color:var(--red);color:var(--red)"><b>Some listed points are outside every camera of this run</b><p style="margin:6px 0">${esc(st.visit_warning.replace(/^WARNING: /, ""))}</p></div>` : ""}
     ${st.stop ? `<div class="stopbox ${st.stop.phase}"><b>${st.stop.phase === "stopping" ? "Stopping\u2026" : "Stopped"}</b> ${(st.stop.robots || []).map(r => `<span class="pill">${esc(robotLabel(r.name))}: ${esc(r.state)}</span>`).join(" ")}${(st.stop.forced || []).length ? `<div class="small" style="color:var(--red)">${esc(st.stop.forced.join("; "))}</div>` : ""}</div>` : ""}
 
     ${liveMapCard(st)}

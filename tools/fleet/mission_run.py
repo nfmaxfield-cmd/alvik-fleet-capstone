@@ -32,7 +32,7 @@ Ctrl+C stops every robot (run_plan's own stop). Free space (diskguard.py, 2026-1
 under its floor; frame saving stops under the frames' floor; under the card's floor during the run, run_plan is sent
 Ctrl+C (every robot stops) and the run ends as it would on Ctrl+C, with the upload.
 """
-VERSION = "2026-11-16vp"   # (Nick 16 Nov) Mission Control's list per robot: a per-robot visit order ('Alpha:P01,P05;Bravo:P11') whose named robot was not found this run no longer stops the run: the robots found run their own lists and the missing one's points are said as not visited (all named robots missing: refused as before); names match whatever their case. Nothing else changed. Before: "2026-11-12e18"   # e18 (Nick 12 Nov decision 4): a robot sent to the nearest readable point (no readable points of its own) has the right of way in the plan (the planner's priority_first: the others are planned round it) (MIRLT_LOST_PRIORITY=0: as e17). Before: "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
+VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov): the wiggle-first binding reads every camera the run uses (bind_side); Visit points warns loudly about a listed point outside every camera of the run (visit_orders, visit_order.json "warning"; MIRLT_VISIT_UNSEEN=quiet: the NOTE only); slow leg ends near an edge for visit tours (planner edge_slow_room_cm); the card-full refusal says exactly how to free space; the summary carries a crash and the stops not reached. Before: "2026-11-16vp"   # (Nick 16 Nov) Mission Control's list per robot: a per-robot visit order ('Alpha:P01,P05;Bravo:P11') whose named robot was not found this run no longer stops the run: the robots found run their own lists and the missing one's points are said as not visited (all named robots missing: refused as before); names match whatever their case. Nothing else changed. Before: "2026-11-12e18"   # e18 (Nick 12 Nov decision 4): a robot sent to the nearest readable point (no readable points of its own) has the right of way in the plan (the planner's priority_first: the others are planned round it) (MIRLT_LOST_PRIORITY=0: as e17). Before: "2026-11-12e17"   # e17 (Nick 12 Nov): the tracking-rate frames kept at 4 a second by default (doe_loop.frames_rates; MIRLT_FRAMES_HZ=12 or =before the old 12 / 10). Before: "2026-11-11e16"   # e16 (Pi audit): the tracking-rate frames' rate is a setting (MIRLT_FRAMES_HZ: pictures a second kept per camera; default unchanged, 12 overhead / 10 side; clips and stills around events are kept at any rate). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): each tag's turn on its robot remembered across runs (tag_heading_store, <conf dir>/tag_headings.json; a dry run's own with --tag-heading-store): the binding's patient heading check gets it, a run with no binding starts from it, tags.json carries yaw_state (measured / remembered / motion / unknown) so run_plan never straightens on an unverified raw heading, run_plan records what it re-learns, free roam's proof drive is harvested after the run; --sim-hc-loss (the heading check's tag lost); MIRLT_TAG_HEADING_MEMORY=0 per run only. Before: "2026-11-10e14"   # e14: robot finding by motion inside the binding (dry: the simulator's own cameras drawn from its true poses); the readable area chosen by light and tag (readmap_store; free roam where every tag of the run reads: readmap_roam.json), each run's own evidence kept with its light; the battery floor from the site / Mission Control passed to run_plan; --sim-light, --readmap-store, --sim-tagless; e13's separate discovery step behind MIRLT_CAMERA_DISCOVERY=e13. 2026-11-10e13 (e13): school free roam planned inside the readable area (--readable-map); the camera check before a tags run (camera_feed); --sim-plain-roofs; tracked for the sleep 10 min after a run. 2026-11-10a (e12): the camera self-check at the start of a tags run (camera_selfcheck.py; --no-camera-check). No version string before
 
 import argparse
 import datetime as dt
@@ -328,6 +328,9 @@ def visit_orders(args, robots, out):
     for l, why in sorted(flagged.items()):
         say("VISIT ORDER: %s: %s%s" % (l, why, "" if keep else " (the page's 'try unreadable points anyway', or --visit-keep-unreadable, "
                                                                 "keeps it)"))
+    warning = unseen_warning(args, final, flagged) if keep else ""
+    if warning:
+        say(warning)
     for n in robots:
         if n in final:
             say("VISIT ORDER %s: %s" % (n, " -> ".join(final[n]) or "(nothing left to visit)"))
@@ -336,11 +339,38 @@ def visit_orders(args, robots, out):
     if out:
         with open(os.path.join(out, "visit_order.json"), "w") as f:
             json.dump({"asked": args.visit_order, "lists": lists, "orders": final, "flagged": flagged,
-                       "kept_unreadable": keep}, f, indent=1)
+                       "kept_unreadable": keep, "warning": warning, "cameras": run_camera_words(args)}, f, indent=1)
     if not any(final.values()):
         raise SystemExit("NOT STARTED: every point in the order is outside the area the camera reads (%s). Nothing "
                          "moved. Keep them anyway with 'keep them' (--visit-keep-unreadable)." % ", ".join(sorted(flagged)))
     return {n: v for n, v in final.items()}
+
+
+def run_camera_words(args):
+    """Which cameras this run uses, in the page's words."""
+    side_off = bool(getattr(args, "no_side", False))
+    return "camera 1 only (camera 2 is off for this run)" if side_off else "camera 1 and camera 2"
+
+
+def unseen_warning(args, final, flagged):
+    """(e23, school 18 Nov 14:30: Bravo was sent to P26 and P23 in the half no camera of the run read; it drove 98 cm
+    on its wheels alone and was held) One loud line, for the run log and Mission Control, naming every listed point
+    outside every camera the run uses, whose list it is on, and what to do. "" when there is none, or
+    MIRLT_VISIT_UNSEEN=quiet (the NOTE lines only, as before)."""
+    if not flagged or SG_().value("MIRLT_VISIT_UNSEEN") == "quiet":
+        return ""
+    who = {}
+    for n, labs in final.items():
+        for l in labs:
+            if l in flagged and l not in who.setdefault(n, []):
+                who[n].append(l)
+    if not who:
+        return ""
+    return ("WARNING: POINTS NO CAMERA OF THIS RUN CAN SEE: %s. This run uses %s. A robot sent there drives on its "
+            "wheels alone and is held when its position doubt reaches the edge rule, so these points may not be "
+            "reached. Before pressing Start again: switch camera 2 on, or take these points off the list. They stay "
+            "in this run because 'try unreadable points anyway' is ticked." % (
+                "; ".join("%s: %s" % (n, ", ".join(ls)) for n, ls in sorted(who.items())), run_camera_words(args)))
 
 
 VISIT_DWELL_S = 8.0      # (e11, Jay-Sun 9 Nov, Experiment A tours) the stop at each point of a chosen order: his number
@@ -495,6 +525,17 @@ def build(args, out):
         say("VISIT DRIVES: %s" % ("each leg in one go (no stops between points)" if ck <= 0 else
                                   "pieces of at most %.0f cm" % over["chunk_cm"]))
     over["motion"] = args.motion       # (5 Nov) stop-turn-drive (default) or curves at the corners
+    if getattr(args, "visit_order", "") and SG_().flag("MIRLT_EDGE_SLOW_END"):
+        # (e23, school 18 Nov 17:54) Visit points in an order: the last part of a leg that ends inside the edge rule's
+        # room is driven slowly (safety_rules.slow_end_room_cm: the derived clearance at the tour's speed plus what it
+        # drives in the oldest fix a robot accepts); the re-plans inherit it through the plan's settings
+        import safety_rules as SR_
+        v_ = float(getattr(args, "visit_speed_cms", 0.0) or 10.0)
+        over["edge_slow_room_cm"] = SR_.slow_end_room_cm(v_, getattr(args, "tracking_", "tags") or "tags")
+        over["edge_slow_cms"] = SR_.slow_end_cms()
+        if over["edge_slow_cms"] < v_:
+            say("SLOW ENDS: a leg that ends within %.1f cm of an edge or keep-out is finished at %.0f cm/s (the tour "
+                "drives at %.0f cm/s)" % (over["edge_slow_room_cm"], over["edge_slow_cms"], v_))
     if LOST_PRIORITY and RESCUED and not over.get("priority_first"):
         # (e18, Nick 12 Nov decision 4) recovering a robot with no readable points is high priority: it is planned first,
         # the others round it (they move out of its way)
@@ -527,6 +568,20 @@ def build(args, out):
     if bad:
         raise SystemExit("Plan refused: %s" % bad)
     return mm, plan, mp, pp
+
+
+# (e23, school 18 Nov 12:30: "Free space first: ./run-fleet-pi.sh space" only SHOWS the space; nothing had ever been
+# uploaded there, so clean-uploaded had nothing to delete) exactly what to type, in order; nothing is deleted
+FREE_SPACE_STEPS = ("To free space (nothing is deleted): 1. in a terminal on the Pi type: cd ~/alvik-fleet-capstone   "
+                    "2. then type: ./run-fleet-pi.sh space --move   (it moves finished run folders from the card to "
+                    "the USB drive, leaves a link in their place, and prints the free space after)   3. press Start "
+                    "again. If it says there is nothing to move or no USB drive: ./run-fleet-pi.sh clean-uploaded "
+                    "lists the runs GitHub already has, and adding --yes deletes only those.")
+
+
+def SG_():
+    import safety_group as SG
+    return SG
 
 
 def start_bridge(args, out, mp, cal, scal, stream, side_stream):
@@ -881,7 +936,8 @@ def wiggle_first(args, out):
         import calib_run as CRN
         rec = WB.run_for_mission(args.site_, slots, os.path.join(out, "bind"), stream=args.stream,
                                  calib=args.calib or os.path.join(tc, "overhead.json"), ips=args.robot,
-                                 rm=run_readmap(args, None), heading_store=heading_store_path(args, out))
+                                 rm=run_readmap(args, None), heading_store=heading_store_path(args, out),
+                                 side=bind_side(args, tc))
     except (Exception, SystemExit) as e:   # noqa: BLE001  (BindError, RunEnd, the port in use)
         say("NOT STARTED: the wiggle-first binding did not finish: %s. To run with the typed tag ids instead: "
             "--binding fixed (or the site's tags.binding \"fixed\")." % e)
@@ -900,6 +956,17 @@ def wiggle_first(args, out):
         say("NAMES in this run only (the robots are not renamed: tags.rename_to_slot false): %s" % ", ".join(
             "%s is %s" % kv for kv in sorted(args.aliases_.items())))
     return 0
+
+
+def bind_side(args, tc):
+    """(e23) (camera 2's stream, its model file) for the wiggle-first binding when THIS RUN uses camera 2 (the same
+    rule as the run's own bridge: not --no-side / cameras.side.use false, and the setup saved its model), else None."""
+    if getattr(args, "no_side", False):
+        return None
+    scal = getattr(args, "side_calib", None) or os.path.join(tc, "side.json")
+    if not os.path.exists(scal):
+        return None
+    return (args.side_stream, scal)
 
 
 def stop_lead_specs(args, out):
@@ -1511,8 +1578,7 @@ def run(args):
     say(guard.words(frames_on=not args.no_frames))
     st0 = guard.state()
     if st0["stop"]:
-        say("NOT STARTED: %s. Nothing moved. Free space first: ./run-fleet-pi.sh space, then "
-            "./run-fleet-pi.sh clean-uploaded" % st0["why"])
+        say("NOT STARTED: %s. Nothing moved. %s" % (st0["why"], FREE_SPACE_STEPS))
         return 3
     if (args.site_ or {}).get("attended_only") and not args.dry:
         say("ATTENDED ONLY (Jay-Sun 5 Nov): at school the robots drive only while Jay-Sun is in the room")
@@ -2113,6 +2179,12 @@ def summarise(out, sess, frames, cond):
              robots_out=rs.get("robots_out"), plans_refused=rs.get("plans_refused"),
              sensor_stops=len(rs.get("sensor_stops") or []), confirm_checks=rs.get("confirm_checks"),
              battery=rs.get("battery"), start_checks=rs.get("start_checks"))
+    if rs.get("crash"):
+        s["crash"] = rs["crash"]          # (e23) a program error in the run: said as a crash, never "done"
+    if rs.get("points_not_reached"):
+        s["points_not_reached"] = rs["points_not_reached"]      # (e23) stops the robot was not at
+    if rs.get("plan_ahead"):
+        s["plan_ahead"] = rs["plan_ahead"]
     # keep going and confidence at every point (2026-11-03)
     s.update(on_problem=rs.get("on_problem"), kept_going=rs.get("kept_going") or [], points=rs.get("points") or [],
              points_skipped=rs.get("points_skipped") or [], points_reassigned=rs.get("points_reassigned") or [])

@@ -50,7 +50,11 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-VERSION = "camera-discovery-2026-11-10e14"   # e14 (10 Nov): a wiggle on the spot where a stroke is not safe (the
+VERSION = "camera-discovery-2026-11-19e23"   # e23 (school 18 Nov, cause B: two starts hung for 4-5 min inside
+#   cv2.VideoCapture with no message): find_cameras probes only USB capture nodes no other program holds (the
+#   recorder's cameras are its streams; the Pi's codec nodes are not cameras), opens each in a child process with a
+#   time limit from the measured open times, and says what it looked for, found and skipped. MIRLT_CAMERA_PROBE=e13:
+#   the probe as before. Before: "camera-discovery-2026-11-10e14"   # e14 (10 Nov): a wiggle on the spot where a stroke is not safe (the
 #   robot's own footprint only: analyse_wiggle gives its position, no heading); each stroke's END position (end_cm), so a
 #   drive step can be followed by motion (motion_find.py); robots found by motion at the start of every run.
 #   e13: the first version (coverage, strokes, typed names a first guess)
@@ -168,9 +172,147 @@ def v4l_cameras():
     return out
 
 
-def find_cameras():
-    """Every camera this Pi can open: the recorder's streams (it holds the devices while it records), then devices
-    it does not hold. [dict(name, src, kind)]."""
+# (e23) How long one camera may take to open. MEASURED: 153 opens in the school's 25 run logs of 16 and 18 Nov (the gap
+# between OpenCV's own warnings; docs/results/e23-school-fixes/open_times.json): median 0.64 s, 95th percentile 0.95 s,
+# longest that finished 1.59 s; the two that hung never finished (4 min 20 s and about 5 min).
+OPEN_LONGEST_S = 1.59
+OPEN_FACTOR = 3.0         # [chosen] the limit is this many times the longest open on record (4.8 s from the school's
+#                           logs). No DOE: a hung open never returns, so anything a few times the longest real open
+#                           separates them; each Pi's own opens raise the record (open_record) and so the limit
+CHILD_START_S = 20.0      # [chosen] a child Python may take this long to load OpenCV before its open is timed (the
+#                           hang was in the open, not the import; a throttled Pi 5 loads it in 1-3 s). No DOE
+OPEN_RECORD = "camera_open_times.json"
+
+_OPEN_CHILD = (
+    "import sys, time\n"
+    "import cv2\n"
+    "sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
+    "t0 = time.time()\n"
+    "cap = cv2.VideoCapture(sys.argv[1])\n"
+    "ok = bool(cap.isOpened() and cap.read()[0])\n"
+    "cap.release()\n"
+    "sys.stdout.write('%s %.3f\\n' % ('ok' if ok else 'no', time.time() - t0)); sys.stdout.flush()\n")
+
+
+def probe_mode():
+    """usb (e23, the default): only USB capture nodes nobody holds, each opened in a child with a time limit;
+    e13: every /dev/video first node opened in this process (the way that hung on 18 Nov)."""
+    return "e13" if os.environ.get("MIRLT_CAMERA_PROBE", "usb") == "e13" else "usb"
+
+
+def open_record_path():
+    return os.path.join(os.environ.get("MIRLT_CONF_DIR") or os.path.expanduser("~/.config/mirlt"), OPEN_RECORD)
+
+
+def open_limit_s(path=None):
+    """The time limit for one camera open: OPEN_FACTOR x the longest open that ever finished (the school's logs, and
+    this Pi's own record once it has one)."""
+    longest = OPEN_LONGEST_S
+    try:
+        with open(path or open_record_path()) as f:
+            longest = max(longest, float(json.load(f).get("longest_s") or 0.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return round(OPEN_FACTOR * longest, 2)
+
+
+def note_open(seconds, path=None):
+    """This Pi's own record of how long a finished open took (the limit follows the longest)."""
+    path = path or open_record_path()
+    try:
+        try:
+            with open(path) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d["n"] = int(d.get("n") or 0) + 1
+        d["longest_s"] = round(max(float(d.get("longest_s") or 0.0), float(seconds)), 3)
+        d["last_s"] = round(float(seconds), 3)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(d, f)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def is_usb_node(sysdir):
+    """A /sys/class/video4linux/videoN that belongs to a USB camera (its device link runs through a USB bus). The
+    Pi's own codec / ISP nodes (bcm2835-codec, pispbe, rpivid ...) sit on the platform bus: not cameras."""
+    try:
+        return "/usb" in os.path.realpath(os.path.join(sysdir, "device"))
+    except OSError:
+        return False
+
+
+def held_by(dev, proc="/proc"):
+    """[(pid, program)] of the processes that have this device node open (the recorder holds its cameras): read from
+    /proc/<pid>/fd, never by opening the camera. Other users' processes cannot be read and are not listed."""
+    out = []
+    try:
+        want = os.path.realpath(dev)
+        pids = [n for n in os.listdir(proc) if n.isdigit()]
+    except OSError:
+        return out
+    for n in pids:
+        if int(n) == os.getpid():
+            continue
+        fd = os.path.join(proc, n, "fd")
+        try:
+            if any(os.path.realpath(os.path.join(fd, x)) == want for x in os.listdir(fd)):
+                try:
+                    with open(os.path.join(proc, n, "cmdline"), "rb") as f:
+                        cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+                except OSError:
+                    cmd = ""
+                prog = next((os.path.basename(x) for x in cmd.split(" ") if x.endswith(".py")), cmd.split(" ")[0][-30:])
+                out.append((int(n), prog or "?"))
+        except OSError:
+            continue
+    return out
+
+
+def timed_open(dev, limit_s=None, child=None, start_s=CHILD_START_S):
+    """Open one camera in a CHILD process and read one picture, with a time limit: (state, seconds). state: "ok",
+    "no" (it would not open or gave no picture), "timeout" (no answer within limit_s: the child is killed, this
+    program carries on; the 18 Nov hang), "error". The limit starts when the child has loaded OpenCV ("ready")."""
+    import select
+    import subprocess
+    limit_s = open_limit_s() if limit_s is None else float(limit_s)
+    cmd = list(child) if child else [sys.executable, "-c", _OPEN_CHILD]
+    try:
+        p = subprocess.Popen(cmd + [dev], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return "error", 0.0
+
+    def line(wait_s):
+        r, _, _ = select.select([p.stdout], [], [], max(0.0, wait_s))
+        return p.stdout.readline().strip() if r else None
+    t_start = time.time()
+    try:
+        first = line(start_s)
+        if first is None:
+            return "timeout", round(time.time() - t_start, 2)
+        t0 = time.time()
+        if first != "ready":
+            return "error", 0.0
+        ans = line(limit_s)
+        took = round(time.time() - t0, 3)
+        if ans is None:
+            return "timeout", took
+        st = ans.split(" ")[0]
+        return ("ok" if st == "ok" else "no"), took
+    finally:
+        if p.poll() is None:
+            p.kill()
+        try:
+            p.wait(timeout=2)
+        except Exception:  # noqa: BLE001
+            pass
+        p.stdout.close()
+
+
+def find_cameras_e13():
+    """(before e23, kept: MIRLT_CAMERA_PROBE=e13) Every /dev/video first node opened in this process, no time limit."""
     cams = [dict(name=n, src=s, kind="stream") for n, s in recorder_streams()]
     held = len(cams)
     for n, dev in v4l_cameras():
@@ -181,6 +323,53 @@ def find_cameras():
             if not ok:
                 continue                # held by the recorder: its stream above is the same camera
         cams.append(dict(name=n, src=dev, kind="v4l"))
+    return cams
+
+
+def find_cameras(log=None, opener=None, nodes=None, streams=None, holders=None, limit_s=None):
+    """Every camera this Pi can open: the recorder's streams (it holds the devices while it records), then USB
+    cameras nothing else holds. [dict(name, src, kind)]. (e23) Says what it is doing and what it found or skipped
+    (log, default: printed); only USB capture nodes are tried, a node another program holds is never opened, and each
+    open runs in a child process with a time limit (timed_open), so a camera that blocks cannot hang the start.
+    opener / nodes / streams / holders: for tests (the same calls, given)."""
+    if probe_mode() == "e13" and opener is None and nodes is None:
+        return find_cameras_e13()
+    say_ = log or (lambda w: print(w, flush=True))
+    say_("LOOKING FOR CAMERAS: the recorder's streams, then USB cameras nothing else holds ...")
+    t_all = time.time()
+    cams = [dict(name=n, src=s, kind="stream") for n, s in (recorder_streams() if streams is None else streams)]
+    limit = open_limit_s() if limit_s is None else float(limit_s)
+    skipped = []
+    if nodes is None:
+        nodes = []
+        for n, dev in v4l_cameras():
+            sysdir = os.path.join("/sys/class/video4linux", os.path.basename(dev))
+            if not is_usb_node(sysdir):
+                skipped.append("%s (%s): not a USB camera" % (dev, n))
+                continue
+            nodes.append((n, dev))
+    for n, dev in nodes:
+        who = (held_by(dev) if holders is None else holders(dev))
+        if who:
+            skipped.append("%s (%s): held by %s (its stream is the same camera)" % (
+                dev, n, ", ".join("%s pid %d" % (pr, pid) for pid, pr in who[:2])))
+            continue
+        state, took = (opener or timed_open)(dev, limit)
+        if state == "ok":
+            cams.append(dict(name=n, src=dev, kind="v4l", open_s=took))
+            if opener is None:
+                note_open(took)
+        elif state == "timeout":
+            skipped.append("%s (%s): DID NOT OPEN within %.1f s (limit: %.0f x the longest open on record): left out "
+                           "of this run; unplug it and plug it in again if it is needed" % (dev, n, limit, OPEN_FACTOR))
+        else:
+            if state == "no" and opener is None:
+                note_open(took)
+            skipped.append("%s (%s): would not open or gave no picture (%.1f s)" % (dev, n, took))
+    say_("CAMERAS FOUND (%.1f s): %s" % (time.time() - t_all, ", ".join(
+        "%s (%s)" % (c["name"], "the recorder's stream" if c["kind"] == "stream" else c["src"]) for c in cams) or "none"))
+    for w in skipped:
+        say_("  skipped " + w)
     return cams
 
 

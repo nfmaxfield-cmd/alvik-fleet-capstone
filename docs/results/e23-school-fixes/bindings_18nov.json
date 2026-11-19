@@ -1,0 +1,104 @@
+{
+ "what": "The roof tag that turned with each robot in every two-robot binding of 18 Nov 2026 (the runs' own bind/binding.json)",
+ "runs": [
+  {
+   "run": "20261118-132919-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-134340-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Bravo": 4,
+    "Alpha": 3
+   }
+  },
+  {
+   "run": "20261118-143047-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-150347-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-164246-visit-robots",
+   "tags": {
+    "AL-EB54": 4,
+    "AL-E7DC": 3
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-170939-visit-robots",
+   "tags": {
+    "AL-EB54": 4,
+    "AL-E7DC": 3
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-180601-visit-robots",
+   "tags": {
+    "AL-E7DC": 3,
+    "AL-EB54": 4
+   },
+   "slots": {
+    "Alpha": 3,
+    "Bravo": 4
+   }
+  },
+  {
+   "run": "20261118-183130-visit-robots",
+   "tags": {
+    "AL-EB54": 4,
+    "AL-E7DC": 3
+   },
+   "slots": {
+    "Bravo": 4,
+    "Alpha": 3
+   }
+  }
+ ]
+}

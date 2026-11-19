@@ -79,6 +79,17 @@ DEFAULT_SETTINGS = {
     # at its first safe plan, and the robots carrying on are only told to drive replan_first_budget_s ahead (the new
     # plan is usually ready in 0.03 s; when the search takes longer they hold at that point until it is).
     "replan_first_safe": True,
+    # (e23, school 18 Nov: 15 s a re-plan for 20 + 20 points in a fixed order) a re-plan plans only this many of each
+    # robot's next points when its list is in a fixed order (ahead_split); the rest ride along untouched in the plan's
+    # "later" and come in at the next re-plan. 0: the whole list every time (before e23). run_plan picks the number
+    # from the planning time it measures (Coordinator.plan_ahead_k)
+    "plan_ahead_points": 0,
+    # (e23, school 18 Nov 17:54: a 62 cm leg at 15 cm/s to a point 19.7 cm from the long edge ended 11 cm too far) the
+    # last part of a travel leg whose end lies inside this room of an edge or keep-out is driven at edge_slow_cms: by
+    # how far the end is inside the room. 0: off (before e23). run_plan / mission_run set it from the measured numbers
+    # (safety_rules.slow_end_room_cm)
+    "edge_slow_room_cm": 0.0,
+    "edge_slow_cms": 5.0,
     "replan_first_budget_s": 0.5,   # chosen: above the median first-plan time (0.015-0.03 s) with room for this
                                     # machine being busy; below it, robots hold more often. DOE note: 0.25 / 0.5 /
                                     # 1.0 s over the 20-re-plan bench and dry runs with brick drops (robots held,
@@ -733,9 +744,30 @@ def _travel(pose, goal, grid, s, task, what):
         hd = math.atan2(b[1] - a[1], b[0] - a[0])
         if abs(G.wrap(hd - h)) >= math.radians(0.5):
             out.append(turn_prim([a[0], a[1], h], hd, s, task=task))
-        out += drive_prims(a, b, s, task=task)
+        d_slow = slow_end_cm(grid, b, s) if b is pts[-1] else 0.0
+        if d_slow > 0.0 and L - d_slow >= SLOW_SPLIT_MIN_CM:
+            mid = b - (b - a) / L * d_slow                 # (e23) fast to the room's border, slow from there
+            out += drive_prims(a, mid, s, task=task)
+            out += drive_prims(mid, b, s, speed=s.edge_slow_cms, task=task)
+        elif d_slow > 0.0:
+            out += drive_prims(a, b, s, speed=s.edge_slow_cms, task=task)
+        else:
+            out += drive_prims(a, b, s, task=task)
         h = hd
     return out
+
+
+SLOW_SPLIT_MIN_CM = 5.0   # a fast part shorter than this is not worth its own step: the whole leg goes slowly (the
+#                           plan's shortest sensible drive, as its chunks' minimum). No DOE: bookkeeping
+
+
+def slow_end_cm(grid, goal, s):
+    """(e23) How much of a leg's end is driven slowly: how far its end lies inside edge_slow_room_cm of the nearest
+    edge, keep-out or obstacle (0: not inside, or the switch is off, or the slow speed is not slower)."""
+    room = float(s.get("edge_slow_room_cm", 0.0) or 0.0)
+    if room <= 0.0 or float(s.get("edge_slow_cms", 0.0) or 0.0) >= float(s.cruise_cms) - 1e-6:
+        return 0.0
+    return max(0.0, room - float(grid.point_clear(goal)))
 
 
 def _fillet(P, h1, h2, r, Lin, Lout, grid):
@@ -2265,12 +2297,51 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None, t_now=None):
             "clock0": float(plan.get("mission_t0_s", 0.0) or 0.0) + float(t_now or 0.0)}
 
 
+def _point_key(v):
+    """The production point an item belongs to ('point P07' for its goto and for its 'at point P07' stop), or None."""
+    if not isinstance(v, dict):
+        return None
+    lab = str(v.get("label") or "")
+    if lab.startswith("at point "):
+        return lab[3:]
+    return lab if lab.startswith("point ") else None
+
+
+def ahead_split(items, k):
+    """(e23) (now, later): the first k production points of a fixed-order list with everything that stands between
+    them, and the rest (the trip home included) for a later re-plan. Nothing is split when k is 0, when the list holds
+    anything but point items and a home trip (boards, arcs, feels), or when it has no more than k points."""
+    k = int(k or 0)
+    if k <= 0 or not items:
+        return list(items), []
+    if any(not isinstance(v, dict) or (_point_key(v) is None and str(v.get("label") or "") != "home") for v in items):
+        return list(items), []
+    seen, cut = [], len(items)
+    for j, v in enumerate(items):
+        key = _point_key(v)
+        if key is not None and (not seen or seen[-1] != key):
+            if len(seen) == k:
+                cut = j
+                break
+            seen.append(key)
+    else:
+        return list(items), []                 # k points or fewer: the home trip stays with them
+    return list(items[:cut]), list(items[cut:])
+
+
+def later_of(entry):
+    """(e23) The items a plan entry carries for later (not planned yet)."""
+    return list((entry or {}).get("later") or [])
+
+
 def obstacle_replan(dec):
     """The slow half of obstacle_event: plan everyone's remaining work from the
     decision (committed steps first). Returns (new plan, events)."""
     m2, plan, states, s = dec["m2"], dec["plan"], dec["states"], dec["s"]
     rest, keep, events, budget_ticks = dec["rest"], dec["keep"], dec["events"], dec["budget_ticks"]
     names = list(plan["robots"])
+    k_ahead = int(s.get("plan_ahead_points", 0) or 0)
+    held_back = {}                     # (e23) robot -> its items left for a later re-plan
     # 3. new jobs: committed steps, then the rest of the tasks from the hold pose
     jobs = []
     for n in names:
@@ -2295,6 +2366,18 @@ def obstacle_replan(dec):
             jobs.append(Job(n, st["pose"], pend["visits"], pend["park"], FM.pose_in(r_map["park"]),
                             start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=pend["task_offset"],
                             any_order=tasks["any_order"], clock0=dec.get("clock0", 0.0)))
+            if later_of(old):
+                held_back[n] = later_of(old)       # (e23) its later points stay as they are
+            continue
+        if not later and later_of(old):
+            # (e23) it has done everything planned so far and its list goes on: the next points of it, from here
+            nxt_items, rest_items = ahead_split(later_of(old), k_ahead)
+            if rest_items:
+                held_back[n] = rest_items
+            off_ = int(old.get("task_offset", 0) or 0) + len([v for v in old.get("visit_order") or [] if v != "park"])
+            jobs.append(Job(n, st["pose"], nxt_items, tasks["park"] and not rest_items, FM.pose_in(r_map["park"]),
+                            start_tick=budget_ticks, frozen=frozen, task_offset=off_, any_order=False,
+                            clock0=dec.get("clock0", 0.0)))
             continue
         if not later:
             jobs.append(Job(n, st["pose"], [], False, hold, start_tick=budget_ticks, frozen=frozen))
@@ -2332,7 +2415,15 @@ def obstacle_replan(dec):
             it["arc"]["a0_deg"] = left[0]["arc"]["a0_deg"]
             it["arc"]["sweep_deg"] = round(sum(x["arc"]["sweep_deg"] for x in left), 3)
             remaining = [it] + remaining[1:]
-        jobs.append(Job(n, st["pose"], remaining, tasks["park"], FM.pose_in(r_map["park"]),
+        park_ = tasks["park"]
+        if later_of(old) or (k_ahead and not tasks["any_order"]):
+            # (e23) a fixed-order list: only its next k_ahead points are planned now; the rest ride in "later"
+            remaining, rest_items = ahead_split(list(remaining) + later_of(old),
+                                                k_ahead if not tasks["any_order"] else 0)
+            if rest_items:
+                held_back[n] = rest_items
+                park_ = False
+        jobs.append(Job(n, st["pose"], remaining, park_, FM.pose_in(r_map["park"]),
                         start_tick=budget_ticks, lead=lead, frozen=frozen, task_offset=task_i,
                         any_order=tasks["any_order"], clock0=dec.get("clock0", 0.0)))
     over2 = dict(s)
@@ -2341,6 +2432,9 @@ def obstacle_replan(dec):
                         t_limit_s=0.45 * s.replan_budget_s, allow_strand=True,
                         stop_at_first=bool(s.replan_first_safe), prefer_order=plan.get("priority_order"))
     newplan["mission_t0_s"] = round(dec.get("clock0", 0.0), 2)
+    for n, items in held_back.items():
+        if n in newplan["robots"]:
+            newplan["robots"][n]["later"] = copy.deepcopy(items)
     for n in newplan.get("stranded", []):
         ev = next(e for e in events if e["robot"] == n)
         ev["reason"] += "; no safe route yet, stays put until the next re-plan"

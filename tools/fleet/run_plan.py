@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov, Jay-Sun's Visit points runs): finish_replan no longer crashes when a robot rejoined while a plan made without it was worked out (it plans again with it); any exception in the run is "crashed: <why>", never "done"; the move check (fast_done) judges a step from where it STARTED, takes a step whose own pose ended at its target as moved, and counts the camera only when its picture is newer than the step's end (late_move_check logs what the camera says afterwards); fixed-order lists are planned a few points ahead (MIRLT_PLAN_AHEAD) and the improvement try is skipped when the first plan was over budget; a point is credited only when the robot's best position is within its tolerance (else "not reached", MIRLT_POINT_CREDIT); a fix the robot would refuse as too old is carried forward by its own motion since the picture (MIRLT_OLD_FIX); the last part of a leg that ends inside the edge rule's room is driven slowly (MIRLT_EDGE_SLOW_END). Before: "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_MONITOR = "2026-11-12mc"   # (Mission Control build, 12 Nov) write_live ticks the Pi efficiency monitor's feed (monitor_feed.json: the loop period; read-only)
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
@@ -57,6 +57,13 @@ NEVER_STILL = SG.flag("MIRLT_NEVER_STILL")         # (e18, Nick 12 Nov decision 
 LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")     # (e18, 4) a robot in a lost robot's recovery path steps aside
 BLIND_ALLOW = SG.flag("MIRLT_BLIND_ALLOW")         # (e18, 5) each robot's measured odometry trust
 SAVE_CAL_AT_END = SG.flag("MIRLT_SAVE_CAL_AT_END")  # (e18, 6) the trust records saved at any end
+# (e23, school 16 / 18 Nov) each read once here; the old way of each stays behind its switch (safety_group.py)
+MOVE_CHECK_E23 = SG.value("MIRLT_MOVE_CHECK") != "e22"          # the move check from the step's own start and end
+IMPROVE_SKIP_OVER = SG.flag("MIRLT_IMPROVE_SKIP_OVER")         # no improvement try after a plan that was over budget
+POINT_CREDIT_REACHED = SG.value("MIRLT_POINT_CREDIT") != "always"   # a stop is credited only where the robot is there
+OLD_FIX_PROJECT = SG.value("MIRLT_OLD_FIX") != "send"         # a fix too old for the robot is carried forward
+EDGE_SLOW_END = SG.flag("MIRLT_EDGE_SLOW_END")                 # the last part of a leg ending in the edge rule's room
+PLAN_AHEAD_NEAR = SG.value("MIRLT_PLAN_AHEAD") != "all"        # fixed-order lists planned a few points ahead
 CREEP_MAX_CM = 8.0       # (e18) as freeroam_core.CREEP_MAX_CM (CHOSEN there; DOE noted there)
 CREEP_MIN_CM = 2.0
 CREEP_UNC0_CM = 5.0
@@ -665,11 +672,35 @@ class Coordinator:
         p0 = getattr(b, "step_pose0", {}).get(i)
         wheel = math.hypot(b.pose[0] - p0[0], b.pose[1] - p0[1]) if (p0 and b.pose) else None
         h = getattr(b, "cam_hist", None) or []
-        moved, fresh = None, bool(h and getattr(b, "cam_t", None) is not None and t - b.cam_t <= self.blind_after(b))
-        if fresh:
-            before = [q for q in h if q[1] <= st["t_started"]]
-            q0 = before[-1] if before else h[0]
-            moved = math.hypot(h[-1][2] - q0[2], h[-1][3] - q0[3])
+        L_plan, end_cm, cam_new = L, None, None
+        if MOVE_CHECK_E23:
+            # (e23, school 18 Nov: 18 of 19 "did NOT move" verdicts and 5 of 10 "not physically possible" were false)
+            # 1. the step is judged from where the robot STARTED it, along the step's own line: a new plan's first
+            #    step is drawn from where the robot stood when planning began, and it had rolled 10-18 cm on since
+            #    (so 7 cm left of a "24 cm" step was done "impossibly" fast);
+            # 2. a step whose own pose ended at its target is done (observe.at_target: the target within the robot's
+            #    own stated +- and the firmware's arrival window);
+            # 3. the camera's vote counts only when its PICTURE is newer than the step's end. At the moment "done"
+            #    arrives the newest picture is always older (0.15-0.9 s on 18 Nov), so it showed part of the step and
+            #    out-voted the wheels (weight 3 of 7.5); late_move_check judges with the camera once it has caught up.
+            if p0:
+                ux, uy = (stp["to"][0] - stp["from"][0]) / max(L, 1e-6), (stp["to"][1] - stp["from"][1]) / max(L, 1e-6)
+                L = max(0.0, min(L, (stp["to"][0] - p0[0]) * ux + (stp["to"][1] - p0[1]) * uy))
+            if b.pose:
+                end_cm = math.hypot(stp["to"][0] - b.pose[0], stp["to"][1] - b.pose[1])
+            cam_new = [q for q in h if q[0] > t]
+            fresh = bool(cam_new)
+            moved = None
+            if fresh:
+                before = [q for q in h if q[0] <= st["t_started"]]
+                q0 = before[-1] if before else h[0]
+                moved = math.hypot(cam_new[-1][2] - q0[2], cam_new[-1][3] - q0[3])
+        else:
+            moved, fresh = None, bool(h and getattr(b, "cam_t", None) is not None and t - b.cam_t <= self.blind_after(b))
+            if fresh:
+                before = [q for q in h if q[1] <= st["t_started"]]
+                q0 = before[-1] if before else h[0]
+                moved = math.hypot(h[-1][2] - q0[2], h[-1][3] - q0[3])
         ev = getattr(b, "raw_ev", None) or {}
         acc = None
         ax = [a for tt, a, fr in ev.get("rows", []) if tt >= st["t_started"]]
@@ -677,18 +708,33 @@ class Coordinator:
             a = sorted(ax)
             acc = max(abs(v - a[len(a) // 2]) for v in a) >= 0.03
         fr = [f_ for tt, a, f_ in ev.get("rows", []) if tt >= st["t_started"] and f_ is not None and 0 < f_ < 60]
+        sd = None
+        try:
+            sd = float((b.follow or {}).get("sd")) if (b.follow or {}).get("sd") not in (None, "") else None
+        except (TypeError, ValueError):
+            sd = None
         out = OB.move_outcome(L, took, wheel_cm=wheel, accel_rolling=acc,
                               front_change_cm=(fr[0] - fr[-1]) if len(fr) >= 4 else None,
                               front_expect_cm=(-L if stp.get("reverse") else L) if len(fr) >= 4 else None,
-                              cam_moved_cm=moved, cam_fresh=fresh, robot_info=st.get("info") or "")
+                              cam_moved_cm=moved, cam_fresh=fresh, robot_info=st.get("info") or "",
+                              end_off_cm=end_cm if MOVE_CHECK_E23 else None, own_sd_cm=sd)
+        if MOVE_CHECK_E23 and out["verdict"] == "moved" and L >= OB.MIN_JUDGE_CM:
+            # the camera has its say once a picture newer than this step's end has come (late_move_check)
+            before = [q for q in h if q[0] <= st["t_started"]]
+            if before:
+                b.__dict__.setdefault("late_checks", []).append(dict(
+                    i=i, t_end=t, length_cm=round(L, 1), cam0=(before[-1][2], before[-1][3]), wheel_cm=wheel,
+                    words=out["words"]))
+                del b.late_checks[:-6]
         if out["verdict"] == "moved":
             return False
         self.n_fast_done = getattr(self, "n_fast_done", 0) + 1
         fm = b.__dict__.setdefault("fmem", OB.FailMemory())
         pos = b.pose or stp["from"]
         fm.add(t, "drive", -1 if stp.get("reverse") else 1, L, pos[0], pos[1])
-        self.log("did_not_move", robot=b.name, i=i, took_s=round(took, 3), length_cm=round(L, 1), **{
-            k: v for k, v in out.items() if k != "blind_ok"})
+        self.log("did_not_move", robot=b.name, i=i, took_s=round(took, 3), length_cm=round(L, 1),
+                 planned_cm=round(L_plan, 1), end_off_cm=None if end_cm is None else round(end_cm, 1), **{
+                     k: v for k, v in out.items() if k != "blind_ok"})
         self.say("%s: step %d (%.0f cm) reported done in %.2f s: %s: counted as NOT done; re-planning from where it is "
                  "(never the same step unchanged)" % (b.name, i, L, took, out["words"]))
         if fm.escalate(pos[0], pos[1]):
@@ -700,6 +746,34 @@ class Coordinator:
             self.add_obstacle(ob)
             b.fmem = OB.FailMemory()
         return True
+
+    LATE_CHECK_KEEP_S = 5.0   # a move check not answered by a newer picture within this is dropped (the robot is not
+                              # seen: the blind rules have it). No DOE: bookkeeping
+
+    def late_move_check(self, b, q):
+        """(e23) The camera's say on a step taken as done on the robot's own word: the first picture NEWER than the
+        step's end, against the last picture before it began. The robot may have driven further since, so the camera
+        can only show MORE than the step: less than half of it is real evidence that it did not move (wheels spinning
+        on the spot). Logged and counted (summary "observe.late_not_moved"), said once; the plan is not changed here:
+        the fixes that follow correct the pose and the blind / veer rules act on the difference as before."""
+        tf, t_arr, x, y = q[0], q[1], q[2], q[3]
+        keep = []
+        for c in b.late_checks:
+            if tf <= c["t_end"]:
+                if t_arr - c["t_end"] <= self.LATE_CHECK_KEEP_S:
+                    keep.append(c)
+                continue
+            seen = math.hypot(x - c["cam0"][0], y - c["cam0"][1])
+            ok = seen >= 0.5 * c["length_cm"]
+            self.log("move_check_late", robot=b.name, i=c["i"], length_cm=c["length_cm"], camera_cm=round(seen, 1),
+                     wheel_cm=None if c["wheel_cm"] is None else round(c["wheel_cm"], 1),
+                     picture_after_end_s=round(tf - c["t_end"], 2), agrees=ok)
+            if not ok:
+                self.n_late_not_moved = getattr(self, "n_late_not_moved", 0) + 1
+                self.say("%s: step %d (%.0f cm) was taken as done on its own pose, but the camera's first picture "
+                         "after it shows %.0f cm: its wheels may have slipped; the next fixes correct its pose" % (
+                             b.name, c["i"], c["length_cm"], seen))
+        b.late_checks = keep
 
     def floor_feed(self, b, vals):
         """One RAW row for the floor check: the five front zones, when the robot stands still (no step, no speed)."""
@@ -1147,6 +1221,8 @@ class Coordinator:
                 h.append((float(ev.get("t", now())), now(), float(ev["x"]), float(ev["y"]), src))
                 if len(h) > 40:
                     del h[:-30]
+                if getattr(b, "late_checks", None):
+                    self.late_move_check(b, h[-1])
         t = now()
         for b in self.bots.values():
             ev = b.fix
@@ -1166,10 +1242,68 @@ class Coordinator:
                 b.fix = None
                 b.fix_held = getattr(b, "fix_held", 0) + 1
                 continue
-            self.send(b.name, "fix %d %.2f %.2f %s %.2f %.2f" % (ms, ev["x"], ev["y"], "-" if th is None else "%.2f" % th,
-                                                                ev.get("sigma", 0.5), ev.get("sigma_th", 1.5)))
+            fx, fy, fsig = float(ev["x"]), float(ev["y"]), float(ev.get("sigma", 0.5))
+            if OLD_FIX_PROJECT:
+                pr = self.project_old_fix(b, ev, th, t)
+                if pr is not None:
+                    ms, fx, fy, th, fsig = pr
+            self.send(b.name, "fix %d %.2f %.2f %s %.2f %.2f" % (ms, fx, fy, "-" if th is None else "%.2f" % th,
+                                                                fsig, ev.get("sigma_th", 1.5)))
             b.fix, b.fix_sent_t = None, t
             b.fix_sent += 1
+
+    FIX_MAX_AGE_DEFAULT_S = 1.0   # the firmware's fix_max_age_ms before e21 (params.h); a robot that reports its own
+    #                               value (PARAM fix_max_age_ms) is believed instead. Not chosen here
+    FIX_TRANSIT_S = 0.07          # MEASURED (school 18 Nov, 8,476 pose rows of the busiest run): a message between the Pi
+    #                               and a robot takes up to this long (99th percentile). No DOE: a measurement
+
+    def fix_max_age_s(self, b):
+        try:
+            return float(b.params.get("fix_max_age_ms")) / 1000.0
+        except (TypeError, ValueError, AttributeError):
+            return self.FIX_MAX_AGE_DEFAULT_S
+
+    def pose_interp(self, b, t):
+        """The robot's own pose (x, y, th) at laptop time t from its pose history, between the two rows round t; None
+        when t is outside what the history holds (it is never guessed)."""
+        ph = getattr(b, "pose_hist", None) or []
+        for a, c in zip(ph, ph[1:]):
+            if a[0] <= t <= c[0]:
+                if c[0] - a[0] > 1.0:
+                    return None            # a hole in its reports: no honest in-between
+                f = (t - a[0]) / (c[0] - a[0]) if c[0] > a[0] else 0.0
+                return (a[1] + f * (c[1] - a[1]), a[2] + f * (c[2] - a[2]),
+                        a[3] + f * (((c[3] - a[3] + 180.0) % 360.0) - 180.0))
+        return None
+
+    def project_old_fix(self, b, ev, th, t):
+        """(e23, school 18 Nov 17:54: the bridge stalled 1.5 s, the next pictures were 1.2-1.7 s old when read, the
+        robot refused them as old and drove its last 40 cm to P33 on its wheels alone, 11 cm too far, to 8.9 cm from the
+        long edge) A fix whose picture is older than the robot accepts is not thrown away: the camera's position at
+        the picture's time is carried forward by what the robot's OWN pose did since then, and sent as a fix for its
+        newest pose, its +- widened by the measured odometry drift over that distance (ODO_P95_PER_CM, as an sd).
+        Returns (ms, x, y, th, sigma) or None (not old, or its history does not reach that picture)."""
+        age = t - float(ev["t"])
+        if age <= self.fix_max_age_s(b) - self.FIX_TRANSIT_S or b.pose is None or b.offset is None:
+            return None
+        ph = getattr(b, "pose_hist", None) or []
+        own = self.pose_interp(b, float(ev["t"]))
+        if own is None or not ph:
+            return None
+        nowp = ph[-1]                       # (laptop time of its newest own pose, x, y, th)
+        dx, dy = nowp[1] - own[0], nowp[2] - own[1]
+        dist = math.hypot(dx, dy)
+        sig = math.hypot(float(ev.get("sigma", 0.5)), self.ODO_P95_PER_CM / 2.45 * dist)
+        th2 = None if th is None else ((float(th) + (nowp[3] - own[2]) + 180.0) % 360.0) - 180.0
+        b.old_fix_n = getattr(b, "old_fix_n", 0) + 1
+        if b.old_fix_n == 1 or b.old_fix_n % 50 == 0:
+            self.log("old_fix_carried", robot=b.name, n=b.old_fix_n, age_s=round(age, 2), moved_cm=round(dist, 1),
+                     max_age_s=self.fix_max_age_s(b))
+        if b.old_fix_n == 1:
+            self.say("%s: a camera picture reached the run %.1f s old (the robot takes fixes up to %.1f s old): its "
+                     "position is carried forward by the %.0f cm the robot drove since and sent as a fix for now, "
+                     "instead of being refused" % (b.name, age, self.fix_max_age_s(b), dist))
+        return int(round((nowp[0] - b.offset) * 1000)), float(ev["x"]) + dx, float(ev["y"]) + dy, th2, sig
 
     def lock_close(self, b, ev):
         """(e09, B1 identity) A lock-on fix within tracking_layer.CLOSE_CM of another robot's latest camera spot: the
@@ -1369,6 +1503,7 @@ class Coordinator:
         over["separation_cm"] = max(float(over.get("separation_cm", 0.0)), gate)    # re-plans are made at the gate
         if budget is not None:
             over["replan_budget_s"] = budget
+        over["plan_ahead_points"] = self.plan_ahead_k() if PLAN_AHEAD_NEAR else 0      # (e23)
         if improving:
             over["replan_first_safe"] = False     # the background search for a shorter plan: the full search
         news = [ob] if ob else []
@@ -1404,12 +1539,18 @@ class Coordinator:
                    result=None, error=None, cpu=None,
                    map_keys={self.obstacle_key(o) for o in dec["m2"].get("obstacles", [])})
 
+        slow = float(os.environ.get("MIRLT_SIM_REPLAN_SLOW") or 1.0) if getattr(self.args, "dry_run", False) else 1.0
+
         def work():
             t0 = time.perf_counter()
             try:
                 job["result"] = P.obstacle_replan(dec)
             except Exception as e:  # noqa: BLE001
                 job["error"] = e
+            if slow > 1.0:
+                # (e23, simulator only: MIRLT_SIM_REPLAN_SLOW=<times>) planning as slow as the Pi measured it, so a
+                # dry run meets the waits the school's Pi had (a desk machine plans 5-10 times quicker)
+                time.sleep((slow - 1.0) * (time.perf_counter() - t0))
             job["cpu"] = time.perf_counter() - t0
         job["thread"] = threading.Thread(target=work, daemon=True)
         self.planning = job
@@ -1436,6 +1577,31 @@ class Coordinator:
             return
         newplan, events = job["result"]
         cpu = job["cpu"]
+        back = [n for n in self.names if n not in newplan["robots"]]
+        if back:
+            # (e23, school 18 Nov 17:09 and 18:31: KeyError 'Alpha' / 'Bravo' here ended two runs, shown as "done") a
+            # robot REJOINED while this plan, made without it, was being worked out (its veer recovery took 3-4 s, the
+            # plan 5-12 s). The plan is not used: everyone plans again from where they are, with it. Its own
+            # out-obstacle is not carried into that plan (it is no longer standing there as a brick).
+            rec = {"t_run": round(t_event - self.t_run, 2), "source": ob["source"] if ob else
+                   ("improve" if improving else "retry"), "cpu_s": round(cpu, 3), "budget_s": over["replan_budget_s"],
+                   "rejoined_meanwhile": back, "kept": False, "old_plan": self.plan_no}
+            self.replans.append(rec)
+            self.log("replan", **rec)
+            self.say("%s rejoined while a plan made without %s was being worked out (%.1f s): that plan is not used; "
+                     "planning again with %s" % (", ".join(back), "it" if len(back) == 1 else "them", cpu,
+                                                 "it" if len(back) == 1 else "them"))
+            if ob is not None and str(ob.get("id", "")) in {"out-%s" % n for n in back}:
+                ob = None
+            # the rejoin's own re-plan is waiting in the queue: this one takes its place
+            for k_, d_ in enumerate(self.deferred):
+                if d_[0] is None and not d_[3]:
+                    del self.deferred[k_]
+                    break
+            if improving:
+                return self.next_deferred() if self.deferred else self.handle_obstacle(None)
+            self.handle_obstacle(ob, cause=cause if cause in self.names else None, budget=over["replan_budget_s"])
+            return
         outs = [n for n in newplan["robots"] if self.bots[n].out]
         if outs:                     # a robot went out while this was being computed: it is not in the new plan
             newplan = self.without(newplan, outs)
@@ -1494,6 +1660,10 @@ class Coordinator:
                "cpu_s": round(cpu, 3), "budget_s": over["replan_budget_s"], "events": events,
                "new_makespan_s": newplan["summary"]["makespan_s"], "stranded": newplan.get("stranded", []),
                "obstacle": ob, "states": job["states"], "old_plan": self.plan_no}
+        n_now, n_later = self.points_in(newplan)
+        rec["points_planned"], rec["points_later"], rec["plan_ahead"] = n_now, n_later, over.get("plan_ahead_points", 0)
+        if not improving:
+            self.note_plan_cost(cpu, n_now)
         if improving:
             old_end = self.plan_start + self.plan["summary"]["makespan_s"]
             new_end = t_event + newplan["summary"]["makespan_s"]
@@ -1548,13 +1718,111 @@ class Coordinator:
         self.note_skips(newplan)
         self.keep_reassigned()
         self.next_retry = now() + self.args.retry_s if newplan.get("stranded") else math.inf
-        if newplan["summary"].get("first_safe_only") and not newplan.get("stranded"):
+        if IMPROVE_SKIP_OVER and cpu > float(over["replan_budget_s"]):
+            # (e23, school 18 Nov 18:06: 27 re-plans of 14.8 s median, each followed by an improvement try as long,
+            # both robots standing for most of it: planner busy 399 s of 460 s) the plan itself already took longer
+            # than its budget: a wider search would take longer still, so no improvement try follows it
+            self.improve_at = None
+            self.log("improve_skipped", cpu_s=round(cpu, 3), budget_s=over["replan_budget_s"])
+        elif newplan["summary"].get("first_safe_only") and not newplan.get("stranded"):
             # the first safe plan went out at once: the search for a shorter one starts now, in the background
             # (Nick, 2026-10-27 00:08); it is swapped in only if everyone finishes sooner (the improvement try)
             self.improve_at = now()
         elif ob is not None and self.args.improve_after_s > 0:
             self.improve_at = t_event + over["replan_budget_s"] + self.args.improve_after_s
         self.next_deferred()
+
+    # -- (e23) a fixed-order list is planned a few points ahead ---------------------------------------------------------
+    # School 18 Nov 18:06: 27 re-plans, median 14.8 s each for 20 + 20 points, against 2.5-8.5 s with 4 + 4: both robots
+    # stood for 399 s of a 460 s run. A re-plan now plans each robot's next K points; the rest ride in the plan entry's
+    # "later" (planner.ahead_split) and come in at the next re-plan, asked for while the robot stands at its last
+    # planned point (feed_watch).
+    PLAN_COST_SEED_S = 0.36   # MEASURED (school Pi, 18 Nov): planning time per point in the plan, from the re-plans of
+    #                           4 + 4 points (median 3.3 s) and 20 + 20 points (median 14.8 s): (14.8 - 3.3) / 32. The
+    #                           starting guess only: each run uses its own measured cost after its first re-plan
+    PLAN_AHEAD_MIN = 2        # [chosen] never fewer than this many points per robot: the one it is driving to and the
+    #                           next, so the following points can be planned while it stands at a point. DOE: yes
+    #                           (1 / 2 / 3 against standing time and points reached, simulator at the Pi's planning cost)
+    PLAN_AHEAD_MAX = 20       # [chosen] a cap so one quick re-plan does not bring a whole long list back in. No DOE
+
+    def points_in(self, plan):
+        """(points planned, points left for later) over every robot of a plan."""
+        now_, later_ = set(), set()
+        for n, e in (plan.get("robots") or {}).items():
+            for v in list(e.get("visit_order") or []) + list((e.get("pending") or {}).get("visits") or []):
+                k = P._point_key(v)
+                if k:
+                    now_.add((n, k))
+            for v in e.get("later") or []:
+                k = P._point_key(v)
+                if k:
+                    later_.add((n, k))
+        return len(now_), len(later_)
+
+    def note_plan_cost(self, cpu_s, points):
+        """This run's own planning time per point planned (the median of its re-plans so far)."""
+        if points <= 0:
+            return
+        c = self.__dict__.setdefault("plan_costs", [])
+        c.append(float(cpu_s) / float(points))
+        del c[:-15]
+
+    def plan_ahead_k(self):
+        """How many points per robot a re-plan plans: as many as fit the re-plan's own budget (the plan's
+        replan_budget_s) at the planning cost per point measured in this run (before the first measurement: the
+        school Pi's, PLAN_COST_SEED_S), shared between the robots that are running; at least PLAN_AHEAD_MIN.
+        MIRLT_PLAN_AHEAD_N=<n> fixes it (for a designed experiment)."""
+        fixed = os.environ.get("MIRLT_PLAN_AHEAD_N")
+        if fixed:
+            try:
+                return max(1, int(fixed))
+            except ValueError:
+                pass
+        c = self.__dict__.get("plan_costs") or []
+        cost = statistics.median(c) if c else self.PLAN_COST_SEED_S
+        budget = float((self.plan.get("settings") or {}).get("replan_budget_s", 2.0))
+        k = int(budget / max(cost, 1e-3) / max(1, len(self.names)))
+        k = max(self.PLAN_AHEAD_MIN, min(self.PLAN_AHEAD_MAX, k))
+        if k != getattr(self, "_ahead_said", None):
+            self._ahead_said = k
+            self.log("plan_ahead", points_each=k, cost_s_per_point=round(cost, 3), budget_s=budget,
+                     measured=bool(c), robots=len(self.names))
+        return k
+
+    def planned_points_left(self, n):
+        """Robot n's planned production points not done yet, and whether it is standing at the last of them."""
+        entry = self.plan["robots"].get(n) or {}
+        b = self.bots[n]
+        steps = entry.get("steps") or []
+        left = []
+        for i, stp in enumerate(steps):
+            lab = str(stp.get("label") or "")
+            if lab.startswith("at point ") and stp.get("type") == "wait" and i < len(b.stat) and \
+                    b.stat[i]["status"] != "done":
+                left.append((i, lab[3:]))
+        standing = len(left) == 1 and b.stat[left[0][0]]["status"] == "started"
+        return [x[1] for x in left], standing
+
+    def feed_watch(self):
+        """A robot whose list goes on beyond what is planned (its entry's "later"): when it stands at its last planned
+        point, or has nothing planned left, the plan is made again, which brings its next points in. Planning then
+        runs while it stands at a point instead of while everyone waits."""
+        if not PLAN_AHEAD_NEAR or self.planning is not None or self.pending_replan is not None or self.abort:
+            return
+        t = now()
+        for n in self.names:
+            entry = self.plan["robots"].get(n) or {}
+            if not entry.get("later"):
+                continue
+            left, standing = self.planned_points_left(n)
+            if left and not standing:
+                continue
+            if t - getattr(self, "feed_t", {}).get(n, 0.0) < self.args.retry_s:
+                continue                       # (a guard against a loop when the next points cannot be planned)
+            self.__dict__.setdefault("feed_t", {})[n] = t
+            self.log("plan_ahead_feed", robot=n, later=len(entry["later"]), standing=standing)
+            self.pending_replan = ("%s's next points" % n, t)
+            return
 
     def next_deferred(self):
         if self.deferred and self.planning is None and not self.abort:
@@ -2404,11 +2672,13 @@ class Coordinator:
                 b.dwell = dict(point=lab[3:], t0=t, pose=list(b.pose) if b.pose else None,
                                tag=tag if (tag and t - tag[0] < 2.0) else None)
         elif state == "done":
-            self.__dict__.setdefault("done_labels", set()).add(lab)
             d = getattr(b, "dwell", None)
             t0 = d["t0"] if d and d["point"] == lab[3:] else t - float(stp.get("t_end", 0) - stp.get("t_start", 0))
             b.dwell = None
-            self.record_point(b, lab[3:], t0, t, interrupted=bool(d and d.get("interrupted")))
+            ok = self.record_point(b, lab[3:], t0, t, interrupted=bool(d and d.get("interrupted")),
+                                   target=list(stp["to"][:2]) if stp.get("to") else None)
+            if ok is not False:
+                self.__dict__.setdefault("done_labels", set()).add(lab)      # (e23) only a stop AT the point is done
 
     DWELL_STILL_CM = 2.0      # (e12 item 9) "did not move" during an interrupted dwell: the roof-tag reads (else its own
                               # pose) within this. Chosen (Nick's "about 2 cm"). No DOE
@@ -2424,7 +2694,17 @@ class Coordinator:
             return math.hypot(b.pose[0] - d["pose"][0], b.pose[1] - d["pose"][1]) <= self.DWELL_STILL_CM
         return False
 
-    def record_point(self, b, point, t0, t1, interrupted=False):
+    def reach_tol_cm(self, plus_minus_cm, speed=None):
+        """(e23) How far from a point a stop may be and still be AT it. DERIVED: where a drive ends against its planned
+        end (safety_rules.TRACK_P95_CM across, stop_cm along: both measured, 95th percentile) plus this stop's own
+        stated +- (95 %). Nothing typed."""
+        import safety_rules as SR
+        return round(math.hypot(SR.TRACK_P95_CM, SR.stop_cm(speed)) + float(plus_minus_cm or 0.0), 1)
+
+    def record_point(self, b, point, t0, t1, interrupted=False, target=None):
+        """One stop at a production point. (e23) Returns False when the robot's best position was NOT at the point
+        (beyond reach_tol_cm of `target`): the stop is kept apart as "not reached" with the distance, and is not a
+        visit (school 18 Nov: P29 credited four times from 24-29 cm away, six more stops 11-77 cm off)."""
         lg = [f for f in (getattr(b, "fix_log", None) or []) if t0 - 0.05 <= f["t"] <= t1 + 0.05]
         own = list(b.pose) if b.pose else None
         rec = dict(robot=b.name, point=point, t_run=round(t1 - self.t_run, 2) if self.t_run else None,
@@ -2466,11 +2746,26 @@ class Coordinator:
         if moved:
             rec["cameras_moved"] = dict(moved)
             words += " (camera %s reported moved: counted in)" % ", ".join(sorted(moved))
+        if POINT_CREDIT_REACHED and target is not None and rec.get("x") is not None:
+            miss = math.hypot(rec["x"] - float(target[0]), rec["y"] - float(target[1]))
+            tol = self.reach_tol_cm(rec.get("plus_minus_cm"))
+            rec.update(target=[round(float(target[0]), 2), round(float(target[1]), 2)], miss_cm=round(miss, 1),
+                       reach_tol_cm=tol, reached=bool(miss <= tol))
+            if miss > tol:
+                rec["words"] = "%s (%s): NOT REACHED: it stood %.1f cm from the point (at %.1f, %.1f; the point is " \
+                               "at %.1f, %.1f; a stop counts within %.1f cm: where drives end plus this position's " \
+                               "own \u00b1%.1f cm), %s" % (point, b.name, miss, rec["x"], rec["y"], target[0], target[1],
+                                                           tol, rec.get("plus_minus_cm") or 0.0, rec.get("source"))
+                self.__dict__.setdefault("not_reached", []).append(rec)
+                self.log("point_not_reached", **rec)
+                self.say("POINT " + rec["words"] + ": not counted as a visit")
+                return False
         rec["words"] = words
         self.__dict__.setdefault("points", []).append(rec)
         self.log("point_confidence", **rec)
         self.say("POINT " + words)
         self.point_csv(rec)
+        return True
 
     POINT_COLS = ["robot", "point", "t_run", "x", "y", "plus_minus_cm", "source", "n_fixes", "two_camera_share",
                   "since_fix_cm", "since_fix_s", "own_x", "own_y", "own_vs_camera_cm", "dwell_s", "words"]
@@ -2714,7 +3009,14 @@ class Coordinator:
         moved = [vo[j] for j in idx]
         for j in reversed(idx):
             del vo[j]
-        vo.extend(moved)
+        lt = self.plan["robots"][n].get("later")
+        if lt:
+            # (e23) its list goes on beyond the plan: "the end of its list" is the end of those, before the trip home
+            hi = next((j for j in range(len(lt) - 1, -1, -1) if isinstance(lt[j], dict) and
+                       str(lt[j].get("label", "")) == "home"), len(lt))
+            lt[hi:hi] = moved
+        else:
+            vo.extend(moved)
         done[(n, pt)] = 1
         self.log("point_deferred", robot=n, point=pt, why=why)
         return pt, "deferred"
@@ -2774,6 +3076,7 @@ class Coordinator:
         pend = entry.get("pending") or {}
         if pend and pend.get("visits"):
             vo = [v for v in pend["visits"] if isinstance(v, dict)]
+        vo = vo + [v for v in entry.get("later") or [] if isinstance(v, dict)]      # (e23) not planned yet
         out = []
         for j, v in enumerate(vo):
             lab = str(v.get("label") or "")
@@ -2852,7 +3155,8 @@ class Coordinator:
         """The production point labels in robot n's plan (its visit order and its pending work)."""
         entry = self.plan["robots"].get(n) or {}
         return {str(v.get("label")) for v in (entry.get("visit_order") or []) + list((entry.get("pending") or {})
-                                                                                   .get("visits") or [])
+                                                                                   .get("visits") or []) +
+                list(entry.get("later") or [])
                 if isinstance(v, dict) and str(v.get("label", "")).startswith("point ")}
 
     def insert_visits(self, n, items):
@@ -2875,6 +3179,13 @@ class Coordinator:
             if not items:
                 return
         b = self.bots[n]
+        lt = entry.get("later")
+        if lt:
+            # (e23) its own list goes on beyond the plan: handed-over points go after those, before its trip home
+            hi = next((j for j in range(len(lt) - 1, -1, -1) if isinstance(lt[j], dict) and
+                       str(lt[j].get("label", "")) == "home"), len(lt))
+            lt[hi:hi] = copy.deepcopy(items)
+            return
         finished = bool(b.stat) and all(st["status"] == "done" for st in b.stat) or not entry.get("steps")
         vo = entry.setdefault("visit_order", [])
         if finished and not (entry.get("pending") or {}).get("visits"):
@@ -2914,8 +3225,8 @@ class Coordinator:
                 continue
             entry = self.plan["robots"][n]
             labs = {str(v.get("label")) for v in (entry.get("visit_order") or []) + list((entry.get("pending") or {})
-                                                                                        .get("visits") or [])
-                    if isinstance(v, dict)}
+                                                                                        .get("visits") or []) +
+                    list(entry.get("later") or []) if isinstance(v, dict)}
             if pt not in labs and ("at " + pt) not in labs:
                 self.insert_visits(n, r["items"])
                 missing = True
@@ -4477,7 +4788,8 @@ class Coordinator:
             return False
         if any(b.out and getattr(b, "out_kind", None) == "recovering" for b in self.bots.values()):
             return False                # (e07) a robot on its reserved recovery comes back with points to do
-        undone = [n for n in self.names if not all(st["status"] == "done" for st in self.bots[n].stat)]
+        undone = [n for n in self.names if not all(st["status"] == "done" for st in self.bots[n].stat) or
+                  (self.plan["robots"].get(n) or {}).get("later")]      # (e23) ... or its list goes on
         if undone:
             if any(getattr(self.bots[n], "retry_n", 0) == 0 for n in undone):
                 self.others_done_t = None       # (a robot trying to rejoin does not restart the wait)
@@ -4556,6 +4868,7 @@ class Coordinator:
             self.held_creep_watch()       # (e18, Nick 12 Nov decision 2) never still: held robots creep
             self.trust_checkpoint()       # (e18, 6) the odometry records written out every minute
             self.rejoin_watch()
+            self.feed_watch()             # (e23) the next points of a long fixed-order list come into the plan
             if self.abort:
                 break
             self.disk_watch()
@@ -4638,6 +4951,7 @@ class Coordinator:
                             "heading_relearned": list(getattr(self, "heading_relearned", []) or []),
                             "surface_marks": list(getattr(self, "surface_marks", []) or []),
                             "did_not_move": getattr(self, "n_fast_done", 0),
+                            "late_not_moved": getattr(self, "n_late_not_moved", 0),     # (e23) the camera, afterwards
                             "skipped": list(getattr(self, "skipped", []) or [])},
                 "safety_group": SG.snapshot(), "held_creeps": getattr(self, "creeps_n", 0),
                 "odo_trust": {n: b.trust.summary() for n, b in self.bots.items() if getattr(b, "trust", None)},
@@ -4673,6 +4987,10 @@ class Coordinator:
                 "lost_robot_points": getattr(self.args, "lost_robot_points", "reassign"),
                 "kept_going": self.__dict__.get("kept_going", []),
                 "points": self.__dict__.get("points", []),
+                "points_not_reached": self.__dict__.get("not_reached", []),      # (e23) stops the robot was not at
+                "plan_ahead": {"on": PLAN_AHEAD_NEAR, "points_each": getattr(self, "_ahead_said", None),
+                               "cost_s_per_point": [round(v, 3) for v in self.__dict__.get("plan_costs", [])]},
+                "old_fixes_carried": {n: getattr(b, "old_fix_n", 0) for n, b in self.bots.items()},
                 "points_skipped": self.__dict__.get("skipped", []),
                 "points_reassigned": [{k: q[k] for k in ("point", "frm", "to", "t_run")}
                                       for q in self.__dict__.get("reassigned", [])],
@@ -6457,6 +6775,23 @@ def main(argv=None):
         print(e)
         coord.abort = coord.__dict__.get("abort") or "start-up failed"
         code = 1
+    except Exception as e:      # noqa: BLE001
+        # (e23, school 18 Nov: two runs that crashed were reported as "done") ANY error in the run is a crash, said as
+        # one: the result is "crashed: <why>", never "done"; the robots are stopped below as at any end
+        import traceback
+        tb = traceback.extract_tb(e.__traceback__)
+        where = ("%s line %d" % (os.path.basename(tb[-1].filename), tb[-1].lineno)) if tb else "?"
+        coord.abort = crash_words(e, where)
+        coord.crash = {"error": type(e).__name__, "why": str(e), "where": where,
+                       "traceback": traceback.format_exc()}
+        traceback.print_exc()
+        print("\nCRASHED: %s. Stopping every robot. This is a program error, not something the robots did: the "
+              "points not done are listed below." % coord.abort)
+        try:
+            coord.log("crashed", why=coord.abort, where=where, traceback=coord.crash["traceback"])
+        except Exception:  # noqa: BLE001
+            pass
+        code = 1
     finally:
         # sends stop to every robot (ends the follow runs) and closes the files; a finished run leaves the robots that
         # are dancing until switched off (Monday's end) dancing
@@ -6470,7 +6805,13 @@ def main(argv=None):
             coord.trust_save("the run ended: %s" % (coord.__dict__.get("abort") or "done"))   # (e18, 6) at ANY end
         except Exception:  # noqa: BLE001
             pass
-        summ = coord.summary() if hasattr(coord, "dockings") else {"result": coord.__dict__.get("abort")}
+        try:
+            summ = coord.summary() if hasattr(coord, "dockings") else {"result": coord.__dict__.get("abort")}
+        except Exception as e2:  # noqa: BLE001  (e23: a summary that fails never turns a run into "done" or hides it)
+            summ = {"result": coord.__dict__.get("abort") or "crashed: the summary failed (%s: %s)" % (
+                type(e2).__name__, e2)}
+        if coord.__dict__.get("crash"):
+            summ["crash"] = coord.crash
         if sim is not None:
             if getattr(args, "sim_persist", False):
                 sim.terminate()            # (--persist: it reports on SIGTERM)
@@ -6489,6 +6830,11 @@ def main(argv=None):
     if summ.get("result") != "done" and not str(summ.get("result")).startswith("limited:"):
         code = code or 1          # a plan cut short at a plywood edge ("limited: ...") is not a failure
     return code
+
+
+def crash_words(e, where="?"):
+    """(e23) The result of a run that ended on a program error: "crashed: KeyError 'Alpha' (run_plan.py line 1526)"."""
+    return "crashed: %s %s (%s)" % (type(e).__name__, str(e)[:160], where)
 
 
 def install_signals(coord):

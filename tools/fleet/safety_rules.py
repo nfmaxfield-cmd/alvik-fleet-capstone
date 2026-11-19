@@ -143,6 +143,21 @@ def edge_room_cm(caller, tracking=None, speed=13.0, unc_cm=None, rule=None):
                               extra_cm=CALLER_EXTRA_CM.get(caller, 0.0)), 1)
 
 
+def slow_end_room_cm(speed, tracking="tags", fix_age_s=1.0, leads=None):
+    """(e23) A leg that ENDS nearer than this to an edge (the robot's middle) is finished slowly: the one derived edge
+    clearance at that speed (body, measured track error, measured stopping distance, the camera's edge bias) plus
+    how far the robot drives at that speed in the oldest fix it accepts (fix_age_s: the firmware's fix_max_age, 1 s
+    before e21), i.e. the stretch it may be on its wheels alone. 10 cm/s with roof tags: 20.4 cm; 15 cm/s: 25.8 cm
+    (school 18 Nov: P33, 19.7 cm from the long edge, was overshot by 11 cm at 15 cm/s). Nothing typed."""
+    v = float(speed or 0.0)
+    return round(clearance_cm(TRACK_P95_CM, v, tracking, stops_here=True, leads=leads) + v * float(fix_age_s), 1)
+
+
+def slow_end_cms():
+    """The slow speed for such an end: the slowest speed the stopping distance was measured at (5 cm/s, 1.4 cm)."""
+    return float(min(STOP_P95_CM))
+
+
 def edge_dist(rect, x, y):
     f = getattr(rect, "edge_dist", None)          # (e13) a proven workspace: its own distance
     if f is not None:

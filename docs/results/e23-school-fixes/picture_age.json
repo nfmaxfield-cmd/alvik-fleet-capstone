@@ -1,0 +1,280 @@
+{
+ "20261116-174837-visit-robots": {
+  "overhead": {
+   "pictures": 540,
+   "age_median_s": 0.173,
+   "age_p90_s": 0.228,
+   "age_max_s": 0.68,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 47.5,
+   "detect_ms_p90": 87.5,
+   "gap_between_pictures_median_s": 0.093,
+   "per_s": 7.06
+  }
+ },
+ "20261118-130132-visit-robots": {
+  "overhead": {
+   "pictures": 796,
+   "age_median_s": 0.149,
+   "age_p90_s": 0.196,
+   "age_max_s": 0.677,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 41.7,
+   "detect_ms_p90": 63.5,
+   "gap_between_pictures_median_s": 0.074,
+   "per_s": 8.69
+  }
+ },
+ "20261118-132919-visit-robots": {
+  "overhead": {
+   "pictures": 1335,
+   "age_median_s": 0.189,
+   "age_p90_s": 0.26,
+   "age_max_s": 0.684,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 84.8,
+   "detect_ms_p90": 120.1,
+   "gap_between_pictures_median_s": 0.118,
+   "per_s": 6.02
+  }
+ },
+ "20261118-134340-visit-robots": {
+  "overhead": {
+   "pictures": 638,
+   "age_median_s": 0.221,
+   "age_p90_s": 0.333,
+   "age_max_s": 0.865,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 101.7,
+   "detect_ms_p90": 168.3,
+   "gap_between_pictures_median_s": 0.161,
+   "per_s": 4.64
+  }
+ },
+ "20261118-143047-visit-robots": {
+  "overhead": {
+   "pictures": 700,
+   "age_median_s": 0.274,
+   "age_p90_s": 0.418,
+   "age_max_s": 0.893,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 89.7,
+   "detect_ms_p90": 175.6,
+   "gap_between_pictures_median_s": 0.192,
+   "per_s": 4.28
+  }
+ },
+ "20261118-150347-visit-robots": {
+  "side": {
+   "pictures": 1742,
+   "age_median_s": 0.182,
+   "age_p90_s": 0.337,
+   "age_max_s": 0.94,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 0.3,
+   "detect_ms_p90": 137.7,
+   "gap_between_pictures_median_s": 0.085,
+   "per_s": 9.08
+  },
+  "overhead": {
+   "pictures": 845,
+   "age_median_s": 0.295,
+   "age_p90_s": 0.432,
+   "age_max_s": 0.882,
+   "over_1.0_s_pct": 0.0,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 98.4,
+   "detect_ms_p90": 170.1,
+   "gap_between_pictures_median_s": 0.18,
+   "per_s": 4.44
+  }
+ },
+ "20261118-161142-visit-robots": {
+  "side": {
+   "pictures": 2053,
+   "age_median_s": 0.197,
+   "age_p90_s": 0.435,
+   "age_max_s": 1.492,
+   "over_1.0_s_pct": 0.7,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 1.9,
+   "detect_ms_p90": 166.6,
+   "gap_between_pictures_median_s": 0.087,
+   "per_s": 7.47
+  },
+  "overhead": {
+   "pictures": 924,
+   "age_median_s": 0.297,
+   "age_p90_s": 0.492,
+   "age_max_s": 1.854,
+   "over_1.0_s_pct": 1.1,
+   "over_1.5_s_pct": 0.3,
+   "detect_ms_median": 100.5,
+   "detect_ms_p90": 194.9,
+   "gap_between_pictures_median_s": 0.201,
+   "per_s": 3.38
+  }
+ },
+ "20261118-164246-visit-robots": {
+  "side": {
+   "pictures": 1551,
+   "age_median_s": 0.224,
+   "age_p90_s": 0.432,
+   "age_max_s": 1.227,
+   "over_1.0_s_pct": 0.1,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 0.7,
+   "detect_ms_p90": 165.8,
+   "gap_between_pictures_median_s": 0.102,
+   "per_s": 7.01
+  },
+  "overhead": {
+   "pictures": 650,
+   "age_median_s": 0.349,
+   "age_p90_s": 0.581,
+   "age_max_s": 1.315,
+   "over_1.0_s_pct": 1.4,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 130.9,
+   "detect_ms_p90": 249.4,
+   "gap_between_pictures_median_s": 0.25,
+   "per_s": 2.99
+  }
+ },
+ "20261118-170939-visit-robots": {
+  "side": {
+   "pictures": 2633,
+   "age_median_s": 0.255,
+   "age_p90_s": 0.516,
+   "age_max_s": 1.229,
+   "over_1.0_s_pct": 0.2,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 92.3,
+   "detect_ms_p90": 241.2,
+   "gap_between_pictures_median_s": 0.096,
+   "per_s": 6.58
+  },
+  "overhead": {
+   "pictures": 1170,
+   "age_median_s": 0.318,
+   "age_p90_s": 0.586,
+   "age_max_s": 1.049,
+   "over_1.0_s_pct": 0.1,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 108.8,
+   "detect_ms_p90": 242.3,
+   "gap_between_pictures_median_s": 0.307,
+   "per_s": 2.94
+  }
+ },
+ "20261118-173209-visit-robots": {
+  "side": {
+   "pictures": 7351,
+   "age_median_s": 0.289,
+   "age_p90_s": 0.434,
+   "age_max_s": 1.92,
+   "over_1.0_s_pct": 0.7,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 95.5,
+   "detect_ms_p90": 174.7,
+   "gap_between_pictures_median_s": 0.115,
+   "per_s": 6.6
+  },
+  "overhead": {
+   "pictures": 3446,
+   "age_median_s": 0.293,
+   "age_p90_s": 0.486,
+   "age_max_s": 1.838,
+   "over_1.0_s_pct": 0.9,
+   "over_1.5_s_pct": 0.1,
+   "detect_ms_median": 69.0,
+   "detect_ms_p90": 169.5,
+   "gap_between_pictures_median_s": 0.229,
+   "per_s": 3.1
+  }
+ },
+ "20261118-175439-visit-robots": {
+  "side": {
+   "pictures": 1513,
+   "age_median_s": 0.367,
+   "age_p90_s": 0.578,
+   "age_max_s": 2.319,
+   "over_1.0_s_pct": 2.9,
+   "over_1.5_s_pct": 0.8,
+   "detect_ms_median": 129.3,
+   "detect_ms_p90": 240.2,
+   "gap_between_pictures_median_s": 0.149,
+   "per_s": 4.08
+  },
+  "overhead": {
+   "pictures": 577,
+   "age_median_s": 0.332,
+   "age_p90_s": 0.837,
+   "age_max_s": 2.587,
+   "over_1.0_s_pct": 6.2,
+   "over_1.5_s_pct": 1.2,
+   "detect_ms_median": 37.6,
+   "detect_ms_p90": 253.9,
+   "gap_between_pictures_median_s": 0.534,
+   "per_s": 1.56
+  }
+ },
+ "20261118-180601-visit-robots": {
+  "side": {
+   "pictures": 2569,
+   "age_median_s": 0.317,
+   "age_p90_s": 0.671,
+   "age_max_s": 2.043,
+   "over_1.0_s_pct": 1.5,
+   "over_1.5_s_pct": 0.2,
+   "detect_ms_median": 113.6,
+   "detect_ms_p90": 365.5,
+   "gap_between_pictures_median_s": 0.122,
+   "per_s": 4.51
+  },
+  "overhead": {
+   "pictures": 989,
+   "age_median_s": 0.399,
+   "age_p90_s": 0.858,
+   "age_max_s": 2.097,
+   "over_1.0_s_pct": 5.5,
+   "over_1.5_s_pct": 0.7,
+   "detect_ms_median": 148.1,
+   "detect_ms_p90": 380.3,
+   "gap_between_pictures_median_s": 0.428,
+   "per_s": 1.74
+  }
+ },
+ "20261118-183130-visit-robots": {
+  "side": {
+   "pictures": 621,
+   "age_median_s": 0.214,
+   "age_p90_s": 0.466,
+   "age_max_s": 1.48,
+   "over_1.0_s_pct": 1.9,
+   "over_1.5_s_pct": 0.0,
+   "detect_ms_median": 0.8,
+   "detect_ms_p90": 200.7,
+   "gap_between_pictures_median_s": 0.106,
+   "per_s": 6.69
+  },
+  "overhead": {
+   "pictures": 225,
+   "age_median_s": 0.39,
+   "age_p90_s": 0.717,
+   "age_max_s": 2.237,
+   "over_1.0_s_pct": 4.0,
+   "over_1.5_s_pct": 1.3,
+   "detect_ms_median": 153.3,
+   "detect_ms_p90": 383.3,
+   "gap_between_pictures_median_s": 0.288,
+   "per_s": 2.55
+  }
+ }
+}

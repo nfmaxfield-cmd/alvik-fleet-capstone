@@ -35,11 +35,14 @@ Changelog
                  "off" runs: more falls and stands; e21 report section 9).
   2026-11-16ko   MIRLT_KEEPOUT_ROOM: the paths keep the edge rule's room (track error + stopping distance) from a site's
                  keep-outs, not the body and 1.5 cm only (school Visit points ran into the outlet plates, 16 Nov).
+  2026-11-19e23  the fixes for Jay-Sun's school runs of 16 / 18 Nov: MIRLT_STOP_UNNAMED, MIRLT_CAMERA_PROBE,
+                 MIRLT_MOVE_CHECK, MIRLT_IMPROVE_SKIP_OVER, MIRLT_PLAN_AHEAD, MIRLT_POINT_CREDIT, MIRLT_OLD_FIX,
+                 MIRLT_EDGE_SLOW_END, MIRLT_BIND_CAMS, MIRLT_WAKE_WAIT, MIRLT_VISIT_UNSEEN.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -310,6 +313,49 @@ SWITCHES = [
      "Every calibration correction a run measured (curves, straight drives, turns: each by the agreement rule; each "
      "robot's odometry record) saved at every ending: the time cap, Stop / Ctrl+C, an error (a checkpoint every minute "
      "covers a crash or power cut). 0: only the curves at a normal end (e17)", "e18"),
+    # -- e23: Jay-Sun's school runs of 16 and 18 Nov -----------------------------------------------------------------------
+    ("MIRLT_STOP_UNNAMED", "once", "wait", "F M C",
+     "A Stop pressed before the robots are named: a robot known only by its slot name (no address, no WiFi name) is "
+     "settled by the first `stop` that went out with the robots' log port read, and a new Start ends the watch. wait: "
+     "asked for by its slot name every 3 s for ever (school 16 / 18 Nov: it stopped the next three starts)", "e23"),
+    ("MIRLT_CAMERA_PROBE", "usb", "e13", "M C",
+     "Looking for cameras at a start: only USB cameras that no other program holds are opened, each in a child process "
+     "with a time limit (3 x the longest open on record), and what was found or skipped is said. e13: every /dev/video "
+     "node opened in the run's own process, no limit (school 18 Nov: two starts hung 4-5 min)", "e23"),
+    ("MIRLT_MOVE_CHECK", "e23", "e22", "M",
+     "Did a drive step happen? Judged from where the robot started the step, done when its own pose ended at the "
+     "target, and the camera votes only with a picture newer than the step's end (it has its say afterwards, logged). "
+     "e22: the plan's length and the newest picture whatever its age (school 18 Nov: 18 of 19 'did NOT move' false)",
+     "e23"),
+    ("MIRLT_IMPROVE_SKIP_OVER", "1", "0", "M",
+     "No search for a shorter plan after a re-plan that already took longer than its budget. 0: always (school 18 Nov: "
+     "the planner was busy 87 % of a run)", "e23"),
+    ("MIRLT_PLAN_AHEAD", "near", "all", "M",
+     "A list of points in a fixed order is planned a few points ahead for each robot (how many: from the planning "
+     "time measured in this run against its budget), the rest added as it gets there. all: the whole list in every "
+     "re-plan (school 18 Nov: 15 s a re-plan for 20 + 20 points)", "e23"),
+    ("MIRLT_POINT_CREDIT", "reached", "always", "M",
+     "A stop at a point is recorded as reached only when the robot's best position (camera during the stop, else its "
+     "own pose) is within the point's tolerance; else 'not reached' with the distance, and the point stays not "
+     "visited. always: every stop the plan made counts (school 18 Nov: stops credited 11-77 cm from their points)",
+     "e23"),
+    ("MIRLT_OLD_FIX", "project", "send", "M",
+     "A camera fix whose picture is older than the robot accepts is carried forward by the robot's own motion since "
+     "that picture and sent as a fix for now, with a wider +-. send: sent as it is and refused by the robot as old "
+     "(school 18 Nov 17:54: no fix used for the last 40 cm before the edge)", "e23"),
+    ("MIRLT_EDGE_SLOW_END", "1", "0", "M",
+     "The last part of a leg that ends inside the edge rule's room is driven at the slow speed, so the stop is short "
+     "and fixes arrive before the edge. 0: the leg's speed to its end", "e23"),
+    ("MIRLT_BIND_CAMS", "run", "one", "M C",
+     "Naming the robots by their wiggle reads roof tags with every camera the run uses. one: camera 1 only (school 18 "
+     "Nov 14:27: a robot standing where only camera 2 sees it could not be named)", "e23"),
+    ("MIRLT_WAKE_WAIT", "site", "fixed", "M C",
+     "A start waits for sleeping robots as long as the site's own sleep check-in (school: 60 min would be too long to "
+     "stand and wait, so it waits its usual time and says the real interval and how to wake them now). fixed: the "
+     "message says 'every 10 min' whatever the site", "e23"),
+    ("MIRLT_VISIT_UNSEEN", "warn", "quiet", "M",
+     "Visit points: a listed point outside every camera the run uses is warned about loudly at the start (Mission "
+     "Control and the run log). quiet: a NOTE line only", "e23"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

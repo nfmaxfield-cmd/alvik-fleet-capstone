@@ -1,0 +1,229 @@
+{
+ "20261116-173641-visit-robots": {
+  "reports": 84,
+  "lag_median_s": 0.008,
+  "lag_p90_s": 0.012,
+  "lag_max_s": 0.035,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": null,
+  "not_planning": {
+   "n": 84,
+   "median_s": 0.008,
+   "p90_s": 0.012,
+   "max_s": 0.035
+  }
+ },
+ "20261118-130132-visit-robots": {
+  "reports": 48,
+  "lag_median_s": 0.008,
+  "lag_p90_s": 0.011,
+  "lag_max_s": 0.103,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": null,
+  "not_planning": {
+   "n": 48,
+   "median_s": 0.008,
+   "p90_s": 0.011,
+   "max_s": 0.103
+  }
+ },
+ "20261118-132919-visit-robots": {
+  "reports": 129,
+  "lag_median_s": 0.008,
+  "lag_p90_s": 0.013,
+  "lag_max_s": 0.177,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": null,
+  "not_planning": {
+   "n": 129,
+   "median_s": 0.008,
+   "p90_s": 0.013,
+   "max_s": 0.177
+  }
+ },
+ "20261118-134340-visit-robots": {
+  "reports": 168,
+  "lag_median_s": 0.008,
+  "lag_p90_s": 0.02,
+  "lag_max_s": 0.066,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 27,
+   "median_s": 0.011,
+   "p90_s": 0.041,
+   "max_s": 0.066
+  },
+  "not_planning": {
+   "n": 141,
+   "median_s": 0.008,
+   "p90_s": 0.018,
+   "max_s": 0.039
+  }
+ },
+ "20261118-143047-visit-robots": {
+  "reports": 98,
+  "lag_median_s": 0.01,
+  "lag_p90_s": 0.045,
+  "lag_max_s": 0.457,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 13,
+   "median_s": 0.041,
+   "p90_s": 0.174,
+   "max_s": 0.457
+  },
+  "not_planning": {
+   "n": 85,
+   "median_s": 0.01,
+   "p90_s": 0.021,
+   "max_s": 0.388
+  }
+ },
+ "20261118-150347-visit-robots": {
+  "reports": 138,
+  "lag_median_s": 0.009,
+  "lag_p90_s": 0.015,
+  "lag_max_s": 0.053,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": null,
+  "not_planning": {
+   "n": 138,
+   "median_s": 0.009,
+   "p90_s": 0.015,
+   "max_s": 0.053
+  }
+ },
+ "20261118-161142-visit-robots": {
+  "reports": 231,
+  "lag_median_s": 0.009,
+  "lag_p90_s": 0.019,
+  "lag_max_s": 0.059,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 91,
+   "median_s": 0.011,
+   "p90_s": 0.026,
+   "max_s": 0.059
+  },
+  "not_planning": {
+   "n": 140,
+   "median_s": 0.009,
+   "p90_s": 0.015,
+   "max_s": 0.051
+  }
+ },
+ "20261118-164246-visit-robots": {
+  "reports": 141,
+  "lag_median_s": 0.01,
+  "lag_p90_s": 0.016,
+  "lag_max_s": 0.04,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 4,
+   "median_s": 0.038,
+   "p90_s": 0.039,
+   "max_s": 0.039
+  },
+  "not_planning": {
+   "n": 137,
+   "median_s": 0.01,
+   "p90_s": 0.016,
+   "max_s": 0.04
+  }
+ },
+ "20261118-170939-visit-robots": {
+  "reports": 358,
+  "lag_median_s": 0.009,
+  "lag_p90_s": 0.016,
+  "lag_max_s": 0.162,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 5,
+   "median_s": 0.009,
+   "p90_s": 0.012,
+   "max_s": 0.012
+  },
+  "not_planning": {
+   "n": 353,
+   "median_s": 0.009,
+   "p90_s": 0.016,
+   "max_s": 0.162
+  }
+ },
+ "20261118-173209-visit-robots": {
+  "reports": 661,
+  "lag_median_s": 0.01,
+  "lag_p90_s": 0.048,
+  "lag_max_s": 0.537,
+  "over_0.5_s_pct": 0.3,
+  "while_planning": {
+   "n": 270,
+   "median_s": 0.013,
+   "p90_s": 0.071,
+   "max_s": 0.138
+  },
+  "not_planning": {
+   "n": 391,
+   "median_s": 0.008,
+   "p90_s": 0.013,
+   "max_s": 0.537
+  }
+ },
+ "20261118-175439-visit-robots": {
+  "reports": 92,
+  "lag_median_s": 0.01,
+  "lag_p90_s": 0.436,
+  "lag_max_s": 0.498,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 30,
+   "median_s": 0.019,
+   "p90_s": 0.108,
+   "max_s": 0.132
+  },
+  "not_planning": {
+   "n": 62,
+   "median_s": 0.009,
+   "p90_s": 0.475,
+   "max_s": 0.498
+  }
+ },
+ "20261118-180601-visit-robots": {
+  "reports": 315,
+  "lag_median_s": 0.015,
+  "lag_p90_s": 0.097,
+  "lag_max_s": 0.3,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 97,
+   "median_s": 0.015,
+   "p90_s": 0.083,
+   "max_s": 0.3
+  },
+  "not_planning": {
+   "n": 218,
+   "median_s": 0.016,
+   "p90_s": 0.097,
+   "max_s": 0.195
+  }
+ },
+ "20261118-183130-visit-robots": {
+  "reports": 63,
+  "lag_median_s": 0.01,
+  "lag_p90_s": 0.062,
+  "lag_max_s": 0.167,
+  "over_0.5_s_pct": 0.0,
+  "while_planning": {
+   "n": 12,
+   "median_s": 0.063,
+   "p90_s": 0.131,
+   "max_s": 0.167
+  },
+  "not_planning": {
+   "n": 51,
+   "median_s": 0.01,
+   "p90_s": 0.015,
+   "max_s": 0.024
+  }
+ }
+}

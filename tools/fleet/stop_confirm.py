@@ -24,15 +24,28 @@ What this adds:
 Switch (keep features, switch them off): MIRLT_STOP_GROUP=0 sends the Ctrl+C to the leader only, as before; the
 StopWatch still reports. Decided automatically: on.
 
+(e23, school 16 and 18 Nov, cause A) A Stop pressed BEFORE the robots are named (no binding yet) watched the site's
+slot names (Alpha / Bravo, no address at school). No robot ever answers under a slot name there, so the watcher sent
+`stop` to the whole WiFi every 3 s for ever and listened on the robots' log port each time: the next runs' compass
+checks and follow runs were stopped 3 s after they began, and two starts found "port 5005 is in use". Now:
+  * a robot that is only a GUESS (not from this run's binding) and has neither an address nor a WiFi name cannot be
+    told apart from any other robot: it is settled by the first `stop` that went out with the log port read (every
+    robot that answered is listed), not asked for by name again;
+  * cancel(): a new Start ends the watcher (no more `stop`s, the log port free) once every driver has ended;
+  * the listen and the `stop` are skipped while the watcher is cancelled.
+Switch MIRLT_STOP_UNNAMED=wait: the watch as before e23 (asks for the slot names until someone presses "carry on").
+
 Changelog
   2026-11-12a  first version (Mission Control build)
+  2026-11-19e23  robots that were never named are settled by one answered `stop` (school 16 / 18 Nov: the watcher that
+                 never ended); cancel() for a new Start; MIRLT_STOP_UNNAMED
 """
 import os
 import signal
 import threading
 import time
 
-VERSION = "stop-confirm-2026-11-12a"
+VERSION = "stop-confirm-2026-11-19e23"   # e23: unnamed robots settled by one answered stop, cancel(). Before: "stop-confirm-2026-11-12a"
 
 # A process whose command line holds one of these drives robots (or simulates them).
 DRIVER_WORDS = ("run_plan.py", "rp_shim.py", "freeroam.py", "calib_run.py", "fleet_sim.py", "sim_shim.py",
@@ -52,6 +65,22 @@ LISTEN_S = 1.0            # stop_all.LISTEN_S: idle robots answer a `stop` at on
 
 def group_on():
     return os.environ.get("MIRLT_STOP_GROUP", "1") != "0"
+
+
+def unnamed_once():
+    """(e23) A robot that was never named in this run is settled by one answered `stop` (MIRLT_STOP_UNNAMED=once, the
+    default); wait: asked for by its slot name for ever, as before e23."""
+    try:
+        import safety_group as SG
+        return SG.value("MIRLT_STOP_UNNAMED") != "wait"
+    except Exception:  # noqa: BLE001  (the stop never depends on another module)
+        return os.environ.get("MIRLT_STOP_UNNAMED", "once") != "wait"
+
+
+def nameable(r):
+    """Can this robot's own answer be recognised? Robots from the run's binding always (their WiFi name and address
+    are known); a guessed robot only when it has an address or a WiFi name (home's fixed addresses)."""
+    return bool(r.get("bound", True) or r.get("ip") or r.get("ref"))
 
 
 def _stat(pid, proc="/proc"):
@@ -162,6 +191,9 @@ class StopWatch:
         self.done_t = None
         self.thread = None
         self._stage = 0                       # escalation steps taken
+        self.cancelled = None                 # (e23) why it was ended early (a new Start)
+        self.heard_all = {}                   # (e23) every robot that answered a `stop` of this watch: {name: ip}
+        self.unnamed_once = unnamed_once()
 
     # -- the work ------------------------------------------------------------------------------------------------
     def live_drivers(self):
@@ -192,7 +224,7 @@ class StopWatch:
 
     def step(self):
         """One pass. Returns True when every robot has confirmed."""
-        if self.done_t is not None:
+        if self.done_t is not None or self.cancelled:
             return True
         live = self.live_drivers()
         now = self.clock()
@@ -233,11 +265,22 @@ class StopWatch:
                 r["state"], r["words"] = "waiting", "stop sent (try %d); the robots' log port is held by another " \
                                                     "program, so its answer cannot be read yet" % r["tries"]
             return False
+        if self.cancelled:
+            return True
         ips = {ip: n for n, ip in heard.items()}
+        self.heard_all.update(heard)
         for r in todo:
             if r["name"] in heard or (r.get("ref") and r["ref"] in heard) or (r.get("ip") and r["ip"] in ips):
                 r["state"], r["words"] = "confirmed", "answered: stopped"
                 r["confirmed_t"] = round(now - self.t0, 1)
+            elif self.unnamed_once and not nameable(r):
+                # (e23) never named in this run and no address: nobody can answer as "Alpha". The `stop` went to every
+                # robot on the WiFi and the log port was read: that is all that can be known, so it is settled here
+                who = ", ".join("%s at %s" % kv for kv in sorted(self.heard_all.items())) or "no robot"
+                r["state"] = "confirmed"
+                r["words"] = "not named yet in this run: `stop` went to every robot on the WiFi (%s answered)" % who
+                r["confirmed_t"] = round(now - self.t0, 1)
+                r["unnamed"] = True
             elif r in due:
                 r["state"], r["words"] = "no answer", "stop sent %d time%s, no answer yet (asleep, off, or out of " \
                                                       "WiFi?)" % (r["tries"], "" if r["tries"] == 1 else "s")
@@ -260,6 +303,38 @@ class StopWatch:
         self.done_t = self.clock()
         return True
 
+    def cancel(self, why="a new run was started"):
+        """(e23) End the watch early: no more `stop`s, the robots' log port left free. Only once every driver has ended
+        (the escalation must finish its work first): returns False while one is still alive. The thread is joined, so
+        the port is free when this returns."""
+        if self.done_t is not None:
+            return True
+        if self.drivers_gone_t is None and self.live_drivers():
+            return False
+        left = [r["name"] for r in self.robots.values() if r["state"] != "confirmed"]
+        for r in self.robots.values():
+            if r["state"] != "confirmed":
+                r["state"], r["words"] = "not confirmed", "no answer before %s" % why
+        self.events.append([round(self.clock() - self.t0, 1), "ended: %s%s" % (
+            why, (" (%s had not answered)" % ", ".join(left)) if left else "")])
+        self.cancelled = why
+        self.done_t = self.clock()
+        th = self.thread
+        if th is not None and th.is_alive() and th is not threading.current_thread():
+            th.join(LISTEN_S + 2.0)           # at most one listen (LISTEN_S) is under way
+        return True
+
+    def add_jobs(self, jobs):
+        """(e23, one watcher at a time) A second Stop while this watch runs: anything new that was running joins it."""
+        have = {j.pgid for j in self.jobs}
+        for j in jobs:
+            if j.pgid in have:
+                continue
+            self.jobs.append(j)
+            for r in j.robots:
+                self.robots.setdefault(r["name"], dict(r, state="stop sent", words="stop sent", job=j.name, tries=0))
+        self.events.append([round(self.clock() - self.t0, 1), "Stop pressed again: the same watch carries on"])
+
     def run(self, tick_s=0.5):
         while not self.step():
             time.sleep(tick_s)
@@ -272,10 +347,12 @@ class StopWatch:
     # -- what the page shows -------------------------------------------------------------------------------------
     def state(self):
         done = self.done_t is not None
-        rs = [{k: r.get(k) for k in ("name", "ref", "state", "words", "tries", "confirmed_t")}
+        rs = [{k: r.get(k) for k in ("name", "ref", "state", "words", "tries", "confirmed_t", "unnamed")}
               for r in self.robots.values()]
         n_ok = sum(r["state"] == "confirmed" for r in rs)
-        if done and any(r["state"] == "not confirmed" for r in rs):
+        if done and self.cancelled:
+            words = "Stopped (%s)." % self.cancelled
+        elif done and any(r["state"] == "not confirmed" for r in rs):
             words = "Stopped; %s never answered (you carried on without %s)." % (
                 ", ".join(r["name"] for r in rs if r["state"] == "not confirmed"),
                 "it" if sum(r["state"] == "not confirmed" for r in rs) == 1 else "them")

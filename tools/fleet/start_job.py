@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-13e22"   # e22 (Nick 13 Nov): headline() (one plain status line: what runs, since when, each robot found / asleep / not heard, what it waits for), STOP also stops a free roam started from the terminal (its tmux session's Ctrl+C), needs-a-hand requests of an earlier run cleared, the start-failure words say the robots were woken first, note_sleep when robots are sent to sleep. Before: "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov, cause A): a Stop before the robots are named no longer watches slot names for ever (robots_for_stop marks guesses, one watcher at a time, a new Start ends the watcher and waits for the log port), start_wait_words. Before: "2026-11-13e22"   # e22 (Nick 13 Nov): headline() (one plain status line: what runs, since when, each robot found / asleep / not heard, what it waits for), STOP also stops a free roam started from the terminal (its tmux session's Ctrl+C), needs-a-hand requests of an earlier run cleared, the start-failure words say the robots were woken first, note_sleep when robots are sent to sleep. Before: "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -680,6 +680,9 @@ class Starter:
             pr = self.practice()
             if (self.S.site or {}).get("attended_only") and not pr and not attended:
                 raise ValueError("At school the robots drive only while Jay-Sun is in the room: confirm he is here.")
+            self.end_stopwatch()            # (e23) a Stop's watch never outlives the next Start
+            if not pr:
+                self.wait_log_port()        # (e23) ... and the robots' log port is free before the run asks for it
             self.S.stop_asked = False
             self.active, self.active_practice = kind, pr
             self.started_t = time.time()
@@ -700,6 +703,40 @@ class Starter:
             self.last = None
             self.deferred_sleep = None      # (e11) a new run: the sleep held after a refused start is off
             return r
+
+    def end_stopwatch(self):
+        """(e23, school 16 / 18 Nov: a Stop pressed before the robots were named kept sending `stop` to the whole WiFi
+        and listening on the robots' log port, so the next three starts failed) A new Start ends any Stop watch still
+        running: refused only while a process of the stopped run is still alive (its escalation is at work)."""
+        sw = getattr(self, "stopwatch", None)
+        if sw is None or sw.done_t is not None:
+            return
+        if not sw.cancel("a new run was started"):
+            raise ValueError("The last run is still stopping (%s): wait a few seconds and press Start again." % (
+                ", ".join(sorted({os.path.basename(c.split(" ")[1]) if " " in c else c[:30]
+                                  for _j, _p, c in sw.live_drivers()})) or "closing"))
+        print("STOP: the watch of the last Stop ended because a new run was started", flush=True)
+
+    def wait_log_port(self, port=None, timeout_s=None):
+        """(e23, "port 5005 is in use" at two school starts) Wait until nothing on this Pi listens on the robots' log
+        port: a Stop's one-shot `stop` (stop_all.py) listens there for LISTEN_S. DERIVED: at most that listen plus the
+        watcher's own (2 x stop_all.LISTEN_S), then the start goes on and the run says what holds the port. True when
+        free."""
+        import socket
+        import stop_all as SA
+        port = SA.LOG_PORT if port is None else port
+        end = time.time() + (2.0 * SA.LISTEN_S if timeout_s is None else timeout_s)
+        while True:
+            rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                rx.bind(("", port))
+                return True
+            except OSError:
+                if time.time() >= end:
+                    return False
+                time.sleep(0.1)
+            finally:
+                rx.close()
 
     def sim_breaks(self, n):
         """Practice runs break the guesses (Observe, then trust: the simulator's job): roof tags turned, a dark patch
@@ -876,6 +913,12 @@ class Starter:
 
             def send(ips):
                 SA.stop_robots(list(ips) + SA.broadcast_addrs(), broadcast=True)
+            old = getattr(self, "stopwatch", None)
+            if old is not None and old.done_t is None and old.thread is not None and old.thread.is_alive():
+                # (e23) one watcher at a time: Stop pressed again joins the watch that is running (before: each press
+                # started its own, each sending `stop` every 3 s and listening on the log port)
+                old.add_jobs(jobs)
+                return {"stopped": said or ["nothing was running"], "stop": old.state()}
             self.stopwatch = SC.StopWatch(jobs, practice=pr, listen=None if pr else SA.listen_for_robots,
                                           send_stop=None if pr else send, say=lambda w: print("STOP: " + w, flush=True))
             self.stopwatch.kind = self.active
@@ -902,7 +945,9 @@ class Starter:
         return jobs
 
     def robots_for_stop(self):
-        """[{name, ref, ip}]: the robots the run found (binding: nickname, WiFi name, address), else the site's."""
+        """[{name, ref, ip, bound}]: the robots the run found (binding: nickname, WiFi name, address), else the site's
+        as a GUESS (bound False: e23, the StopWatch does not wait for a guessed robot that has no address and no WiFi
+        name, because no robot can answer under a slot name)."""
         out = []
         f = self.run_folder()
         for p in ((os.path.join(f, "bind", "binding.json"), os.path.join(f, "binding.json")) if f else ()):
@@ -911,7 +956,7 @@ class Starter:
                     rec = json.load(fh)
                 for r in rec.get("robots") or []:
                     out.append({"name": r.get("slot") or r.get("name_before"), "ref": r.get("wifi_name") or r.get("ip"),
-                                "ip": r.get("ip")})
+                                "ip": r.get("ip"), "bound": True})
                 if out:
                     return out
             except (OSError, ValueError):
@@ -920,7 +965,7 @@ class Starter:
         site = {r["name"]: r for r in (self.S.site or {}).get("robots") or []}
         refs = robot_refs(self.S.site)
         for n in names or list(site):
-            out.append({"name": n, "ref": refs.get(n), "ip": (site.get(n) or {}).get("ip")})
+            out.append({"name": n, "ref": refs.get(n) or "", "ip": (site.get(n) or {}).get("ip"), "bound": False})
         return out
 
     def _stop_record(self, sw):
@@ -978,6 +1023,14 @@ class Starter:
             out["words"] = ("%s is running%s." % (TITLES[kind], " (practice)" if self.active_practice else "")) \
                 if st.get("running") else "%s ended." % TITLES[kind]
             out["folder"] = st.get("folder")
+            res = None if st.get("running") else self.run_result(st.get("folder"))
+            if res and str(res).startswith("crashed"):
+                # (e23, school 18 Nov: two crashed runs were shown as ended / done) a crash is said as a crash
+                out["crashed"] = True
+                out["words"] = "%s CRASHED and did not finish (a program error, not the robots): %s" % (
+                    TITLES[kind], str(res)[len("crashed:"):].strip() or "see the run's log")
+            elif res and res != "done":
+                out["words"] = "%s ended: %s" % (TITLES[kind], res)
             if not out["lines"]:
                 out["lines"] = self.mission_tail(st.get("folder"))
             refused = self.refusal_words(st.get("folder"))
@@ -989,6 +1042,10 @@ class Starter:
             w_ = self.start_failure_words(out.get("folder"))
             if w_:
                 out["words"], out["refused"] = w_, True
+        if kind == "visit":
+            vw = self.visit_warning(out.get("folder"))        # (e23) listed points no camera of the run can see
+            if vw:
+                out["visit_warning"] = vw
         out["upload"] = self.upload_state(out.get("folder"), running, self.active_practice)   # (12 Nov, 1b)
         sw = getattr(self, "stopwatch", None)
         if sw is not None and getattr(sw, "kind", None) == kind and sw.t0 >= getattr(self, "started_t", 0) - 1:
@@ -1206,6 +1263,28 @@ class Starter:
                     "press Experiment routes again; or plug in camera 2.")
         txt = ln.split("NOT STARTED", 1)[1].lstrip(": ")
         return "Not started, nothing moved: %s" % txt
+
+    def visit_warning(self, folder):
+        """(e23) The run's own warning about listed points outside every camera it uses (visit_order.json)."""
+        try:
+            with open(os.path.join(folder or "", "visit_order.json")) as f:
+                return str(json.load(f).get("warning") or "")
+        except (OSError, ValueError, AttributeError):
+            return ""
+
+    def run_result(self, folder):
+        """(e23) The run's own result (mission_summary.json, else the run program's summary): "done", "interrupted",
+        "crashed: ...", or None when there is none yet."""
+        for p in (os.path.join(folder or "", "mission_summary.json"),
+                  os.path.join(folder or "", "run", "run_plan_summary.json")):
+            try:
+                with open(p) as f:
+                    r = json.load(f).get("result")
+                if r:
+                    return str(r)
+            except (OSError, ValueError, AttributeError):
+                continue
+        return None
 
     def mission_tail(self, folder, n=8):
         for p in (os.path.join(folder or "", "mission_stdout.txt"), os.path.join(folder or "", "log.txt"),
