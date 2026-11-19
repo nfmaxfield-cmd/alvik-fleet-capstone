@@ -1,0 +1,890 @@
+{
+ "20261118-130132-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 24.0,
+   "p90": 65.1
+  },
+  "core2": {
+   "median": 77.0,
+   "p90": 99.5
+  },
+  "core3": {
+   "median": 62.9,
+   "p90": 99.5
+  },
+  "load1": {
+   "median": 3.9,
+   "p90": 4.1
+  },
+  "temp_c": {
+   "median": 76.0,
+   "p90": 77.4
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2625.0,
+   "p90": 2796.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 291.7,
+   "p90": 291.7
+  },
+  "recorder_cpu": {
+   "median": 98.2,
+   "p90": 99.0
+  },
+  "recorder_rss_mb": {
+   "median": 268.7,
+   "p90": 268.7
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 22.8,
+   "p90": 80.3
+  },
+  "run_plan_rss_mb": {
+   "median": 293.2,
+   "p90": 293.5
+  },
+  "tag_bridge_cpu": {
+   "median": 109.3,
+   "p90": 111.4
+  },
+  "tag_bridge_rss_mb": {
+   "median": 262.7,
+   "p90": 268.0
+  }
+ },
+ "20261118-132919-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 32.5,
+   "p90": 69.2
+  },
+  "core2": {
+   "median": 71.3,
+   "p90": 99.0
+  },
+  "core3": {
+   "median": 64.7,
+   "p90": 97.5
+  },
+  "load1": {
+   "median": 3.5,
+   "p90": 4.1
+  },
+  "temp_c": {
+   "median": 75.5,
+   "p90": 77.4
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2643.5,
+   "p90": 2739.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 314.4,
+   "p90": 314.4
+  },
+  "recorder_cpu": {
+   "median": 97.9,
+   "p90": 99.3
+  },
+  "recorder_rss_mb": {
+   "median": 269.1,
+   "p90": 269.2
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 33.2,
+   "p90": 58.8
+  },
+  "run_plan_rss_mb": {
+   "median": 256.6,
+   "p90": 279.4
+  },
+  "tag_bridge_cpu": {
+   "median": 110.8,
+   "p90": 112.3
+  },
+  "tag_bridge_rss_mb": {
+   "median": 250.5,
+   "p90": 268.9
+  }
+ },
+ "20261118-134340-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 99.0,
+   "p90": 100.0
+  },
+  "core2": {
+   "median": 97.5,
+   "p90": 99.5
+  },
+  "core3": {
+   "median": 85.2,
+   "p90": 99.5
+  },
+  "load1": {
+   "median": 5.7,
+   "p90": 6.0
+  },
+  "temp_c": {
+   "median": 76.9,
+   "p90": 78.9
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2539.5,
+   "p90": 2702.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 270.8,
+   "p90": 270.8
+  },
+  "recorder_cpu": {
+   "median": 92.0,
+   "p90": 94.9
+  },
+  "recorder_rss_mb": {
+   "median": 269.5,
+   "p90": 269.5
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 39.2,
+   "p90": 105.0
+  },
+  "run_plan_rss_mb": {
+   "median": 303.5,
+   "p90": 342.9
+  },
+  "tag_bridge_cpu": {
+   "median": 101.5,
+   "p90": 108.5
+  },
+  "tag_bridge_rss_mb": {
+   "median": 262.9,
+   "p90": 272.2
+  }
+ },
+ "20261118-143047-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 68.5,
+   "p90": 98.5
+  },
+  "core2": {
+   "median": 90.4,
+   "p90": 99.5
+  },
+  "core3": {
+   "median": 77.5,
+   "p90": 99.0
+  },
+  "load1": {
+   "median": 5.2,
+   "p90": 6.3
+  },
+  "temp_c": {
+   "median": 78.9,
+   "p90": 80.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2554.5,
+   "p90": 2613.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 283.8,
+   "p90": 283.8
+  },
+  "recorder_cpu": {
+   "median": 93.1,
+   "p90": 97.5
+  },
+  "recorder_rss_mb": {
+   "median": 400.3,
+   "p90": 400.4
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 33.3,
+   "p90": 99.0
+  },
+  "run_plan_rss_mb": {
+   "median": 242.4,
+   "p90": 299.2
+  },
+  "tag_bridge_cpu": {
+   "median": 104.6,
+   "p90": 108.9
+  },
+  "tag_bridge_rss_mb": {
+   "median": 259.9,
+   "p90": 272.7
+  }
+ },
+ "20261118-150347-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 33.3,
+   "p90": 61.6
+  },
+  "core2": {
+   "median": 83.1,
+   "p90": 91.0
+  },
+  "core3": {
+   "median": 79.0,
+   "p90": 89.7
+  },
+  "load1": {
+   "median": 6.2,
+   "p90": 6.9
+  },
+  "temp_c": {
+   "median": 78.4,
+   "p90": 80.3
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2374.0,
+   "p90": 2465.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 294.5,
+   "p90": 294.5
+  },
+  "recorder_cpu": {
+   "median": 97.2,
+   "p90": 98.7
+  },
+  "recorder_rss_mb": {
+   "median": 409.6,
+   "p90": 409.6
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 32.2,
+   "p90": 51.6
+  },
+  "run_plan_rss_mb": {
+   "median": 270.8,
+   "p90": 289.1
+  },
+  "tag_bridge_cpu": {
+   "median": 144.3,
+   "p90": 164.8
+  },
+  "tag_bridge_rss_mb": {
+   "median": 270.7,
+   "p90": 289.7
+  }
+ },
+ "20261118-161142-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 42.7,
+   "p90": 85.5
+  },
+  "core2": {
+   "median": 86.3,
+   "p90": 94.6
+  },
+  "core3": {
+   "median": 85.4,
+   "p90": 95.5
+  },
+  "load1": {
+   "median": 6.5,
+   "p90": 7.6
+  },
+  "temp_c": {
+   "median": 79.4,
+   "p90": 81.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2459.5,
+   "p90": 2587.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 295.4,
+   "p90": 295.4
+  },
+  "recorder_cpu": {
+   "median": 96.2,
+   "p90": 98.2
+  },
+  "recorder_rss_mb": {
+   "median": 401.9,
+   "p90": 402.6
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 38.2,
+   "p90": 106.5
+  },
+  "run_plan_rss_mb": {
+   "median": 286.2,
+   "p90": 305.3
+  },
+  "tag_bridge_cpu": {
+   "median": 141.4,
+   "p90": 160.7
+  },
+  "tag_bridge_rss_mb": {
+   "median": 280.9,
+   "p90": 291.3
+  }
+ },
+ "20261118-164246-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 97.1,
+   "p90": 100.0
+  },
+  "core2": {
+   "median": 91.9,
+   "p90": 98.5
+  },
+  "core3": {
+   "median": 87.9,
+   "p90": 99.0
+  },
+  "load1": {
+   "median": 7.7,
+   "p90": 8.1
+  },
+  "temp_c": {
+   "median": 82.8,
+   "p90": 83.3
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1775.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2374.0,
+   "p90": 2487.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 280.5,
+   "p90": 280.5
+  },
+  "recorder_cpu": {
+   "median": 92.8,
+   "p90": 95.8
+  },
+  "recorder_rss_mb": {
+   "median": 404.2,
+   "p90": 406.7
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 31.6,
+   "p90": 82.7
+  },
+  "run_plan_rss_mb": {
+   "median": 274.3,
+   "p90": 295.1
+  },
+  "tag_bridge_cpu": {
+   "median": 131.2,
+   "p90": 137.6
+  },
+  "tag_bridge_rss_mb": {
+   "median": 274.8,
+   "p90": 290.4
+  }
+ },
+ "20261118-170939-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 45.3,
+   "p90": 54.3
+  },
+  "core2": {
+   "median": 86.2,
+   "p90": 90.5
+  },
+  "core3": {
+   "median": 85.6,
+   "p90": 89.6
+  },
+  "load1": {
+   "median": 6.9,
+   "p90": 7.2
+  },
+  "temp_c": {
+   "median": 81.8,
+   "p90": 82.3
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2450.0,
+   "p90": 2567.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 298.5,
+   "p90": 298.5
+  },
+  "recorder_cpu": {
+   "median": 96.1,
+   "p90": 97.9
+  },
+  "recorder_rss_mb": {
+   "median": 407.1,
+   "p90": 407.3
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 39.4,
+   "p90": 51.1
+  },
+  "run_plan_rss_mb": {
+   "median": 285.1,
+   "p90": 293.0
+  },
+  "tag_bridge_cpu": {
+   "median": 159.0,
+   "p90": 166.5
+  },
+  "tag_bridge_rss_mb": {
+   "median": 303.0,
+   "p90": 305.2
+  }
+ },
+ "20261118-173209-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 98.5,
+   "p90": 100.0
+  },
+  "core2": {
+   "median": 97.0,
+   "p90": 100.0
+  },
+  "core3": {
+   "median": 96.4,
+   "p90": 100.0
+  },
+  "load1": {
+   "median": 8.4,
+   "p90": 9.6
+  },
+  "temp_c": {
+   "median": 82.8,
+   "p90": 83.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1726.0,
+   "p90": 1775.0
+  },
+  "mem_avail_mb": {
+   "median": 2379.0,
+   "p90": 2419.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 293.5,
+   "p90": 293.5
+  },
+  "recorder_cpu": {
+   "median": 93.5,
+   "p90": 95.7
+  },
+  "recorder_rss_mb": {
+   "median": 408.1,
+   "p90": 408.3
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 28.0,
+   "p90": 96.0
+  },
+  "run_plan_rss_mb": {
+   "median": 277.2,
+   "p90": 315.8
+  },
+  "tag_bridge_cpu": {
+   "median": 118.7,
+   "p90": 146.5
+  },
+  "tag_bridge_rss_mb": {
+   "median": 272.5,
+   "p90": 290.1
+  }
+ },
+ "20261118-175439-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 99.5,
+   "p90": 100.0
+  },
+  "core2": {
+   "median": 99.5,
+   "p90": 100.0
+  },
+  "core3": {
+   "median": 99.5,
+   "p90": 100.0
+  },
+  "load1": {
+   "median": 9.1,
+   "p90": 9.7
+  },
+  "temp_c": {
+   "median": 82.8,
+   "p90": 83.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1726.0,
+   "p90": 1775.0
+  },
+  "mem_avail_mb": {
+   "median": 2360.0,
+   "p90": 2423.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 292.3,
+   "p90": 292.3
+  },
+  "recorder_cpu": {
+   "median": 93.0,
+   "p90": 95.6
+  },
+  "recorder_rss_mb": {
+   "median": 408.3,
+   "p90": 408.5
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 80.5,
+   "p90": 101.7
+  },
+  "run_plan_rss_mb": {
+   "median": 300.9,
+   "p90": 366.9
+  },
+  "tag_bridge_cpu": {
+   "median": 96.6,
+   "p90": 141.7
+  },
+  "tag_bridge_rss_mb": {
+   "median": 277.3,
+   "p90": 296.3
+  }
+ },
+ "20261118-180601-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 98.5,
+   "p90": 100.0
+  },
+  "core2": {
+   "median": 99.0,
+   "p90": 100.0
+  },
+  "core3": {
+   "median": 99.0,
+   "p90": 100.0
+  },
+  "load1": {
+   "median": 8.7,
+   "p90": 9.5
+  },
+  "temp_c": {
+   "median": 82.8,
+   "p90": 83.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1726.0,
+   "p90": 1775.0
+  },
+  "mem_avail_mb": {
+   "median": 2381.5,
+   "p90": 2483.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 1.5
+  },
+  "mission_rss_mb": {
+   "median": 280.3,
+   "p90": 280.3
+  },
+  "recorder_cpu": {
+   "median": 92.5,
+   "p90": 95.1
+  },
+  "recorder_rss_mb": {
+   "median": 408.6,
+   "p90": 408.7
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 92.6,
+   "p90": 98.2
+  },
+  "run_plan_rss_mb": {
+   "median": 302.1,
+   "p90": 316.8
+  },
+  "tag_bridge_cpu": {
+   "median": 104.7,
+   "p90": 137.8
+  },
+  "tag_bridge_rss_mb": {
+   "median": 287.0,
+   "p90": 301.2
+  }
+ },
+ "20261118-183130-visit-robots": {
+  "core0": {
+   "median": 100.0,
+   "p90": 100.0
+  },
+  "core1": {
+   "median": 81.0,
+   "p90": 99.0
+  },
+  "core2": {
+   "median": 89.3,
+   "p90": 99.0
+  },
+  "core3": {
+   "median": 85.8,
+   "p90": 99.5
+  },
+  "load1": {
+   "median": 6.1,
+   "p90": 7.5
+  },
+  "temp_c": {
+   "median": 82.3,
+   "p90": 82.8
+  },
+  "freq_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "arm_mhz": {
+   "median": 1800.0,
+   "p90": 1800.0
+  },
+  "mem_avail_mb": {
+   "median": 2439.0,
+   "p90": 2591.0
+  },
+  "mission_cpu": {
+   "median": 1.0,
+   "p90": 2.0
+  },
+  "mission_rss_mb": {
+   "median": 312.3,
+   "p90": 312.3
+  },
+  "recorder_cpu": {
+   "median": 94.5,
+   "p90": 98.0
+  },
+  "recorder_rss_mb": {
+   "median": 409.7,
+   "p90": 409.8
+  },
+  "recorder_cores": {
+   "median": 0.0,
+   "p90": 0.0
+  },
+  "run_plan_cpu": {
+   "median": 59.4,
+   "p90": 127.8
+  },
+  "run_plan_rss_mb": {
+   "median": 276.4,
+   "p90": 365.3
+  },
+  "tag_bridge_cpu": {
+   "median": 117.8,
+   "p90": 141.7
+  },
+  "tag_bridge_rss_mb": {
+   "median": 266.8,
+   "p90": 302.5
+  }
+ }
+}

@@ -8,7 +8,7 @@ Used by the sizing tests (tools/fleet/tag_sizing.py), the camera check-out's tes
 (tools/sim/fleet_sim.py --tag-cams), so the real detector (tools/fleet/tagcore.py) reads every simulated picture.
 The camera's true model (tools/recognition/cameras.py's CameraModel) is what a perfect setup would measure.
 """
-VERSION = "tag-cam-2026-11-10e13"   # e13: cfg plain_roofs (robots with no roof tag). No version string before
+VERSION = "tag-cam-2026-11-19e23"   # e23: cfg late {every_s, stall_s, first_s}: the stream freezes for stall_s every every_s, then hands out the picture taken when the freeze began, stamped with its own time (school 18 Nov: the bridge stalled 1.5 s and the next pictures were 1.2-1.7 s old). Before: "tag-cam-2026-11-10e13"   # e13: cfg plain_roofs (robots with no roof tag). No version string before
 import math
 import os
 import sys
@@ -473,6 +473,7 @@ def serve_live(sim, cfg, out_dir):
         servers.append(srv)
         sim.log("serving the simulated tag camera %s (%dx%d) at http://127.0.0.1:%d/live" % (c.name, c.W, c.H, port))
     period = 1.0 / float(cfg.get("fps", 12.0))
+    t_first, held = [None], {}          # (e23) late pictures (cfg "late")
     n = 0
     prev = {}
     low = cfg.get("low_res") or {}
@@ -524,6 +525,22 @@ def serve_live(sim, cfg, out_dir):
                 body = buf.tobytes()
             if n == 1:
                 cv2.imwrite(os.path.join(out_dir, "live_first_%s.png" % c.name), img)
+            late = cfg.get("late") or {}
+            if late and float(late.get("stall_s") or 0.0) > 0.0:
+                # (e23) late pictures: every every_s the stream freezes for stall_s; the picture taken as the freeze
+                # began is the next one handed out, stamped with its OWN time (so it arrives stall_s old)
+                if t_first[0] is None:
+                    t_first[0] = t_cap
+                ph = (t_cap - t_first[0] - float(late.get("first_s", 20.0))) % float(late.get("every_s", 20.0))
+                if t_cap - t_first[0] >= float(late.get("first_s", 20.0)) and ph < float(late["stall_s"]):
+                    held.setdefault(c.name, (body, n, t_cap))
+                    continue
+                if c.name in held:
+                    body, n_h, t_h = held.pop(c.name)
+                    with cond:
+                        latest[c.name][0] = (body, n, t_h + 0.04 + float(cfg.get("clock_skew_s") or 0.0))
+                        cond.notify_all()
+                    continue
             with cond:
                 latest[c.name][0] = (body, n, t_cap + 0.04 + float(cfg.get("clock_skew_s") or 0.0))   # (11-05h)
                 #                                                            a camera clock off by clock_skew_s

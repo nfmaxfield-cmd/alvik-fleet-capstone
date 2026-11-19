@@ -558,22 +558,33 @@ def test_a_stop_far_from_its_point_is_not_credited():
     assert ok is False and not c.__dict__.get("points")
     r = c.not_reached[0]
     assert r["reached"] is False and abs(r["miss_cm"] - 24.5) < 0.2 and r["reach_tol_cm"] < 6.0
+    assert c.stop_misses == [r["miss_cm"]] or abs(c.stop_misses[0] - 24.5) < 0.2
     assert "NOT REACHED" in r["words"] and "24.5 cm" in r["words"]
     # the same stop at the point is credited as before
     b.fix_log = [dict(t=t1 - 4.0 + 0.3 * k, x=262.0, y=123.6, unc=1.7, cams=["side"]) for k in range(12)]
-    assert RP.Coordinator.record_point(c, b, "point P29", t1 - 5.0, t1, target=[261.6, 124.5]) is True
-    assert c.points[0]["reached"] is True and c.points[0]["miss_cm"] < 1.5
+    b.point_target = [261.6, 124.5]                                  # as point_step hands it over
+    assert RP.Coordinator.record_point(c, b, "point P29", t1 - 5.0, t1) is True
+    assert c.points[0]["reached"] is True and c.points[0]["miss_cm"] < 1.5 and b.point_target is None
 
 
 def test_the_reach_tolerance_is_derived_and_a_missed_stop_is_not_done():
     c = _point_coord()
-    assert c.reach_tol_cm(1.7) == round(math.hypot(SR.TRACK_P95_CM, SR.stop_cm(None)) + 1.7, 1)
+    derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(None))
+    seed = c.MISS_SEED_CM[0] + 3.0 * 1.4826 * c.MISS_SEED_CM[1]        # the school's measured scatter: 5.5 cm
+    assert c.reach_tol_cm(1.7) == round(max(derived + 1.7, seed), 1) == 5.5
+    assert c.reach_tol_cm(7.2) == round(derived + 7.2, 1)              # a doubtful position has its own wider +-
+    d = json.load(open(os.path.join(REPO, "docs", "results", "e23-school-fixes", "real_stop_miss.json")))
+    assert d["stops"] == 131 and abs(d["median_miss_cm"] - c.MISS_SEED_CM[0]) < 0.1
     src = open(os.path.join(FLEET, "run_plan.py")).read()
     k = src.index("ok = self.record_point(b, lab[3:], t0, t, interrupted=")
     assert "if ok is not False:" in src[k:k + 400] and "done_labels" in src[k:k + 500]
-    # the six stops the report lists as credited far from their points would all be refused at their stated +-
-    for miss, pm in ((76.5, 2.4), (39.5, 2.4), (25.4, 7.2), (12.8, 7.2), (15.6, 7.2), (11.2, 7.2)):
+    # every stop the 18 Nov report lists as credited far from its point is refused at its stated +-
+    for miss, pm in ((76.5, 1.6), (39.5, 1.6), (29.1, 2.4), (25.4, 4.6), (24.4, 1.7), (15.6, 1.6), (12.8, 1.7),
+                     (11.2, 1.7)):
         assert miss > c.reach_tol_cm(pm)
+    # ... and a table whose stops normally scatter wider (this run's own stops) is judged by its own scatter
+    c.stop_misses = [3.9, 4.6, 5.2, 5.8, 4.4, 6.1, 5.0, 3.5]
+    assert c.reach_tol_cm(1.7) > 6.1 and 24.5 > c.reach_tol_cm(1.7)
 
 
 def test_the_old_crediting_is_kept_behind_its_switch(monkeypatch):

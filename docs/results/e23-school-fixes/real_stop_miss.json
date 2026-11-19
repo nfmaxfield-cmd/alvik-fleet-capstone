@@ -1,0 +1,160 @@
+{
+ "stops": 131,
+ "median_miss_cm": 2.8,
+ "p90_miss_cm": 6.3,
+ "refused": 15,
+ "refused_list": [
+  {
+   "run": "20261118-173209-visit-robots",
+   "robot": "Alpha",
+   "point": "P04",
+   "miss_cm": 76.5,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-173209-visit-robots",
+   "robot": "Alpha",
+   "point": "P06",
+   "miss_cm": 39.5,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Bravo",
+   "point": "P29",
+   "miss_cm": 29.1,
+   "pm_cm": 2.4,
+   "tol_cm": 5.3,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-173209-visit-robots",
+   "robot": "Alpha",
+   "point": "P20",
+   "miss_cm": 25.4,
+   "pm_cm": 4.6,
+   "tol_cm": 7.5,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Bravo",
+   "point": "P29",
+   "miss_cm": 24.5,
+   "pm_cm": 1.7,
+   "tol_cm": 4.6,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Bravo",
+   "point": "P29",
+   "miss_cm": 24.4,
+   "pm_cm": 1.7,
+   "tol_cm": 4.6,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Bravo",
+   "point": "P29",
+   "miss_cm": 24.4,
+   "pm_cm": 1.7,
+   "tol_cm": 4.6,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-180601-visit-robots",
+   "robot": "Bravo",
+   "point": "P35",
+   "miss_cm": 15.6,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-180601-visit-robots",
+   "robot": "Bravo",
+   "point": "P36",
+   "miss_cm": 12.8,
+   "pm_cm": 1.7,
+   "tol_cm": 4.6,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Alpha",
+   "point": "P11",
+   "miss_cm": 11.2,
+   "pm_cm": 1.7,
+   "tol_cm": 4.6,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-175439-visit-robots",
+   "robot": "Alpha",
+   "point": "P33",
+   "miss_cm": 8.8,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "odometry only",
+   "refused": true
+  },
+  {
+   "run": "20261118-180601-visit-robots",
+   "robot": "Alpha",
+   "point": "P15",
+   "miss_cm": 5.7,
+   "pm_cm": 1.8,
+   "tol_cm": 4.7,
+   "source": "one camera (side)",
+   "refused": true
+  },
+  {
+   "run": "20261118-161142-visit-robots",
+   "robot": "Alpha",
+   "point": "P01",
+   "miss_cm": 5.5,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-170939-visit-robots",
+   "robot": "Alpha",
+   "point": "P04",
+   "miss_cm": 5.3,
+   "pm_cm": 1.6,
+   "tol_cm": 4.5,
+   "source": "one camera (overhead)",
+   "refused": true
+  },
+  {
+   "run": "20261118-170939-visit-robots",
+   "robot": "Alpha",
+   "point": "P01",
+   "miss_cm": 4.8,
+   "pm_cm": 1.8,
+   "tol_cm": 4.7,
+   "source": "one camera (overhead)",
+   "refused": true
+  }
+ ],
+ "kept_max_miss_cm": 7.0,
+ "share_under_3cm": 0.611
+}

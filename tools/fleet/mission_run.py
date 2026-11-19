@@ -1780,6 +1780,11 @@ def run(args):
             tcfg["dark"] = [[float(v) for v in d.split(",")] for d in args.sim_dark]
         if args.sim_clock_skew:
             tcfg["clock_skew_s"] = float(args.sim_clock_skew)     # (11-05h) the pictures stamped on a skewed clock
+        if getattr(args, "sim_late", ""):
+            # (e23) late pictures as on the school Pi (18 Nov): EVERY,STALL[,FIRST] s: the stream freezes for STALL
+            # every EVERY s and the next picture is that old when it comes
+            lv = [float(v) for v in str(args.sim_late).split(",")]
+            tcfg["late"] = {"every_s": lv[0], "stall_s": lv[1], "first_s": lv[2] if len(lv) > 2 else 20.0}
         tcp = os.path.join(out, "tag_cams.json")
         with open(tcp, "w") as f:
             json.dump(tcfg, f, indent=1)
@@ -2299,6 +2304,7 @@ def main(argv=None):
                    "point-fix simulator first (found however many, heading nudge, compass check after a restart)")
     g.add_argument("--sim-tag-yaw", default="", metavar="NAME=DEG,...", help="(11-05h) those robots' roof tags are "
                    "turned on them by DEG (the simulator draws and reads them so)")
+    g.add_argument("--sim-late", default="", metavar="EVERY,STALL[,FIRST]", help="(e23, dry) late pictures: the simulated cameras freeze for STALL s every EVERY s (from FIRST s on) and the next picture arrives that old, stamped with its own time (school 18 Nov)")
     g.add_argument("--sim-clock-skew", type=float, default=0.0, metavar="S",
                    help="(11-05h) the simulated cameras stamp their pictures S s off the Pi's clock")
     g.add_argument("--sim-dark", action="append", default=[], metavar="X0,Y0,X1,Y1",

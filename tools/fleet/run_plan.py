@@ -2675,8 +2675,8 @@ class Coordinator:
             d = getattr(b, "dwell", None)
             t0 = d["t0"] if d and d["point"] == lab[3:] else t - float(stp.get("t_end", 0) - stp.get("t_start", 0))
             b.dwell = None
-            ok = self.record_point(b, lab[3:], t0, t, interrupted=bool(d and d.get("interrupted")),
-                                   target=list(stp["to"][:2]) if stp.get("to") else None)
+            b.point_target = list(stp["to"][:2]) if stp.get("to") else None      # (e23) where this stop should be
+            ok = self.record_point(b, lab[3:], t0, t, interrupted=bool(d and d.get("interrupted")))
             if ok is not False:
                 self.__dict__.setdefault("done_labels", set()).add(lab)      # (e23) only a stop AT the point is done
 
@@ -2694,17 +2694,41 @@ class Coordinator:
             return math.hypot(b.pose[0] - d["pose"][0], b.pose[1] - d["pose"][1]) <= self.DWELL_STILL_CM
         return False
 
+    # (e23) "At the point": how far from a point a stop may be and still count.
+    MISS_SEED_CM = (2.82, 0.61)   # MEASURED: the median and the median absolute deviation of how far the 131 recorded
+    #                               stops of the school runs of 16 and 18 Nov stood from their points (the camera's
+    #                               median during the stop against the point's typed position;
+    #                               docs/results/e23-school-fixes/real_stop_miss.json). The starting guess for a run's
+    #                               normal scatter; the run's own stops replace it once it has MISS_OWN_N of them
+    MISS_OWN_N = 5                # [chosen] a run's own scatter counts from this many stops on. No DOE: bookkeeping
+    MISS_MADS = 3.0               # the usual robust outlier rule: beyond 3 scaled MADs (1.4826 x MAD) of the median.
+    #                               A convention, not tuned here. No DOE
+
     def reach_tol_cm(self, plus_minus_cm, speed=None):
-        """(e23) How far from a point a stop may be and still be AT it. DERIVED: where a drive ends against its planned
-        end (safety_rules.TRACK_P95_CM across, stop_cm along: both measured, 95th percentile) plus this stop's own
-        stated +- (95 %). Nothing typed."""
+        """(e23) How far from a point a stop may be and still be AT it: the larger of
+          * DERIVED: where a drive ends against its planned end (safety_rules.TRACK_P95_CM across, stop_cm along: both
+            measured, 95th percentile) plus this stop's own stated +- (95 %);
+          * OBSERVED: the normal scatter of stops (median + 3 scaled MADs of how far stops stand from their points: the
+            school's measured record to begin with, this run's own stops once it has five), so a stop is refused only
+            when it is far outside what stops at this table normally do (school: 5.5 cm; the stops the 18 Nov report
+            lists stood 8.8 to 77 cm away)."""
         import safety_rules as SR
-        return round(math.hypot(SR.TRACK_P95_CM, SR.stop_cm(speed)) + float(plus_minus_cm or 0.0), 1)
+        derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(speed)) + float(plus_minus_cm or 0.0)
+        m = self.__dict__.get("stop_misses") or []
+        if len(m) >= self.MISS_OWN_N:
+            med = statistics.median(m)
+            mad = statistics.median([abs(v - med) for v in m])
+        else:
+            med, mad = self.MISS_SEED_CM
+        return round(max(derived, med + self.MISS_MADS * 1.4826 * mad), 1)
 
     def record_point(self, b, point, t0, t1, interrupted=False, target=None):
         """One stop at a production point. (e23) Returns False when the robot's best position was NOT at the point
-        (beyond reach_tol_cm of `target`): the stop is kept apart as "not reached" with the distance, and is not a
-        visit (school 18 Nov: P29 credited four times from 24-29 cm away, six more stops 11-77 cm off)."""
+        (beyond reach_tol_cm of where the stop should be: `target`, else b.point_target): the stop is kept apart as
+        "not reached" with the distance, and is not a visit (school 18 Nov: P29 credited four times from 24-29 cm away,
+        six more stops 11-77 cm off)."""
+        if target is None:
+            target, b.point_target = getattr(b, "point_target", None), None
         lg = [f for f in (getattr(b, "fix_log", None) or []) if t0 - 0.05 <= f["t"] <= t1 + 0.05]
         own = list(b.pose) if b.pose else None
         rec = dict(robot=b.name, point=point, t_run=round(t1 - self.t_run, 2) if self.t_run else None,
@@ -2749,13 +2773,17 @@ class Coordinator:
         if POINT_CREDIT_REACHED and target is not None and rec.get("x") is not None:
             miss = math.hypot(rec["x"] - float(target[0]), rec["y"] - float(target[1]))
             tol = self.reach_tol_cm(rec.get("plus_minus_cm"))
+            sm = self.__dict__.setdefault("stop_misses", [])
+            sm.append(miss)                # every stop, reached or not: the run's own scatter (robust to the far ones)
+            del sm[:-200]
             rec.update(target=[round(float(target[0]), 2), round(float(target[1]), 2)], miss_cm=round(miss, 1),
                        reach_tol_cm=tol, reached=bool(miss <= tol))
             if miss > tol:
                 rec["words"] = "%s (%s): NOT REACHED: it stood %.1f cm from the point (at %.1f, %.1f; the point is " \
-                               "at %.1f, %.1f; a stop counts within %.1f cm: where drives end plus this position's " \
-                               "own \u00b1%.1f cm), %s" % (point, b.name, miss, rec["x"], rec["y"], target[0], target[1],
-                                                           tol, rec.get("plus_minus_cm") or 0.0, rec.get("source"))
+                               "at %.1f, %.1f; a stop counts within %.1f cm: the larger of where drives end plus " \
+                               "this position's own \u00b1%.1f cm and the normal scatter of stops), %s" % (
+                                   point, b.name, miss, rec["x"], rec["y"], target[0], target[1], tol,
+                                   rec.get("plus_minus_cm") or 0.0, rec.get("source"))
                 self.__dict__.setdefault("not_reached", []).append(rec)
                 self.log("point_not_reached", **rec)
                 self.say("POINT " + rec["words"] + ": not counted as a visit")
