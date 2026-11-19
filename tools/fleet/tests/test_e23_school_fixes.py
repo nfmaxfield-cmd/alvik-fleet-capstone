@@ -460,19 +460,55 @@ def test_the_run_is_not_finished_while_a_list_goes_on_and_the_next_points_are_as
     assert "point A5" in c.listed_labels("Alpha")
 
 
+def test_the_run_is_not_done_while_handed_over_points_wait_for_a_replan_that_is_due():
+    """Simulator, 19 Nov (late pictures, 20 + 20 points): Bravo was held 253 s in, its 25 points not done went to
+    Alpha, which had finished its own; the re-plan for them was due 5 s later (past the re-plan cap) and the run ended
+    "done" before it."""
+    mm, plan = _long_plan(3)
+    c = coord(mm, plan)
+    for n in c.names:
+        for st in c.bots[n].stat:
+            st["status"] = "done"
+    assert RP.Coordinator.finished(c) is True
+    c.others_done_t = None
+    items = [{"label": "point B9", "goto": [60.0, 40.0]}, {"label": "at point B9", "wait_s": 5.0}]
+    RP.Coordinator.insert_visits(c, "Alpha", items)                  # what reassign_points does for a held Bravo
+    assert RP.Coordinator.handed_points_waiting(c) == {"Alpha": ["point B9"]}
+    c.pending_replan = ("re-plan after the cap, spaced", RP.now() + 5.0)
+    assert RP.Coordinator.finished(c) is False
+    # no re-plan due (it was made and could not place the point), or the point done since: the run can end
+    c.pending_replan = None
+    assert RP.Coordinator.finished(c) is True
+    c.pending_replan = ("again", RP.now() + 5.0)
+    c.done_labels = {"at point B9"}
+    assert RP.Coordinator.finished(c) is True
+
+
 def test_points_ahead_come_from_the_measured_planning_cost():
     mm, plan = _long_plan(4)
     c = coord(mm, plan)
     budget = float(c.plan["settings"]["replan_budget_s"])
-    # nothing measured yet: the school Pi's 0.36 s a point, two robots
-    assert RP.Coordinator.plan_ahead_k(c) == max(c.PLAN_AHEAD_MIN, int(budget / c.PLAN_COST_SEED_S / 2))
-    for _ in range(3):
-        RP.Coordinator.note_plan_cost(c, 0.2, 10)                    # this run plans a point in 0.02 s
+    a0, c0 = c.PLAN_COST_SEED
+    # nothing measured yet: the school Pi's line (0.4 s fixed + 0.36 s a point), two robots
+    assert RP.Coordinator.plan_ahead_k(c) == max(c.PLAN_AHEAD_MIN, int((budget - a0) / c0 / 2)) == 2
+    # one size measured, far quicker than the Pi (a desk machine): the Pi's line scaled to it
+    for _ in range(2):
+        RP.Coordinator.note_plan_cost(c, 0.4, 10)
+    fixed, per, how = RP.Coordinator.plan_cost(c)
+    assert abs(fixed + per * 10 - 0.4) < 1e-6 and "scaled" in how
+    assert RP.Coordinator.plan_ahead_k(c) > 10
+    # two sizes measured: a fitted line. A machine whose FIXED part alone is over the budget (the grid, built for
+    # every re-plan) gains nothing from planning fewer points and pays FIXED at every extra re-plan: the whole list
+    c.plan_costs = [(4, 12.4), (10, 13.0), (40, 16.0), (4, 12.5)]
+    fixed, per, how = RP.Coordinator.plan_cost(c)
+    assert 11.5 < fixed < 12.5 and 0.05 < per < 0.15 and "fitted" in how
     assert RP.Coordinator.plan_ahead_k(c) == c.PLAN_AHEAD_MAX
-    for _ in range(12):
-        RP.Coordinator.note_plan_cost(c, 8.0, 8)                     # ... or in 1 s (a hot Pi)
-    assert RP.Coordinator.plan_ahead_k(c) == c.PLAN_AHEAD_MIN
-    assert any(e == "plan_ahead" and k["measured"] for e, k in c.logged)
+    # ... and one that is slow per point (the Pi on 18 Nov) plans the few points that fit its budget
+    c.plan_costs = [(8, 3.3), (40, 14.8), (8, 3.2), (40, 15.0)]
+    fixed, per, how = RP.Coordinator.plan_cost(c)
+    assert abs(per - 0.36) < 0.03 and fixed < 0.6
+    assert RP.Coordinator.plan_ahead_k(c) == 2
+    assert any(e == "plan_ahead" and "fitted" in k["how"] for e, k in c.logged)
 
 
 def test_no_improvement_try_after_a_replan_that_was_over_its_budget():

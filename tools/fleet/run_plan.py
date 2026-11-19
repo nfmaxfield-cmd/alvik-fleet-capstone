@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov, Jay-Sun's Visit points runs): finish_replan no longer crashes when a robot rejoined while a plan made without it was worked out (it plans again with it); any exception in the run is "crashed: <why>", never "done"; the move check (fast_done) judges a step from where it STARTED, takes a step whose own pose ended at its target as moved, and counts the camera only when its picture is newer than the step's end (late_move_check logs what the camera says afterwards); fixed-order lists are planned a few points ahead (MIRLT_PLAN_AHEAD) and the improvement try is skipped when the first plan was over budget; a point is credited only when the robot's best position is within its tolerance (else "not reached", MIRLT_POINT_CREDIT); a fix the robot would refuse as too old is carried forward by its own motion since the picture (MIRLT_OLD_FIX); the last part of a leg that ends inside the edge rule's room is driven slowly (MIRLT_EDGE_SLOW_END). Before: "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov, Jay-Sun's Visit points runs): (19 Nov, finishing) a re-plan's cost is FIXED + PER POINT fitted to the run's own re-plans (plan_cost; a machine whose fixed part is over the budget plans the whole list, as before e23), and the run is not "done" while points handed to a finished robot wait for a re-plan that is due (handed_points_waiting). finish_replan no longer crashes when a robot rejoined while a plan made without it was worked out (it plans again with it); any exception in the run is "crashed: <why>", never "done"; the move check (fast_done) judges a step from where it STARTED, takes a step whose own pose ended at its target as moved, and counts the camera only when its picture is newer than the step's end (late_move_check logs what the camera says afterwards); fixed-order lists are planned a few points ahead (MIRLT_PLAN_AHEAD) and the improvement try is skipped when the first plan was over budget; a point is credited only when the robot's best position is within its tolerance (else "not reached", MIRLT_POINT_CREDIT); a fix the robot would refuse as too old is carried forward by its own motion since the picture (MIRLT_OLD_FIX); the last part of a leg that ends inside the edge rule's room is driven slowly (MIRLT_EDGE_SLOW_END). Before: "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_MONITOR = "2026-11-12mc"   # (Mission Control build, 12 Nov) write_live ticks the Pi efficiency monitor's feed (monitor_feed.json: the loop period; read-only)
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
@@ -1662,7 +1662,7 @@ class Coordinator:
                "obstacle": ob, "states": job["states"], "old_plan": self.plan_no}
         n_now, n_later = self.points_in(newplan)
         rec["points_planned"], rec["points_later"], rec["plan_ahead"] = n_now, n_later, over.get("plan_ahead_points", 0)
-        if not improving:
+        if not improving and n_now > 0:
             self.note_plan_cost(cpu, n_now)
         if improving:
             old_end = self.plan_start + self.plan["summary"]["makespan_s"]
@@ -1737,13 +1737,14 @@ class Coordinator:
     # stood for 399 s of a 460 s run. A re-plan now plans each robot's next K points; the rest ride in the plan entry's
     # "later" (planner.ahead_split) and come in at the next re-plan, asked for while the robot stands at its last
     # planned point (feed_watch).
-    PLAN_COST_SEED_S = 0.36   # MEASURED (school Pi, 18 Nov): planning time per point in the plan, from the re-plans of
-    #                           4 + 4 points (median 3.3 s) and 20 + 20 points (median 14.8 s): (14.8 - 3.3) / 32. The
-    #                           starting guess only: each run uses its own measured cost after its first re-plan
+    PLAN_COST_SEED = (0.4, 0.36)   # MEASURED (school Pi, 18 Nov): a re-plan's time as FIXED + PER POINT in the plan, from
+    #                           the medians of the re-plans with 4 + 4 points (3.3 s) and with 20 + 20 points (14.8 s):
+    #                           per point (14.8 - 3.3) / 32 = 0.36 s, fixed 3.3 - 8 x 0.36 = 0.4 s. The starting guess
+    #                           only: each run fits its own from its re-plans (plan_cost)
     PLAN_AHEAD_MIN = 2        # [chosen] never fewer than this many points per robot: the one it is driving to and the
     #                           next, so the following points can be planned while it stands at a point. DOE: yes
     #                           (1 / 2 / 3 against standing time and points reached, simulator at the Pi's planning cost)
-    PLAN_AHEAD_MAX = 20       # [chosen] a cap so one quick re-plan does not bring a whole long list back in. No DOE
+    PLAN_AHEAD_MAX = 60       # [chosen] "the whole list": more points than any list so far. No DOE
 
     def points_in(self, plan):
         """(points planned, points left for later) over every robot of a plan."""
@@ -1760,33 +1761,56 @@ class Coordinator:
         return len(now_), len(later_)
 
     def note_plan_cost(self, cpu_s, points):
-        """This run's own planning time per point planned (the median of its re-plans so far)."""
-        if points <= 0:
-            return
+        """One re-plan of this run: (points in the plan, the time it took)."""
         c = self.__dict__.setdefault("plan_costs", [])
-        c.append(float(cpu_s) / float(points))
-        del c[:-15]
+        c.append((int(points), float(cpu_s)))
+        del c[:-20]
+
+    def plan_cost(self):
+        """(fixed s, s per point, how it is known) of a re-plan on this machine now. With re-plans of at least two
+        different sizes in this run: a least-squares line through them (neither part below 0). With re-plans of one
+        size only: the school Pi's line scaled to them (their median against what it predicts). None yet: the Pi's."""
+        a0, c0 = self.PLAN_COST_SEED
+        c = self.__dict__.get("plan_costs") or []
+        if not c:
+            return a0, c0, "the school Pi's (nothing measured in this run yet)"
+        xs, ys = [float(p_) for p_, _ in c], [float(t_) for _, t_ in c]
+        if len(c) >= 3 and max(xs) - min(xs) >= 2:
+            mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+            sxx = sum((x - mx) ** 2 for x in xs)
+            slope = max(0.0, sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx)
+            fixed = my - slope * mx
+            if fixed < 0.0:
+                fixed, slope = 0.0, sum(x * y for x, y in zip(xs, ys)) / max(1e-9, sum(x * x for x in xs))
+            return fixed, slope, "fitted to this run's %d re-plans" % len(c)
+        k = statistics.median([y / max(1e-6, a0 + c0 * x) for x, y in zip(xs, ys)])
+        return a0 * k, c0 * k, "the school Pi's line scaled to this run's %d re-plan%s" % (len(c), "" if len(c) == 1 else "s")
 
     def plan_ahead_k(self):
-        """How many points per robot a re-plan plans: as many as fit the re-plan's own budget (the plan's
-        replan_budget_s) at the planning cost per point measured in this run (before the first measurement: the
-        school Pi's, PLAN_COST_SEED_S), shared between the robots that are running; at least PLAN_AHEAD_MIN.
+        """How many points per robot a re-plan plans. A re-plan costs FIXED + PER POINT x the points in it (plan_cost).
+          * FIXED alone at or over the re-plan's budget (the plan's replan_budget_s): fewer points cannot bring a
+            re-plan under its budget, and every extra re-plan pays FIXED again, so the whole list is planned
+            (PLAN_AHEAD_MAX), as before e23.
+          * else: as many points as fit the budget after FIXED, shared between the robots running; at least
+            PLAN_AHEAD_MIN.
         MIRLT_PLAN_AHEAD_N=<n> fixes it (for a designed experiment)."""
-        fixed = os.environ.get("MIRLT_PLAN_AHEAD_N")
-        if fixed:
+        fixed_n = os.environ.get("MIRLT_PLAN_AHEAD_N")
+        if fixed_n:
             try:
-                return max(1, int(fixed))
+                return max(1, int(fixed_n))
             except ValueError:
                 pass
-        c = self.__dict__.get("plan_costs") or []
-        cost = statistics.median(c) if c else self.PLAN_COST_SEED_S
+        a, c, how = self.plan_cost()
         budget = float((self.plan.get("settings") or {}).get("replan_budget_s", 2.0))
-        k = int(budget / max(cost, 1e-3) / max(1, len(self.names)))
-        k = max(self.PLAN_AHEAD_MIN, min(self.PLAN_AHEAD_MAX, k))
+        if a >= budget or c <= 1e-6:
+            k = self.PLAN_AHEAD_MAX
+        else:
+            k = int((budget - a) / c / max(1, len(self.names)))
+            k = max(self.PLAN_AHEAD_MIN, min(self.PLAN_AHEAD_MAX, k))
         if k != getattr(self, "_ahead_said", None):
             self._ahead_said = k
-            self.log("plan_ahead", points_each=k, cost_s_per_point=round(cost, 3), budget_s=budget,
-                     measured=bool(c), robots=len(self.names))
+            self.log("plan_ahead", points_each=k, fixed_s=round(a, 3), s_per_point=round(c, 4), budget_s=budget,
+                     how=how, robots=len(self.names))
         return k
 
     def planned_points_left(self, n):
@@ -4809,6 +4833,21 @@ class Coordinator:
         self.log("blind_end", **rec)
         self.__dict__.setdefault("blinds", []).append(rec)
 
+    def handed_points_waiting(self):
+        """(e23) Robots still running that hold points not done in their pending work (handed over after they had
+        finished, insert_visits): {robot: [labels]}."""
+        done = set(self.__dict__.get("done_labels", set()))
+        gone = {str(q.get("point")) for q in self.__dict__.get("skipped", []) if isinstance(q, dict)}
+        out = {}
+        for n in self.names:
+            vis = ((self.plan["robots"].get(n) or {}).get("pending") or {}).get("visits") or []
+            labs = [str(v.get("label")) for v in vis if isinstance(v, dict) and "goto" in v and
+                    str(v.get("label", "")).startswith("point ")]
+            labs = [l for l in labs if l not in done and ("at " + l) not in done and l not in gone]
+            if labs:
+                out[n] = labs
+        return out
+
     def finished(self):
         if self.plan.get("stranded"):
             return False
@@ -4821,6 +4860,11 @@ class Coordinator:
         if undone:
             if any(getattr(self.bots[n], "retry_n", 0) == 0 for n in undone):
                 self.others_done_t = None       # (a robot trying to rejoin does not restart the wait)
+            return False
+        if (self.pending_replan is not None or self.deferred) and self.handed_points_waiting():
+            # (e23) points handed to a robot that had finished wait for a re-plan that is due (past the re-plan cap
+            # it is spaced REPLAN_SPACING_S apart): the run is not over. Simulator, 19 Nov, late pictures: Bravo was
+            # held at 253 s, its 25 points went to Alpha, which had finished, and the run ended "done" 1 s later
             return False
         if getattr(self, "others_done_t", None) is None:
             self.others_done_t = now()
@@ -5017,7 +5061,9 @@ class Coordinator:
                 "points": self.__dict__.get("points", []),
                 "points_not_reached": self.__dict__.get("not_reached", []),      # (e23) stops the robot was not at
                 "plan_ahead": {"on": PLAN_AHEAD_NEAR, "points_each": getattr(self, "_ahead_said", None),
-                               "cost_s_per_point": [round(v, 3) for v in self.__dict__.get("plan_costs", [])]},
+                               "replans_points_s": [[p_, round(t_, 3)] for p_, t_ in self.__dict__.get("plan_costs", [])],
+                               "cost": dict(zip(("fixed_s", "s_per_point", "how"), (
+                                   lambda q: (round(q[0], 3), round(q[1], 4), q[2]))(self.plan_cost())))},
                 "old_fixes_carried": {n: getattr(b, "old_fix_n", 0) for n, b in self.bots.items()},
                 "points_skipped": self.__dict__.get("skipped", []),
                 "points_reassigned": [{k: q[k] for k in ("point", "frm", "to", "t_run")}

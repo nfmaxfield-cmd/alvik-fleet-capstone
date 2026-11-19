@@ -7,17 +7,20 @@ straight through mission_run.py --dry so each run has its own seed and its own b
   slow     X           every re-plan takes X times as long as on this machine (the school Pi planned 5-10 x slower)
   skew     S           the cameras' clock is S s ahead of the Pi's (Mission Control's practice mode: 0.7, with which the
                        simulated robots refuse EVERY fix as "from the future"; 0: one clock, as on the school Pi)
-    seed_runs.py REPO OUT_DIR CASE [CASE ...]      CASE = name:seed[:restart=Alpha@70][:late=20,1.5][:slow=6][:speed=10][:skew=0]
+  pts      N           N points per robot instead of 20 (Alpha P01.., Bravo P21..), e.g. 4 for the school's 4 + 4 lists
+    seed_runs.py REPO OUT_DIR CASE [CASE ...]      CASE = name:seed[:restart=Alpha@70][:late=20,1.5][:slow=6][:speed=10][:skew=0][:pts=4]
+(19 Nov, finishing: pts added.)
 Each case's folder gets the run, and OUT_DIR/<name>.json the numbers (analyse_run.py)."""
 import json, os, subprocess, sys, time
 REPO, OUT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 os.makedirs(OUT, exist_ok=True)
-ALPHA = ",".join("P%02d" % k for k in range(1, 21))
-BRAVO = ",".join("P%02d" % k for k in range(21, 41))
 for case in sys.argv[3:]:
     parts = case.split(":")
     name, seed = parts[0], int(parts[1])
     o = dict(p.split("=", 1) for p in parts[2:])
+    npts = int(o.get("pts", 20))
+    ALPHA = ",".join("P%02d" % k for k in range(1, 1 + npts))
+    BRAVO = ",".join("P%02d" % k for k in range(21, 21 + npts))
     folder = os.path.join(OUT, name)
     if os.path.exists(os.path.join(folder, "mission_summary.json")):
         print(name, "already run"); continue
