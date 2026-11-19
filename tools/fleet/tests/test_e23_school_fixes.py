@@ -603,6 +603,37 @@ def test_a_stop_far_from_its_point_is_not_credited():
     assert c.points[0]["reached"] is True and c.points[0]["miss_cm"] < 1.5 and b.point_target is None
 
 
+def test_a_dwell_finished_away_from_the_point_is_judged_against_the_point_not_the_pause_step():
+    """Simulator, 19 Nov (late pictures): Alpha stood at P01 (30.5, 31.8), was sent on a recovery 3 s into its dwell
+    and finished the dwell where the recovery left it (40.6, 31.5); the re-plan's pause step was planned there, so the
+    stop was 1.6 cm from "its target" and credited, 10 cm from the point."""
+    mm, plan = production_plan()
+    c = coord(mm, plan)
+    c.t_run = RP.now() - 50.0
+    c.outdir = None
+    c.point_csv = lambda rec: None
+    c.cam_info = lambda: {"moved": {}}
+    c.cam_unc = lambda f: f["unc"]
+    c.said = []
+    c.say = c.said.append
+    px, py = RP.Coordinator.point_xy(c, "point 1")
+    assert [px, py] == [80.0, 120.0] and RP.Coordinator.point_xy(c, "point 99") is None
+    b = c.bots["Alpha"]
+    t1 = RP.now()
+    b.pose = (px + 10.1, py, 0.0)
+    b.fix_log = [dict(t=t1 - 0.05, x=px + 10.1, y=py, unc=1.3, cams=["overhead"])]
+    b.dwell = None
+    stp = {"label": "at point 1", "type": "wait", "to": [px + 8.5, py, 0.0], "t_start": 0.0, "t_end": 0.1}
+    RP.Coordinator.point_step(c, b, stp, "done", t1)
+    assert not c.__dict__.get("points") and c.not_reached[0]["target"] == [px, py]
+    assert abs(c.not_reached[0]["miss_cm"] - 10.1) < 0.1 and "at point 1" not in c.__dict__.get("done_labels", set())
+    # the same dwell finished at the point is a visit
+    b.pose = (px + 0.4, py, 0.0)
+    b.fix_log = [dict(t=t1 - 0.05, x=px + 0.4, y=py, unc=1.3, cams=["overhead"])]
+    RP.Coordinator.point_step(c, b, stp, "done", t1)
+    assert c.points[0]["reached"] is True and "at point 1" in c.done_labels
+
+
 def test_the_reach_tolerance_is_derived_and_a_missed_stop_is_not_done():
     c = _point_coord()
     derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(None))
