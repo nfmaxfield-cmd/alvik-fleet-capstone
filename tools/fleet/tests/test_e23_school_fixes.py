@@ -563,6 +563,8 @@ def test_visit_points_outside_every_camera_are_warned_about_loudly(tmp_path, mon
     assert rec["warning"] == warn[0]
     html = open(os.path.join(FLEET, "mission_control.html")).read()
     assert "st.visit_warning" in html
+    # ... and on the map-first page, the one / and /table open (19 Nov: the practice screenshot showed no warning there)
+    assert "st().visit_warning" in open(os.path.join(FLEET, "mission_control_table.html")).read()
     monkeypatch.setenv("MIRLT_VISIT_UNSEEN", "quiet")
     said.clear()
     MR.visit_orders(a, ["Alpha", "Bravo"], str(tmp_path))

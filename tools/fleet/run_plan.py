@@ -4413,10 +4413,10 @@ class Coordinator:
     def standing_at_point(self, b, bl=None):
         """(e23) The robot's current step is its dwell at a point ("at point 7") and it has not moved since the camera
         lost it (DWELL_STILL_CM, the same "did not move" as an interrupted dwell)."""
-        if b.name not in self.plan["robots"]:
+        if b.name not in ((getattr(self, "plan", None) or {}).get("robots") or {}):
             return False
         steps = self.steps(b.name)
-        i = next((k for k, st in enumerate(b.stat) if st["status"] != "done"), None)
+        i = next((k for k, st in enumerate(getattr(b, "stat", None) or []) if st["status"] != "done"), None)
         if i is None or i >= len(steps):
             return False
         stp = steps[i]
