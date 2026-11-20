@@ -3,6 +3,10 @@
 Built on `f4acc77`, simulator and logs only. Nothing was run on robots, Pis or cameras. Nick approved "fix every cause"
 on 19 Nov 11:59. Built in two sittings (the second finished the acceptance runs and fixed what they found).
 
+**Revised the same day after an independent audit (fix pass e23c).** Section 3 (acceptance) is replaced by what is
+reproducible; section 5 lists what the audit found, what was fixed and what stays open; the Pi update steps changed
+(Mission Control is closed before the pull). The first acceptance table is kept in Appendix D.
+
 ## Premise
 
 The analysis of Jay-Sun's 25 school runs (`docs/results/school-2026-11-18/report.md`) found eight causes, A to H, for
@@ -35,6 +39,13 @@ Each fix keeps its old way behind a Safety group switch (decided automatically; 
 
 Of the 37 new tests, 35 fail on `f4acc77`; the other two pin behaviour that was kept (a held log port is still
 waited for; the old watch behind its switch). The list is in `docs/results/e23-school-fixes/old_code_tests.txt`.
+
+Limits of these fixes (from the audit, section 5):
+
+- **Not fixed, open: the plate contact of run 14** (18 Nov 16:11: Bravo's heading 18° off what was commanded, its camera position inside the zone 4 outlet plate's rectangle for 4 s). Nothing in e23 addresses it.
+- **I covers dwell veers only:** 6 of the 36 real veers of 18 Nov. One of those six had already moved 5.07 cm (the limit is 2 cm) and would still veer. The other 30 are a moving robot's (question 1).
+- **D's plan-ahead usually falls back to the whole list in the stand-in:** the fitted fixed part of a re-plan was 2.4 to 3.7 s against a 2.0 s budget, so most re-plans planned every point, as before e23 (question 4).
+- **`MIRLT_STOP_UNNAMED=wait` is not the whole way before e23:** a new Start still ends the watch and a second Stop still joins the running watch; those two have no switch.
 
 ### 2. The move check on the real verdicts
 
@@ -125,6 +136,46 @@ What a fan would fix: the 4 % clock loss and the "throttled" flags. What it woul
 
 This reading is my own, from timing in the logs; nothing was measured on the Pi for this build.
 
+### 5. The independent audit, and the fix pass (e23c)
+
+An independent audit on 19 Nov reran the tests and the acceptance runs and read the code against the raw school logs.
+
+**What it confirmed:** 35 of the 37 e23 tests fail on `f4acc77`; the fleet suite (1199 passed); the simulator suite's same two failures before and after; the 29 move-check cases regenerated from the raw logs equal the committed ones; the site's pins match the raw bindings; the Stop case (1 `stop` against 101); the old code's crash on the stand-in; nothing under `tools/rfid` changed. With the old veer rule switched back on, e23 met "rejoined while a plan without it was being made" 5 times in one run without a crash.
+
+**What it found, and where each stands now:**
+
+| # | Finding | The audit's evidence | Now |
+|---|---|---|---|
+| 1 | A Stop that no robot answered was said as "Stopped: every robot confirmed" | `stop_noanswer.py`: one `stop`, no answer, "confirmed" | **Fixed.** The `stop` is sent 3 times, 3 s apart, then the page says it was sent and no robot answered. Never "confirmed". Old way: `MIRLT_STOP_NO_ANSWER=first` |
+| 2 | An old picture was carried forward by the robot's pose change, corrections included | A standing robot corrected by 5 cm: the picture moved 5 cm. Four old pictures in a row: 3 cm behind ended 3.0 cm ahead, 8 cm behind ended 6.7 cm ahead | **Fixed.** Carried by what the robot drove only; each correction since the picture is taken out. Same cases: the standing robot's picture is not moved, and the bursts end 0.04 and 0.10 cm short of the truth. Old way: `MIRLT_OLD_FIX_JUMPS=count` |
+| 3 | The stop tolerance grew with misses, and more doubt made a stop easier to credit | Real 16:11 run: 6.0 to 25.5 cm after four refused P29 stops. P01 (5.6 cm off, ±10.9 cm) and P03 (7.0 cm off, ±9.9 cm) credited | **Fixed.** Learned from reached stops only, the stop's ± counted against it, bounded. All four P29 stops, P01 and P03 are refused; the tolerance stays between 5.5 and 8.3 cm. Old way: `MIRLT_REACH_TOL=e23` |
+| 4 | `MIRLT_WAKE_WAIT`'s description said the opposite of the code; one missing robot froze Start for up to 60.5 min | `wake_test.py`; `calib_run.discover` | **Fixed.** Description corrected. With some robots answering, the rest are waited for 3 min, then the run starts and names who is missing. Old way: `MIRLT_WAKE_PARTIAL=wait` |
+| 5 | A second Stop changed the watcher's robot list while the watcher read it | Code reading | **Fixed.** One lock for the watcher, the page and a second Stop |
+| 6 | Chosen numbers not marked | Code reading | **Fixed.** Marked `[chosen]` in the code; Appendix A |
+| 7 | The acceptance numbers are not reproducible | Seed 5 again on the same code: 38 of 40 with 5 re-plans, against the reported 34 of 40 with 47 | **Reported.** Section 3 gives ranges over seeds |
+| 8 | Seed 11 thrashes | Not done at the 25 min cap: 33 of 40, 56 re-plans, 19 holds; five points dropped for good | **Open.** Pre-dates e23 (same code in `f4acc77`); section 3 |
+| 9 | The run-14 plate contact is not addressed | School report, run 14 | **Open.** Listed in section 1 |
+| 10 | The veer fix covers dwell veers only | 6 of 36; one of the six moved 5.07 cm | **Open.** Question 1 |
+| 11 | Plan-ahead falls back to the whole list in the stand-in | Fitted fixed part 2.4 to 3.7 s over a 2.0 s budget | **Open.** Question 4 |
+| 12 | The update steps pulled while Mission Control was running | Rehearsal in a scratch clone | **Fixed.** `mc-stop` comes first; a check of the site file was added |
+| 13 | `MIRLT_STOP_UNNAMED=wait` is not fully the old way | Code reading | **Documented** (section 1, the Safety group) |
+
+Each fix has a test that fails on e23 as built (`b202ea5`): 17 tests in `tools/fleet/tests/test_e23c_audit_fixes.py`, 17 fail there.
+
+On finding 3: taken literally, "distance plus the stop's ± within 5.5 cm" would refuse 94 of the 131 real stops, because a normal stop's ± is 3.3 cm (median). So a stop now counts when its best position is within 5.5 cm of the point **and** its position plus its ± is within 12.6 cm; both numbers are the measured scatter of the 131 school stops. Replayed on those stops, 17 are refused (e23 as built: 11), and none 8.8 cm or more off is credited.
+
+![The stop tolerance through two real school runs, e23 as built and now](../screenshots/2026-11-19/e23c-problem-stop-tolerance-climbed-with-misses.png)
+
+Each mark is one recorded stop's distance from its point; the red line is how far e23 as built would have let a stop be at that moment, the blue line what the fixed code allows.
+
+![Four old pictures in a row: the robot's own position after each](../screenshots/2026-11-19/e23c-problem-burst-of-old-pictures-over-corrected.png)
+
+Each line follows the robot's own position error through four old pictures: e23 as built (red) drove it past the truth, the fixed code (blue) stops at it. This is computed with a copy of the firmware's fix step, not measured on a robot.
+
+![A Stop that no robot answered: what the page said and says](../screenshots/2026-11-19/e23c-problem-stop-nobody-answered-said-confirmed.png)
+
+The same Stop on e23 as built and on the fixed code, with no robot answering: the words the page shows at each moment.
+
 ## Conclusion
 
 These are my own conclusions from the tests and the simulator runs; nothing here was run on the robots.
@@ -147,8 +198,9 @@ These are my own conclusions from the tests and the simulator runs; nothing here
 
 ## School Pi: update steps (Nick)
 
-On the laptop, click the **Tailscale** icon near the clock and switch the account to **joincapstonedb**. Then open
-**PowerShell**. Type each box, press Enter, and wait for the line to finish.
+**1.** On the laptop, click the **Tailscale** icon near the clock and switch the account to **joincapstonedb**.
+
+**2.** Open **PowerShell** on the laptop. Every box below is typed in that PowerShell window: type the one line, press Enter, and wait for the line to finish before the next box.
 
 ```
 ssh nick@100.72.183.28
@@ -156,45 +208,95 @@ ssh nick@100.72.183.28
 
 Type the Pi's password if it asks. You should see a line ending in `$`.
 
+**3.** In the same PowerShell window:
+
 ```
 cd ~/alvik-fleet-capstone
 ```
+
+You should see the `$` line again, now with `alvik-fleet-capstone` in it.
+
+**4.** Close Mission Control before anything is changed, so nothing is running on the Pi while its files change. In the same PowerShell window:
+
+```
+./run-fleet-pi.sh mc-stop
+```
+
+You should see `Mission Control is closing (a run of its own stops first).` and, about 3 seconds later, the `$` line again. If you see `Mission Control is not running in tmux session mc` instead, that is fine: it was already closed.
+
+**5.** In the same PowerShell window:
 
 ```
 git status --short
 ```
 
-You should see either nothing, or one line ` M tools/fleet/sites/school-conference.json` (camera 2 was switched on in that file on this Pi). If you see nothing, skip the two `git stash` boxes below. If you see any other line, stop here and send me that screen.
+You should see either nothing, or the one line ` M tools/fleet/sites/school-conference.json` (camera 2 was switched on in that file on this Pi). If you see nothing, skip steps 6, 8, 9 and 10 (do step 7, then go on from step 11). If you see any other line, stop here and send me that screen.
+
+**6.** In the same PowerShell window:
 
 ```
 git stash
 ```
 
-You should see `Saved working directory and index state`.
+You should see a line starting with `Saved working directory and index state`.
+
+**7.** In the same PowerShell window:
 
 ```
 git pull
 ```
 
-You should see `Fast-forward` and a list of files, among them `tools/fleet/tests/test_e23_school_fixes.py`.
+You should see `Fast-forward` and a list of files, among them `tools/fleet/tests/test_e23c_audit_fixes.py`. If it says `error` or `fatal`, stop here and send me that screen.
+
+**8.** In the same PowerShell window:
 
 ```
 git stash pop
 ```
 
-You should see `Auto-merging tools/fleet/sites/school-conference.json` and no line with `CONFLICT`. If a line says `CONFLICT`, stop here and send me that screen.
+You should see `Auto-merging tools/fleet/sites/school-conference.json` and, near the end, a line starting with `Dropped`. You should not see the word `CONFLICT`.
+
+**9.** Check that the site file came back whole. In the same PowerShell window:
+
+```
+grep -c '<<<<<<<\|>>>>>>>' tools/fleet/sites/school-conference.json
+```
+
+You should see `0`.
+
+**10.** In the same PowerShell window:
+
+```
+python3 -c "import json; json.load(open('tools/fleet/sites/school-conference.json')); print('site file OK')"
+```
+
+You should see `site file OK`.
+
+If step 8 showed `CONFLICT`, or step 9 showed a number other than `0`, or step 10 showed an error instead of `site file OK`: the Pi's own change and the update touched the same lines. Do not start a run. Put the update's own copy of the file back with the one box below (still the same PowerShell window), then send me the screen and carry on from step 11. The Pi's own copy is not lost: `git stash` keeps it until I merge it. Until then camera 2 is off on this Pi (the update's copy says so), so a run uses camera 1 only.
+
+```
+git checkout HEAD -- tools/fleet/sites/school-conference.json
+```
+
+You should see the `$` line again and nothing else. Steps 9 and 10 typed again now give `0` and `site file OK`.
+
+**11.** In the same PowerShell window:
 
 ```
 git log --oneline -1
 ```
 
-You should see one line that ends with `e23 20: build report, acceptance in the simulator, screenshots`. The seven characters in front of it are that commit's short name; the code it carries was last changed in commit `006354b`.
+You should see one line with `e23c` in it.
+
+**12.** In the same PowerShell window:
 
 ```
 python3 tools/fleet/safety_group.py show | tail -1
 ```
 
-You should see `Safety group: every switch on its automatic default (95 switches; tools/fleet/safety_group.py show)`.
+You should see `Safety group: every switch on its automatic default (99 switches; tools/fleet/safety_group.py show)`.
+
+**13.** In the same PowerShell window:
 
 ```
 ./run-fleet-pi.sh space --move
@@ -202,19 +304,15 @@ You should see `Safety group: every switch on its automatic default (95 switches
 
 You should see finished run folders listed as moved to the USB drive and the card's free space after (it was 0.81 GB on 18 Nov; a run needs 0.55 GB).
 
-```
-./run-fleet-pi.sh mc-stop
-```
-
-You should see the `$` line again (Mission Control is closed; a run it had going is stopped first).
+**14.** In the same PowerShell window:
 
 ```
 ./run-fleet-pi.sh mc
 ```
 
-You should see a line with `:8095` in it. The address in front of it may be the Pi's address on the school network; use the one below.
+You should see a line with `:8095` in it. The address in front of it may be the Pi's address on the school network; use the one in step 15.
 
-In the laptop's browser (still on the **joincapstonedb** Tailscale account), open `http://100.72.183.28:8095/table`. You should see Mission Control with the table's map. When a run starts, its log (the **Log** button) now shows a line `LOOKING FOR CAMERAS: ...` followed by `CAMERAS FOUND (...)`.
+**15.** In the laptop's browser (still on the **joincapstonedb** Tailscale account), open `http://100.72.183.28:8095/table`. You should see Mission Control with the table's map. When a run starts, its log (the **Log** button) now shows a line `LOOKING FOR CAMERAS: ...` followed by `CAMERAS FOUND (...)`.
 
 No firmware changed in this build: nothing to flash.
 
@@ -265,6 +363,24 @@ Other:
 | Simulator: late pictures | 1.5 s stall every 20 s, both cameras | **[chosen]** from 18 Nov: stalls of about 1.5 s, 4 to 6 % of camera 1's pictures older than 1 s in the last three runs | Better measured than tested: set it from `bridge/detect_times.csv` |
 | Acceptance ruler for "truly reached" | the larger of 2.9 cm + the stop's own ± and 5.5 cm | The tolerance e23 derives for a stop (drive-end errors; the school's measured stop scatter) | No |
 | Acceptance: "standing" | true speed under 0.5 cm/s | **[chosen]**: well under the slowest drive (4 cm/s) | No |
+
+Added or corrected by the audit's fix pass (e23c). The "Reach tolerance of a stop" row above describes e23 as built (`MIRLT_REACH_TOL=e23`); the rows below replace it.
+
+| Number | Value | Where it comes from | Should a designed experiment set it? |
+|---|---|---|---|
+| Stop tolerance, distance (`MISS_SEED_CM`) | 5.5 cm at school | Measured: median 2.82 cm + 3 scaled MADs (0.61 cm) of how far the 131 recorded stops stood from their points. Never under where drives end (2.9 cm) | No (a measurement) |
+| Stop tolerance, distance + the stop's ± (`MISS_PM_SEED_CM`) | 12.6 cm at school | Measured: median 6.58 cm + 3 scaled MADs (1.35 cm) of (distance + ±) over the same 131 stops | No (a measurement) |
+| The adaptive part: the run's own stops (`MISS_OWN_N`) | from 5 reached stops on | **[chosen]**. From its 5th reached stop a run uses its own reached stops' median + 3 scaled MADs in place of the school's, for both tolerances. Stops that were refused are never used. The result is kept between the measured value and `REACH_TOL_CAP` times it | No: bookkeeping. With the bounds it changed no verdict on the 131 stops when set to 3, 5 or 8 |
+| Widest the run's own stops may make a tolerance (`REACH_TOL_CAP`) | 1.5 x the measured value: 8.3 cm and 18.8 cm | **[chosen]**. 1.5 and 2.0 refuse the same 17 of the 131 stops | No: it follows from what the points are for (question 6) |
+| `stop` sent when no robot answers (`UNNAMED_TRIES`) | 3 times, 3 s apart | **[chosen]** from data: one try is three copies and a 1 s listen; the worst packet loss on record is 1 in 10 (27 Oct), so an awake robot is missed in 3 tries about 1 time in 1000 | No: an extra `stop` is harmless; a sleeping robot answers no number of tries |
+| Wait for the rest once one robot has answered | 3 min | The start's usual wait before e23 (the `wake_min` asked for): an existing **[chosen]** number | No: an awake robot answers within seconds; a sleeping one needs its whole check-in |
+| A hole in a robot's pose reports (`POSE_HOLE_S`) | 1.0 s | **[chosen]**: 9 rows lost in a row (rows come every 0.11 s, median of the 18 Nov runs) | No: a longer hole only means an old picture is not carried forward |
+| Late move check: "the camera agrees" (`LATE_MOVED_SHARE`) | half the step's length | **[chosen]** (the half the e22 move check used) | Not yet: it words a log line only. If a late "did not move" is ever acted on: 0.3 / 0.5 / 0.7 against false alarms |
+| Late move check kept (`LATE_CHECK_KEEP_S`) | 5 s | **[chosen]** bookkeeping (the row "Late move check kept" above) | No |
+| Shortest fast part of a slowed leg (`SLOW_SPLIT_MIN_CM`) | 5 cm | **[chosen]**: the plan's shortest sensible drive | No: bookkeeping |
+| Re-plans the cost fit looks back over (`PLAN_COST_KEEP_N`) | the newest 20 | **[chosen]**, so the fit follows a Pi that slows as it heats | **Yes**, with the points planned ahead: 10 / 20 / all against how well the next re-plan's time is predicted |
+| Re-plans needed before a line is fitted (`PLAN_FIT_MIN_N`) | 3 | **[chosen]**: the smallest number that can disagree with a line | No |
+| ... and how different in size they must be (`PLAN_FIT_MIN_SPREAD`) | 2 points | **[chosen]**, else the slope is fitted to noise | **Yes**, with `PLAN_COST_KEEP_N` |
 
 ## Appendix B: how to reproduce
 
