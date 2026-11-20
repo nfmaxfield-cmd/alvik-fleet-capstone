@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """(e23c, simulator only) The acceptance runs over seeds: one row per run folder made by seed_runs.py (folders named
 <case>-s<seed>), measured by acc_table.one (the simulator's truth), plus counts from the run's own log, and the range
-of each number per case.
+of each number per case. A second run of the same seed is a folder <case>-s<seed>-r2.
     seeds_table.py ACC_DIR OUT.json OUT.md
 Version 1 (2026-11-19)."""
 import collections, glob, json, os, re, sys
@@ -12,9 +12,11 @@ import acc_table as AT   # noqa: E402
 ACC, OUTJ, OUTM = sys.argv[1], sys.argv[2], sys.argv[3]
 rows = []
 for folder in sorted(glob.glob(os.path.join(ACC, "*-s[0-9]*"))):
-    m = re.match(r"(.+)-s(\d+)$", os.path.basename(folder))
+    m = re.match(r"(.+)-s(\d+)(?:-r(\d+))?$", os.path.basename(folder))
     if not m or not os.path.isdir(folder) or folder.endswith("-home"):
         continue
+    if not os.path.exists(os.path.join(folder, "case.json")):
+        continue                                   # still running
     r = AT.one(folder)
     ev = collections.Counter()
     try:
@@ -31,7 +33,7 @@ for folder in sorted(glob.glob(os.path.join(ACC, "*-s[0-9]*"))):
         out = ""
     capped = os.path.exists(os.path.join(folder, "CAPPED.txt"))
     case = json.load(open(os.path.join(folder, "case.json")))
-    rows.append({"case": m.group(1), "seed": int(m.group(2)), "ended": "capped" if capped else (r.get("result") or "?"),
+    rows.append({"case": m.group(1), "seed": int(m.group(2)), "run_of_seed": int(m.group(3) or 1), "ended": "capped" if capped else (r.get("result") or "?"),
                  "wall_s": case.get("wall_s"), "run_s": r.get("duration_s"), "planned_s": r.get("planned_s"),
                  "asked": r.get("asked"), "truly": r.get("truly_reached"), "credited": r.get("credited"),
                  "false_credits": len(r.get("false_credits") or []), "said_not_reached": r.get("said_not_reached"),
@@ -62,10 +64,10 @@ L = ["| List | Seed | How it ended | Truly reached / asked | False credits | Run
      "Closest middle to a keep-out (cm) |", "|" + "---|" * 13]
 summary = {}
 for case in sorted({r["case"] for r in rows}, key=lambda c: (len(c), c)):
-    rs = sorted([r for r in rows if r["case"] == case], key=lambda r: r["seed"])
+    rs = sorted([r for r in rows if r["case"] == case], key=lambda r: (r["seed"], r["run_of_seed"]))
     for r in rs:
-        L.append("| %s | %d | %s | %s / %s | %s | %.0f (%.0f) | %s (%s) | %s | %s | %s | %.1f | %.1f | %.1f |" % (
-            case, r["seed"], {"capped": "**not finished** at the runner's cap"}.get(r["ended"], r["ended"]), r["truly"],
+        L.append("| %s | %d%s | %s | %s / %s | %s | %.0f (%.0f) | %s (%s) | %s | %s | %s | %.1f | %.1f | %.1f |" % (
+            case, r["seed"], "" if r["run_of_seed"] == 1 else " (run %d)" % r["run_of_seed"], {"capped": "**not finished** at the runner's cap"}.get(r["ended"], r["ended"]), r["truly"],
             r["asked"], r["false_credits"], r["run_s"] or 0, r["planned_s"] or 0, r["replans"], r["replan_median_s"],
             r["veers"], r["held_or_out"], r["points_skipped"], r["closest_two_bodies_cm"],
             r["closest_body_to_open_edge_cm"], r["closest_middle_to_keepout_cm"]))

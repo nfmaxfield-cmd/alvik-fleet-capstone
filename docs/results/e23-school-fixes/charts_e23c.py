@@ -110,6 +110,10 @@ if ACC:
         for q in rs:
             ax.scatter(seeds.index(q["seed"]), q["truly"], s=80, color=BLUE if q["ended"] != "capped" else RED,
                        edgecolor="black", linewidth=0.6, zorder=3, marker="o" if q["ended"] != "capped" else "s")
+        # e23 as built (b202ea5) on the same seeds, where it was run: hollow diamonds beside the dots
+        for q in [q for q in acc["rows"] if q["case"] == "b202" + case and q["seed"] in seeds]:
+            ax.scatter(seeds.index(q["seed"]) + 0.22, q["truly"], s=70, facecolor="white", edgecolor="black",
+                       linewidth=1.0, marker="D", zorder=3)
         ax.axhline(asked, color=GREY, ls="--", lw=1)
         ax.text(len(seeds) - 0.55, asked, " asked: %d" % asked, fontsize=8, color=GREY, va="bottom", ha="right")
         ax.set_xticks(range(len(seeds)))
@@ -119,13 +123,15 @@ if ACC:
         ax.set_ylabel("Points the robots truly stood at")
         ax.set_title("%d + %d points" % (asked // 2, asked // 2), fontsize=9)
         ax.grid(axis="y", color="#E5E7EB", lw=0.6)
-    axes[1].legend(handles=[ml.Line2D([], [], marker="o", ls="", mfc=BLUE, mec="black", label="run ended by itself"),
+    axes[1].legend(handles=[ml.Line2D([], [], marker="o", ls="", mfc=BLUE, mec="black", label="final code: run ended by itself"),
+                            ml.Line2D([], [], marker="D", ls="", mfc="white", mec="black",
+                                      label="e23 as built, same seed (4 + 4 only)"),
                             ml.Line2D([], [], marker="s", ls="", mfc=RED, mec="black",
-                                      label="not finished when the runner's wall-clock cap ended it")],
+                                      label="final code: not finished at 19 min")],
                    fontsize=8, frameon=False, loc="lower left")
     fig.suptitle("School Pi stand-in in the simulator, final code: points truly reached in every run, by seed", fontsize=10)
     fig.text(0.01, 0.01, "Measured: the simulator's true robot positions during each recorded stop against the point's place "
-             "(acc_table.py), one dot per run; late pictures 1.5 s every 20 s, planning 6 x slower\n"
+             "(acc_table.py), one mark per run; late pictures 1.5 s every 20 s, planning 6 x slower\n"
              "(docs/results/e23-school-fixes/acceptance/seeds_e23c.json). The same seed does not give the same run: "
              "outcomes depend on wall-clock timing.", fontsize=7, color=GREY)
     fig.tight_layout(rect=(0, 0.08, 1, 0.94))
