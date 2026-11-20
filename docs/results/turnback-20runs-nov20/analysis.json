@@ -1,0 +1,337 @@
+{
+ "summary": {
+  "a": {
+   "n": 20,
+   "finished": {
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sum": 20.0
+   },
+   "truly": {
+    "median": 7.0,
+    "min": 5.0,
+    "max": 8.0,
+    "sum": 133.0
+   },
+   "false_credits": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "replans": {
+    "median": 7.5,
+    "min": 0.0,
+    "max": 27.0,
+    "sum": 189.0
+   },
+   "turnbacks": {
+    "median": 3.0,
+    "min": 1.0,
+    "max": 15.0,
+    "sum": 82.0
+   },
+   "tb_first_moving_stall": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 1.0,
+    "sum": 9.0
+   },
+   "run_s": {
+    "median": 118.76,
+    "min": 87.55,
+    "max": 335.29,
+    "sum": 2651.38
+   },
+   "closest_two_bodies_cm": {
+    "median": 74.405,
+    "min": 14.16,
+    "max": 78.9,
+    "sum": 1311.07
+   },
+   "closest_body_to_open_edge_cm": {
+    "median": 6.76,
+    "min": 4.04,
+    "max": 11.39,
+    "sum": 146.7
+   },
+   "crash": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "hung_over_edge": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "first_moving_stall_t_run": {
+    "median": 31.0,
+    "min": 27.7,
+    "max": 62.5,
+    "sum": 659.8
+   },
+   "contact": 0
+  },
+  "b": {
+   "n": 20,
+   "finished": {
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sum": 20.0
+   },
+   "truly": {
+    "median": 7.0,
+    "min": 5.0,
+    "max": 8.0,
+    "sum": 134.0
+   },
+   "false_credits": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "replans": {
+    "median": 8.0,
+    "min": 0.0,
+    "max": 16.0,
+    "sum": 145.0
+   },
+   "turnbacks": {
+    "median": 4.0,
+    "min": 1.0,
+    "max": 9.0,
+    "sum": 72.0
+   },
+   "tb_first_moving_stall": {
+    "median": 0.5,
+    "min": 0.0,
+    "max": 1.0,
+    "sum": 10.0
+   },
+   "run_s": {
+    "median": 119.41499999999999,
+    "min": 87.52,
+    "max": 204.03,
+    "sum": 2344.5299999999997
+   },
+   "closest_two_bodies_cm": {
+    "median": 74.715,
+    "min": 23.97,
+    "max": 77.64,
+    "sum": 1365.26
+   },
+   "closest_body_to_open_edge_cm": {
+    "median": 6.710000000000001,
+    "min": 6.39,
+    "max": 11.33,
+    "sum": 149.62
+   },
+   "crash": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "hung_over_edge": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "first_moving_stall_t_run": {
+    "median": 30.9,
+    "min": 28.5,
+    "max": 62.6,
+    "sum": 659.6
+   },
+   "contact": 0
+  },
+  "c": {
+   "n": 20,
+   "finished": {
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sum": 20.0
+   },
+   "truly": {
+    "median": 7.0,
+    "min": 4.0,
+    "max": 8.0,
+    "sum": 133.0
+   },
+   "false_credits": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "replans": {
+    "median": 7.5,
+    "min": 0.0,
+    "max": 30.0,
+    "sum": 195.0
+   },
+   "turnbacks": {
+    "median": 4.0,
+    "min": 1.0,
+    "max": 17.0,
+    "sum": 102.0
+   },
+   "tb_first_moving_stall": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 1.0,
+    "sum": 8.0
+   },
+   "run_s": {
+    "median": 119.97999999999999,
+    "min": 86.38,
+    "max": 305.92,
+    "sum": 2791.96
+   },
+   "closest_two_bodies_cm": {
+    "median": 74.77000000000001,
+    "min": 10.6,
+    "max": 77.49,
+    "sum": 1270.79
+   },
+   "closest_body_to_open_edge_cm": {
+    "median": 6.68,
+    "min": 6.5,
+    "max": 12.22,
+    "sum": 141.98
+   },
+   "crash": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "hung_over_edge": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0
+   },
+   "first_moving_stall_t_run": {
+    "median": 30.9,
+    "min": 16.3,
+    "max": 62.1,
+    "sum": 637.8
+   },
+   "contact": 0
+  }
+ },
+ "tests": {
+  "a_vs_b": {
+   "turnbacks": {
+    "U": 198.0,
+    "p": 0.967045381447892
+   },
+   "replans": {
+    "U": 226.5,
+    "p": 0.4804019518332495
+   },
+   "run_s": {
+    "U": 222.0,
+    "p": 0.5608516966002302
+   },
+   "truly": {
+    "U": 204.5,
+    "p": 0.909247415418992
+   },
+   "tb_first_moving_stall": {
+    "table": [
+     [
+      9,
+      11
+     ],
+     [
+      10,
+      10
+     ]
+    ],
+    "odds_ratio": 0.8181818181818182,
+    "p": 1.0
+   }
+  },
+  "b_vs_c": {
+   "turnbacks": {
+    "U": 176.0,
+    "p": 0.5175067342101365
+   },
+   "replans": {
+    "U": 178.0,
+    "p": 0.5590953011256004
+   },
+   "run_s": {
+    "U": 176.0,
+    "p": 0.5249869101903615
+   },
+   "truly": {
+    "U": 196.5,
+    "p": 0.9322639535298628
+   },
+   "tb_first_moving_stall": {
+    "table": [
+     [
+      10,
+      10
+     ],
+     [
+      8,
+      12
+     ]
+    ],
+    "odds_ratio": 1.5,
+    "p": 0.7511863074565595
+   }
+  },
+  "a_vs_c": {
+   "turnbacks": {
+    "U": 171.5,
+    "p": 0.44052221961090055
+   },
+   "replans": {
+    "U": 208.0,
+    "p": 0.8387765768131483
+   },
+   "run_s": {
+    "U": 192.0,
+    "p": 0.8392322130718609
+   },
+   "truly": {
+    "U": 200.5,
+    "p": 1.0
+   },
+   "tb_first_moving_stall": {
+    "table": [
+     [
+      9,
+      11
+     ],
+     [
+      8,
+      12
+     ]
+    ],
+    "odds_ratio": 1.2272727272727273,
+    "p": 1.0
+   }
+  },
+  "turnbacks_by_first_stall": {
+   "yes_median": 4.0,
+   "no_median": 2.0,
+   "n_yes": 27,
+   "n_no": 33,
+   "p": 4.758418597934783e-08
+  }
+ }
+}
