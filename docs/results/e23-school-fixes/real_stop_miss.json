@@ -156,5 +156,14 @@
   }
  ],
  "kept_max_miss_cm": 7.0,
- "share_under_3cm": 0.611
+ "share_under_3cm": 0.611,
+ "seed_miss": [
+  2.82,
+  0.61
+ ],
+ "seed_miss_plus_pm": [
+  6.58,
+  1.35
+ ],
+ "median_pm_cm": 3.3
 }

@@ -209,6 +209,33 @@ def wake_wait_min(site, wake_min=3.0, dry=False, now=None, path=None):
     return max(float(wake_min), wait_s / 60.0), ck
 
 
+def SG_value(name):
+    import safety_group as SG
+    return SG.value(name)
+
+
+def missing_words(site, found, want, ck_min=None, state_dir=None):
+    """(e23c) The loud line for a start that goes ahead with fewer robots than it looked for: how many answered, which
+    WiFi names the site's pins know that did not (when it has pins), and what that means for the run. "" when every
+    robot answered or none did."""
+    if not found or not want or len(found) >= want:
+        return ""
+    names = []
+    try:
+        pins = CR.load_pins(site, CR.state_path(state_dir, CR.PINS_FILE) if state_dir is not None else "")
+        names = sorted(set(pins) - set(found))
+    except Exception:  # noqa: BLE001  (the pins only add names to the words)
+        pass
+    n = want - len(found)
+    return ("STARTING WITHOUT %d ROBOT%s: %d of %d answered (%s). Not heard: %s. %s is asleep, off or out of the WiFi "
+            "(%s). The run starts now with the robot%s that answered; a robot that did not answer is NOT driven and "
+            "NOT tracked in this run, so take it off the table or wake it and start again to include it" % (
+                n, "" if n == 1 else "S", len(found), want, ", ".join(sorted(found)),
+                (", ".join(names) + (" (the site's pinned robots that did not answer)" if names else ""))
+                or "%d robot%s the run has no name for yet" % (n, "" if n == 1 else "s"),
+                "It" if n == 1 else "Each", CR.checkin_words(ck_min), "" if len(found) == 1 else "s"))
+
+
 def pin_disagreements(expect, bound, wifi_of=None):
     """(e23) [(robot, WiFi name, pinned tag, tag the wiggle found)] where a pin (typed in the site file, or kept by the
     Pi) said one roof tag and the robot's own wiggle turned another. The wiggle wins (the binding uses `bound`)."""
@@ -234,10 +261,19 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
     if state_dir is None:
         state_dir = (folder or "") if dry else ((site or {}).get("conf_dir") or "")
     auto = list(slots) in (["auto"], [])
+    asked_min = float(wake_min)
     wake_min, ck_min = wake_wait_min(site, wake_min, dry)          # (e23) the site's own sleep check-in
-    if ck_min is not None and wake_min > 3.0 + 1e-6:
-        log("ROBOTS ASLEEP? If none answers, the start keeps trying for up to %.0f min: %s" % (
-            wake_min, CR.checkin_words(ck_min)))
+    # (e23c, audit of e23) the long wait is for a start where NO robot answers. Once one has answered, the others are
+    # waited for the usual time only (the wait asked for, 3 min) and the run starts with the robots that answered:
+    # robots never wait an hour on one that is asleep or off. MIRLT_WAKE_PARTIAL=wait: every robot is waited for the
+    # whole check-in, as e23 was built
+    partial_min = asked_min if (ck_min is not None and wake_min > asked_min + 1e-6 and
+                                SG_value("MIRLT_WAKE_PARTIAL") != "wait") else None
+    if ck_min is not None and wake_min > asked_min + 1e-6:
+        log("ROBOTS ASLEEP? If none answers, the start keeps trying for up to %.0f min: %s%s" % (
+            wake_min, CR.checkin_words(ck_min),
+            "" if partial_min is None else ". If some answer and others do not, the run starts after %.0f min with "
+            "the robots that answered" % partial_min))
     if auto:
         # (11-05h, Observe then trust) however many robots are on the table: the camera counts the roof tags there
         # and the run waits (up to wake_min) for that many robots to answer; slots are named after the site's robots,
@@ -245,10 +281,16 @@ def bind_for_run(site, slots, link, eye, ips=(), wake_min=3.0, dry=False, folder
         n_tags = len(eye.seen_ids(2.0)) if eye is not None else 0
         log("AUTO: the camera sees %d roof tag%s on the table: waiting for %s robot%s to answer" % (
             n_tags, "" if n_tags == 1 else "s", n_tags or "any", "" if n_tags == 1 else "s"))
-        found = CR.discover(link, list(ips), wake_min, dry, count=n_tags, checkin_min=ck_min)
+        found = CR.discover(link, list(ips), wake_min, dry, count=n_tags, checkin_min=ck_min, partial_min=partial_min)
+        want = n_tags
         slots = auto_slots(site, len(found))
     else:
-        found = CR.discover(link, list(ips), wake_min, dry, count=len(slots), checkin_min=ck_min)
+        want = len(slots)
+        found = CR.discover(link, list(ips), wake_min, dry, count=len(slots), checkin_min=ck_min,
+                            partial_min=partial_min)
+    w = missing_words(site, found, want, ck_min, state_dir if use_pins else None)
+    if w:
+        log(w)
     if not found:
         raise CR.BindError("no robot answered on the WiFi (wake and status to %s for %.0f min%s). Is it switched on and "
                            "on the school WiFi? `python3 tools/pi/robot_sleep.py wake any` wakes one from any address."

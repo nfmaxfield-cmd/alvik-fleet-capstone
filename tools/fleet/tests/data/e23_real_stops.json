@@ -1,0 +1,1053 @@
+{
+"what": "the 131 stops of the school runs of 16 and 18 Nov: distance of the stop's recorded position from its point's typed position, and the stop's stated +- (replay_stops.py)",
+"stops": [
+{
+"run": "20261116-173641-visit-robots",
+"robot": "Alpha",
+"point": "P18",
+"miss_cm": 1.0,
+"pm_cm": 1.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261116-173641-visit-robots",
+"robot": "Alpha",
+"point": "P15",
+"miss_cm": 1.1,
+"pm_cm": 1.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261116-173641-visit-robots",
+"robot": "Alpha",
+"point": "P12",
+"miss_cm": 0.9,
+"pm_cm": 1.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261116-173641-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 0.8,
+"pm_cm": 1.5,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-130132-visit-robots",
+"robot": "Alpha",
+"point": "P10",
+"miss_cm": 0.8,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-130132-visit-robots",
+"robot": "Alpha",
+"point": "P16",
+"miss_cm": 0.9,
+"pm_cm": 0.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-130132-visit-robots",
+"robot": "Alpha",
+"point": "P18",
+"miss_cm": 0.7,
+"pm_cm": 0.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Bravo",
+"point": "P14",
+"miss_cm": 0.5,
+"pm_cm": 0.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 0.6,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Bravo",
+"point": "P18",
+"miss_cm": 0.1,
+"pm_cm": 0.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Alpha",
+"point": "P05",
+"miss_cm": 0.7,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Bravo",
+"point": "P12",
+"miss_cm": 0.7,
+"pm_cm": 1.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Alpha",
+"point": "P09",
+"miss_cm": 0.5,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Bravo",
+"point": "P14",
+"miss_cm": 0.7,
+"pm_cm": 1.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-132919-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 0.5,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Bravo",
+"point": "P20",
+"miss_cm": 2.6,
+"pm_cm": 2.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Alpha",
+"point": "P10",
+"miss_cm": 3.0,
+"pm_cm": 0.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Bravo",
+"point": "P17",
+"miss_cm": 3.1,
+"pm_cm": 0.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Bravo",
+"point": "P07",
+"miss_cm": 2.0,
+"pm_cm": 2.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Bravo",
+"point": "P14",
+"miss_cm": 2.5,
+"pm_cm": 2.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Alpha",
+"point": "P16",
+"miss_cm": 2.3,
+"pm_cm": 2.4,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Bravo",
+"point": "P20",
+"miss_cm": 2.8,
+"pm_cm": 1.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Alpha",
+"point": "P18",
+"miss_cm": 2.7,
+"pm_cm": 4.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-134340-visit-robots",
+"robot": "Alpha",
+"point": "P10",
+"miss_cm": 2.4,
+"pm_cm": 3.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-143047-visit-robots",
+"robot": "Alpha",
+"point": "P14",
+"miss_cm": 3.6,
+"pm_cm": 4.4,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-143047-visit-robots",
+"robot": "Alpha",
+"point": "P16",
+"miss_cm": 3.7,
+"pm_cm": 1.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-143047-visit-robots",
+"robot": "Bravo",
+"point": "P23",
+"miss_cm": 2.5,
+"pm_cm": 9.4,
+"source": "odometry only"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Bravo",
+"point": "P24",
+"miss_cm": 2.0,
+"pm_cm": 5.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 5.6,
+"pm_cm": 10.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Bravo",
+"point": "P31",
+"miss_cm": 2.0,
+"pm_cm": 4.5,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Bravo",
+"point": "P38",
+"miss_cm": 2.5,
+"pm_cm": 5.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Alpha",
+"point": "P13",
+"miss_cm": 4.2,
+"pm_cm": 4.5,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Alpha",
+"point": "P20",
+"miss_cm": 2.1,
+"pm_cm": 1.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 2.4,
+"pm_cm": 4.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-150347-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 5.3,
+"pm_cm": 9.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P24",
+"miss_cm": 3.1,
+"pm_cm": 6.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 5.5,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P31",
+"miss_cm": 4.3,
+"pm_cm": 4.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Alpha",
+"point": "P13",
+"miss_cm": 3.3,
+"pm_cm": 4.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P38",
+"miss_cm": 3.1,
+"pm_cm": 5.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Alpha",
+"point": "P20",
+"miss_cm": 1.0,
+"pm_cm": 5.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 11.2,
+"pm_cm": 1.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 24.4,
+"pm_cm": 1.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 24.5,
+"pm_cm": 1.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 24.4,
+"pm_cm": 1.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-161142-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 29.1,
+"pm_cm": 2.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Bravo",
+"point": "P24",
+"miss_cm": 2.9,
+"pm_cm": 5.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 3.3,
+"pm_cm": 7.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Bravo",
+"point": "P31",
+"miss_cm": 2.7,
+"pm_cm": 4.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Alpha",
+"point": "P13",
+"miss_cm": 3.9,
+"pm_cm": 3.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Bravo",
+"point": "P38",
+"miss_cm": 2.6,
+"pm_cm": 3.2,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Alpha",
+"point": "P20",
+"miss_cm": 3.1,
+"pm_cm": 2.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 3.5,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-164246-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 1.9,
+"pm_cm": 5.9,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P21",
+"miss_cm": 2.2,
+"pm_cm": 2.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 4.8,
+"pm_cm": 1.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P22",
+"miss_cm": 2.5,
+"pm_cm": 3.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P02",
+"miss_cm": 6.3,
+"pm_cm": 3.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P23",
+"miss_cm": 3.0,
+"pm_cm": 2.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P03",
+"miss_cm": 5.7,
+"pm_cm": 4.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P24",
+"miss_cm": 2.3,
+"pm_cm": 5.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P04",
+"miss_cm": 5.3,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P25",
+"miss_cm": 2.8,
+"pm_cm": 3.2,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P26",
+"miss_cm": 2.7,
+"pm_cm": 4.5,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P05",
+"miss_cm": 2.9,
+"pm_cm": 4.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P06",
+"miss_cm": 2.9,
+"pm_cm": 3.4,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P27",
+"miss_cm": 2.6,
+"pm_cm": 3.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P07",
+"miss_cm": 2.5,
+"pm_cm": 3.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P28",
+"miss_cm": 2.4,
+"pm_cm": 3.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P29",
+"miss_cm": 2.8,
+"pm_cm": 4.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P08",
+"miss_cm": 2.6,
+"pm_cm": 3.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P30",
+"miss_cm": 2.3,
+"pm_cm": 3.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P09",
+"miss_cm": 2.9,
+"pm_cm": 2.5,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P31",
+"miss_cm": 2.6,
+"pm_cm": 4.2,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P10",
+"miss_cm": 2.5,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P32",
+"miss_cm": 2.2,
+"pm_cm": 2.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 2.5,
+"pm_cm": 3.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P33",
+"miss_cm": 2.4,
+"pm_cm": 3.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P12",
+"miss_cm": 3.1,
+"pm_cm": 4.5,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P34",
+"miss_cm": 2.3,
+"pm_cm": 4.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P13",
+"miss_cm": 2.9,
+"pm_cm": 6.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P35",
+"miss_cm": 2.5,
+"pm_cm": 2.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P14",
+"miss_cm": 2.7,
+"pm_cm": 3.0,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P36",
+"miss_cm": 2.0,
+"pm_cm": 4.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Alpha",
+"point": "P15",
+"miss_cm": 2.8,
+"pm_cm": 5.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P37",
+"miss_cm": 2.1,
+"pm_cm": 3.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-170939-visit-robots",
+"robot": "Bravo",
+"point": "P38",
+"miss_cm": 2.1,
+"pm_cm": 4.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P01",
+"miss_cm": 3.9,
+"pm_cm": 2.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P02",
+"miss_cm": 3.6,
+"pm_cm": 3.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P03",
+"miss_cm": 7.0,
+"pm_cm": 9.9,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P04",
+"miss_cm": 76.5,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P06",
+"miss_cm": 39.5,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P07",
+"miss_cm": 3.6,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P08",
+"miss_cm": 2.8,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P09",
+"miss_cm": 3.4,
+"pm_cm": 3.4,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P10",
+"miss_cm": 2.9,
+"pm_cm": 1.8,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 2.8,
+"pm_cm": 3.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P12",
+"miss_cm": 3.5,
+"pm_cm": 3.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P13",
+"miss_cm": 2.7,
+"pm_cm": 4.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P14",
+"miss_cm": 3.4,
+"pm_cm": 2.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P15",
+"miss_cm": 3.1,
+"pm_cm": 2.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P16",
+"miss_cm": 3.2,
+"pm_cm": 3.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P17",
+"miss_cm": 2.8,
+"pm_cm": 4.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P18",
+"miss_cm": 3.6,
+"pm_cm": 3.7,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P19",
+"miss_cm": 3.0,
+"pm_cm": 3.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P20",
+"miss_cm": 25.4,
+"pm_cm": 4.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P23",
+"miss_cm": 2.7,
+"pm_cm": 3.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P24",
+"miss_cm": 2.9,
+"pm_cm": 2.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P25",
+"miss_cm": 3.3,
+"pm_cm": 4.1,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P26",
+"miss_cm": 3.0,
+"pm_cm": 4.0,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P27",
+"miss_cm": 2.8,
+"pm_cm": 3.4,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P28",
+"miss_cm": 2.8,
+"pm_cm": 4.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P29",
+"miss_cm": 3.1,
+"pm_cm": 3.6,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P30",
+"miss_cm": 3.1,
+"pm_cm": 4.3,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P31",
+"miss_cm": 3.4,
+"pm_cm": 1.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-173209-visit-robots",
+"robot": "Alpha",
+"point": "P32",
+"miss_cm": 2.7,
+"pm_cm": 4.2,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-175439-visit-robots",
+"robot": "Alpha",
+"point": "P11",
+"miss_cm": 1.2,
+"pm_cm": 6.4,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-175439-visit-robots",
+"robot": "Alpha",
+"point": "P32",
+"miss_cm": 5.1,
+"pm_cm": 7.2,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-175439-visit-robots",
+"robot": "Alpha",
+"point": "P33",
+"miss_cm": 8.8,
+"pm_cm": 1.6,
+"source": "odometry only"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P20",
+"miss_cm": 3.5,
+"pm_cm": 5.2,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P40",
+"miss_cm": 4.1,
+"pm_cm": 4.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P19",
+"miss_cm": 2.4,
+"pm_cm": 5.5,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P18",
+"miss_cm": 6.7,
+"pm_cm": 7.1,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P39",
+"miss_cm": 1.2,
+"pm_cm": 5.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P17",
+"miss_cm": 1.0,
+"pm_cm": 1.6,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P38",
+"miss_cm": 4.3,
+"pm_cm": 6.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P16",
+"miss_cm": 1.4,
+"pm_cm": 5.3,
+"source": "one camera (overhead)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P37",
+"miss_cm": 1.0,
+"pm_cm": 1.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P36",
+"miss_cm": 12.8,
+"pm_cm": 1.7,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Alpha",
+"point": "P15",
+"miss_cm": 5.7,
+"pm_cm": 1.8,
+"source": "one camera (side)"
+},
+{
+"run": "20261118-180601-visit-robots",
+"robot": "Bravo",
+"point": "P35",
+"miss_cm": 15.6,
+"pm_cm": 1.6,
+"source": "one camera (side)"
+}
+]
+}

@@ -757,8 +757,9 @@ def _travel(pose, goal, grid, s, task, what):
     return out
 
 
-SLOW_SPLIT_MIN_CM = 5.0   # a fast part shorter than this is not worth its own step: the whole leg goes slowly (the
-#                           plan's shortest sensible drive, as its chunks' minimum). No DOE: bookkeeping
+SLOW_SPLIT_MIN_CM = 5.0   # [chosen] a fast part shorter than this is not worth its own step: the whole leg goes slowly (the
+#                           plan's shortest sensible drive, as its chunks' minimum). No DOE: bookkeeping (it only
+#                           decides whether a few cm at the leg's start are driven fast or slowly)
 
 
 def slow_end_cm(grid, goal, s):

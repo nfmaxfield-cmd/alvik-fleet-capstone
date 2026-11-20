@@ -40,11 +40,13 @@ Changelog
                  MIRLT_EDGE_SLOW_END, MIRLT_BIND_CAMS, MIRLT_WAKE_WAIT, MIRLT_VISIT_UNSEEN.
   2026-11-19e23b MIRLT_VEER_AT_POINT (found while finishing e23): a robot standing in its dwell at a point is not sent
                  on the veer stage's early turn-back when the camera loses it.
+  2026-11-19e23c the audit of e23: MIRLT_STOP_NO_ANSWER, MIRLT_OLD_FIX_JUMPS, MIRLT_REACH_TOL, MIRLT_WAKE_PARTIAL;
+                 MIRLT_WAKE_WAIT's and MIRLT_STOP_UNNAMED's words corrected to what the code does.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-19e23b"   # e23b: MIRLT_VEER_AT_POINT. Before: "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-19e23c"   # e23c: four switches from the audit of e23, two descriptions corrected. Before: "safety-group-2026-11-19e23b"   # e23b: MIRLT_VEER_AT_POINT. Before: "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -318,8 +320,14 @@ SWITCHES = [
     # -- e23: Jay-Sun's school runs of 16 and 18 Nov -----------------------------------------------------------------------
     ("MIRLT_STOP_UNNAMED", "once", "wait", "F M C",
      "A Stop pressed before the robots are named: a robot known only by its slot name (no address, no WiFi name) is "
-     "settled by the first `stop` that went out with the robots' log port read, and a new Start ends the watch. wait: "
-     "asked for by its slot name every 3 s for ever (school 16 / 18 Nov: it stopped the next three starts)", "e23"),
+     "settled by a `stop` that went out with the robots' log port read, and a new Start ends the watch. wait: "
+     "asked for by its slot name every 3 s for ever (school 16 / 18 Nov: it stopped the next three starts). wait is "
+     "not the whole way before e23: a new Start still ends the watch and a second Stop still joins the running "
+     "watch instead of starting another (those two have no switch)", "e23"),
+    ("MIRLT_STOP_NO_ANSWER", "resend", "first", "F M C",
+     "A Stop before the robots are named that NO robot answers: the `stop` is sent 3 times, 3 s apart, and the page "
+     "then says it was sent and no robot answered (never 'every robot confirmed'). first: settled after the first "
+     "`stop`, as e23 was built (the page still says that no robot answered)", "e23c"),
     ("MIRLT_CAMERA_PROBE", "usb", "e13", "M C",
      "Looking for cameras at a start: only USB cameras that no other program holds are opened, each in a child process "
      "with a time limit (3 x the longest open on record), and what was found or skipped is said. e13: every /dev/video "
@@ -357,9 +365,24 @@ SWITCHES = [
      "Naming the robots by their wiggle reads roof tags with every camera the run uses. one: camera 1 only (school 18 "
      "Nov 14:27: a robot standing where only camera 2 sees it could not be named)", "e23"),
     ("MIRLT_WAKE_WAIT", "site", "fixed", "M C",
-     "A start waits for sleeping robots as long as the site's own sleep check-in (school: 60 min would be too long to "
-     "stand and wait, so it waits its usual time and says the real interval and how to wake them now). fixed: the "
-     "message says 'every 10 min' whatever the site", "e23"),
+     "A start that hears NO robot keeps trying for as long as the site's own sleep check-in (school: 60 min check-in, "
+     "so up to 60.5 min; home: 10.5 min), and says the real interval and how to wake the robots now. fixed: it waits "
+     "the time asked for (3 min) and its message says 'every 10 min' whatever the site", "e23"),
+    ("MIRLT_WAKE_PARTIAL", "go", "wait", "M C",
+     "A start where some robots answer and others do not: the others are waited for the usual 3 min, then the run "
+     "starts with the robots that answered and says loudly which did not (a robot that did not answer is not driven "
+     "and not tracked in that run). wait: every robot is waited for the whole sleep check-in (school: Start stood up "
+     "to 60.5 min for one sleeping robot), as e23 was built", "e23c"),
+    ("MIRLT_OLD_FIX_JUMPS", "remove", "count", "M",
+     "A camera picture too old for the robot is carried forward by what the robot DROVE since: the pose corrections "
+     "it took since the picture (camera fixes it used, pose resets) are taken out of its pose history first. count: "
+     "the newest pose minus the pose at the picture's time, corrections counted as driving, as e23 was built (a "
+     "standing robot corrected by 5 cm had the picture moved 5 cm)", "e23c"),
+    ("MIRLT_REACH_TOL", "bounded", "e23", "M",
+     "How far from its point a stop may be and still count: learned from the stops that were REACHED only, the stop's "
+     "own +- counted against it (position within the tolerance AND position + its +- within a second one), and both "
+     "kept between the table's measured value and 1.5 times it. e23: learned from every stop, the +- added to the "
+     "tolerance, no bound (16:11 run: it grew from 6 to 25.5 cm as stops missed)", "e23c"),
     ("MIRLT_VISIT_UNSEEN", "warn", "quiet", "M",
      "Visit points: a listed point outside every camera the run uses is warned about loudly at the start (Mission "
      "Control and the run log). quiet: a NOTE line only", "e23"),

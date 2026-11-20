@@ -4328,13 +4328,17 @@ def checkin_words(checkin_min=None, left_min=None):
                                                     "; still trying, %.0f min left" % max(0.0, left_min)))
 
 
-def discover(link, ips, wake_min, dry=False, count=0, only=(), checkin_min=None):
+def discover(link, ips, wake_min, dry=False, count=0, only=(), checkin_min=None, partial_min=None):
     """{wifi name: ip} of the robots that answer `status` (sent to the given addresses and the broadcast; `wake` too, so
     a sleeping robot answers at its next check-in), for up to wake_min minutes. (5 Nov) A robot heard at all (its
     check-in, its hello) is also asked at the address it was heard from. count: keep going until this many robots have
-    answered (0: the first to answer and any other within 2 s, as before)."""
+    answered (0: the first to answer and any other within 2 s, as before).
+    (e23c, audit of e23) partial_min: once at least one robot has answered, the others are waited for this long from
+    the start and no longer; the run then starts with the robots that answered (said loudly by the caller). Without
+    it a start at school stood for the whole 60 min check-in whenever one robot of two was asleep or off."""
     targets = list(ips) + ([] if dry else ["255.255.255.255"])
-    end = time.time() + wake_min * 60
+    t_begin = time.time()
+    end = t_begin + wake_min * 60
     found = {}
     k = link.mark()
     said = time.time()
@@ -4353,6 +4357,8 @@ def discover(link, ips, wake_min, dry=False, count=0, only=(), checkin_min=None)
             pass
         elif (count and len(found) >= count) or (not count and first is not None and time.time() - first >= 2.0):
             return found
+        elif partial_min is not None and count and found and time.time() - t_begin >= partial_min * 60:
+            return found                   # (e23c) some answered, the rest did not in the usual wait: go with these
         for ip in targets + [ip for n, ip in heard.items() if n not in found and ip not in targets]:
             link.send(ip, "wake")
             link.send(ip, "status")

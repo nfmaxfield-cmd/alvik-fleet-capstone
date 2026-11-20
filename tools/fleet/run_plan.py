@@ -62,6 +62,8 @@ MOVE_CHECK_E23 = SG.value("MIRLT_MOVE_CHECK") != "e22"          # the move check
 IMPROVE_SKIP_OVER = SG.flag("MIRLT_IMPROVE_SKIP_OVER")         # no improvement try after a plan that was over budget
 POINT_CREDIT_REACHED = SG.value("MIRLT_POINT_CREDIT") != "always"   # a stop is credited only where the robot is there
 OLD_FIX_PROJECT = SG.value("MIRLT_OLD_FIX") != "send"         # a fix too old for the robot is carried forward
+OLD_FIX_MOTION_ONLY = SG.value("MIRLT_OLD_FIX_JUMPS") != "count"   # (e23c) ... by its MOTION only: corrections since removed
+REACH_TOL_BOUNDED = SG.value("MIRLT_REACH_TOL") != "e23"      # (e23c) the stop tolerance from reached stops only, bounded
 EDGE_SLOW_END = SG.flag("MIRLT_EDGE_SLOW_END")                 # the last part of a leg ending in the edge rule's room
 VEER_AT_POINT_STAND = SG.value("MIRLT_VEER_AT_POINT") != "recover"   # (e23) no early turn-back for a robot standing in its dwell
 PLAN_AHEAD_NEAR = SG.value("MIRLT_PLAN_AHEAD") != "all"        # fixed-order lists planned a few points ahead
@@ -438,6 +440,12 @@ class Coordinator:
         return self.plan["robots"][name]["steps"]
 
     def send(self, name, text):
+        if text.startswith("fpose"):
+            # (e23c) the Pi resets this robot's pose: its next pose rows jump with no drive behind the jump
+            # (project_old_fix must not count that as motion)
+            b = getattr(self, "bots", {}).get(name)
+            if b is not None:
+                b.fpose_sent_t = now()
         self.link.send_name(name, text)
 
     # -- incoming -------------------------------------------------------------
@@ -748,8 +756,13 @@ class Coordinator:
             b.fmem = OB.FailMemory()
         return True
 
-    LATE_CHECK_KEEP_S = 5.0   # a move check not answered by a newer picture within this is dropped (the robot is not
-                              # seen: the blind rules have it). No DOE: bookkeeping
+    LATE_CHECK_KEEP_S = 5.0   # [chosen] a move check not answered by a newer picture within this is dropped (the robot
+                              # is not seen: the blind rules have it). No DOE: bookkeeping (it only decides whether a
+                              # late "the camera disagrees" line is still written; nothing drives on it)
+    LATE_MOVED_SHARE = 0.5    # [chosen] the camera "agrees" a step happened when its first picture after the step shows
+                              # at least this share of the step's length (the same half as the e22 move check used).
+                              # DOE: not yet. It only words a log line today; if a late "did not move" is ever acted
+                              # on, set it from steps with known slip (0.3 / 0.5 / 0.7 against false alarms)
 
     def late_move_check(self, b, q):
         """(e23) The camera's say on a step taken as done on the robot's own word: the first picture NEWER than the
@@ -765,7 +778,7 @@ class Coordinator:
                     keep.append(c)
                 continue
             seen = math.hypot(x - c["cam0"][0], y - c["cam0"][1])
-            ok = seen >= 0.5 * c["length_cm"]
+            ok = seen >= self.LATE_MOVED_SHARE * c["length_cm"]
             self.log("move_check_late", robot=b.name, i=c["i"], length_cm=c["length_cm"], camera_cm=round(seen, 1),
                      wheel_cm=None if c["wheel_cm"] is None else round(c["wheel_cm"], 1),
                      picture_after_end_s=round(tf - c["t_end"], 2), agrees=ok)
@@ -1048,7 +1061,22 @@ class Coordinator:
             b.__dict__.setdefault("trail", OB.Trail()).add(x, y, th)     # (11-05h, 4'a) its breadcrumb trail
             self.echo_pose(b, t, ms, x, y, th, state)
             ph = b.__dict__.setdefault("pose_hist", [])       # (laptop time of the pose, x, y, th): blind_watch
-            ph.append(((ms / 1000.0 + b.offset) if b.offset is not None else t, x, y, th))
+            # (e23c) fifth value: this row's FRAME number. It goes up when the robot's pose was corrected between the
+            # row before and this one (it used a camera fix: fixes_used changed; or the Pi reset its pose: fpose), so
+            # the step from the row before is a correction plus a drive, not a drive alone (motion_since)
+            pt = (ms / 1000.0 + b.offset) if b.offset is not None else t
+            try:
+                used = int(float(v[12]))
+            except (TypeError, ValueError):
+                used = None
+            fr = getattr(b, "pose_frame", 0)
+            gap = (pt - ph[-1][0]) if ph else 0.0
+            fp = getattr(b, "fpose_sent_t", None)
+            if ph and ((used is not None and used != getattr(b, "pose_used", used)) or
+                       (fp is not None and 0.0 <= t - fp <= self.FIX_TRANSIT_S + max(gap, 0.0))):
+                fr += 1
+            b.pose_frame, b.pose_used = fr, used
+            ph.append((pt, x, y, th, fr))
             if len(ph) > 120:
                 del ph[:-80]
         # done reports lost over WiFi: the robot runs its steps in order, so everything up to last_done is done
@@ -1264,18 +1292,84 @@ class Coordinator:
         except (TypeError, ValueError, AttributeError):
             return self.FIX_MAX_AGE_DEFAULT_S
 
+    POSE_HOLE_S = 1.0             # [chosen] two pose rows further apart than this are a hole in the robot's reports:
+    #                               nothing is read in between. Rows come every 0.11 s (median of the 18 Nov runs), so
+    #                               this is 9 rows lost in a row. No DOE: a longer hole only means an old picture is
+    #                               sent as it is (and refused by the robot), never a wrong position
+
     def pose_interp(self, b, t):
         """The robot's own pose (x, y, th) at laptop time t from its pose history, between the two rows round t; None
         when t is outside what the history holds (it is never guessed)."""
         ph = getattr(b, "pose_hist", None) or []
         for a, c in zip(ph, ph[1:]):
             if a[0] <= t <= c[0]:
-                if c[0] - a[0] > 1.0:
+                if c[0] - a[0] > self.POSE_HOLE_S:
                     return None            # a hole in its reports: no honest in-between
                 f = (t - a[0]) / (c[0] - a[0]) if c[0] > a[0] else 0.0
                 return (a[1] + f * (c[1] - a[1]), a[2] + f * (c[2] - a[2]),
                         a[3] + f * (((c[3] - a[3] + 180.0) % 360.0) - 180.0))
         return None
+
+    def motion_since(self, b, tp):
+        """(e23c, audit of e23) What the robot DROVE between laptop time tp and its newest pose row, from its pose
+        history with the corrections taken out: (dx, dy, dth, doubt_cm, corrections) or None (the history does not
+        reach tp, has a hole after it, or holds nothing but corrected steps).
+
+        The robot's own pose jumps whenever it uses a camera fix (the firmware shifts its pose and its whole history,
+        pose.h) or the Pi resets it (fpose). e23 took the newest pose minus the pose at the picture's time as "what it
+        drove": a correction in between was counted as a drive, so a standing robot corrected by 5 cm got an old
+        picture's position moved 5 cm, and a burst of old pictures over-corrected (3 cm behind -> 3 cm ahead). Here
+        a step between two rows that holds a correction (the row's frame number went up) is not read from the poses:
+        its drive is taken from the nearest steps without one, before and after it (their speed, by time), and how far
+        those two disagree over the corrected step is returned as doubt. Rows with no frame number (a history built
+        by hand in a test) count as steps without a correction."""
+        ph = getattr(b, "pose_hist", None) or []
+        if len(ph) < 2 or tp < ph[0][0] or tp > ph[-1][0]:
+            return None
+        segs = []                               # [dt, dx, dy, dth, corrected] of each step that ends after tp
+        for a, c in zip(ph, ph[1:]):
+            if c[0] <= tp:
+                continue
+            dt = c[0] - a[0]
+            if dt > self.POSE_HOLE_S or dt <= 0.0:
+                return None
+            f = 1.0 if a[0] >= tp else (c[0] - tp) / dt          # the part of the step after the picture
+            corr = len(a) > 4 and len(c) > 4 and c[4] != a[4]
+            segs.append([dt * f, (c[1] - a[1]) * f, (c[2] - a[2]) * f,
+                         (((c[3] - a[3] + 180.0) % 360.0) - 180.0) * f, corr, dt, a, c])
+        if not segs:
+            return 0.0, 0.0, 0.0, 0.0, 0
+        # speed of each step without a correction over the WHOLE history (so a corrected step at either end of the
+        # window still has a neighbour): [(mid time, vx, vy, w)]
+        clean = []
+        for a, c in zip(ph, ph[1:]):
+            dt = c[0] - a[0]
+            if 0.0 < dt <= self.POSE_HOLE_S and not (len(a) > 4 and len(c) > 4 and c[4] != a[4]):
+                clean.append((0.5 * (a[0] + c[0]), (c[1] - a[1]) / dt, (c[2] - a[2]) / dt,
+                              (((c[3] - a[3] + 180.0) % 360.0) - 180.0) / dt))
+        dx = dy = dth = doubt = 0.0
+        n = 0
+        for dtp, sx, sy, sth, corr, _dt, a, c in segs:
+            if not corr:
+                dx, dy, dth = dx + sx, dy + sy, dth + sth
+                continue
+            n += 1
+            mid = 0.5 * (a[0] + c[0])
+            before = [q for q in clean if q[0] < mid]
+            after = [q for q in clean if q[0] > mid]
+            if not before and not after:
+                return None                     # nothing but corrections: what it drove cannot be told
+            if before and after:
+                p, q = before[-1], after[0]
+                w = (mid - p[0]) / (q[0] - p[0])
+                v = [p[k] + w * (q[k] - p[k]) for k in (1, 2, 3)]
+                doubt += math.hypot(q[1] - p[1], q[2] - p[2]) * dtp     # the two neighbours' speeds disagree by this
+            else:
+                p = (before or after)[-1 if before else 0]
+                v = [p[1], p[2], p[3]]
+                doubt += math.hypot(p[1], p[2]) * dtp                   # one neighbour only: standing to twice as far
+            dx, dy, dth = dx + v[0] * dtp, dy + v[1] * dtp, dth + v[2] * dtp
+        return dx, dy, dth, doubt, n
 
     def project_old_fix(self, b, ev, th, t):
         """(e23, school 18 Nov 17:54: the bridge stalled 1.5 s, the next pictures were 1.2-1.7 s old when read, the
@@ -1292,14 +1386,28 @@ class Coordinator:
         if own is None or not ph:
             return None
         nowp = ph[-1]                       # (laptop time of its newest own pose, x, y, th)
-        dx, dy = nowp[1] - own[0], nowp[2] - own[1]
+        dx, dy, dth = nowp[1] - own[0], nowp[2] - own[1], nowp[3] - own[2]
+        doubt, n_corr = 0.0, 0
+        if OLD_FIX_MOTION_ONLY:
+            # (e23c) by what it DROVE since the picture, the corrections it took since then removed (motion_since)
+            mv = self.motion_since(b, float(ev["t"]))
+            if mv is None:
+                # nothing but corrected steps since the picture: its drive cannot be told from its corrections. The
+                # picture is sent as it is (the robot refuses it as old), never carried by a guess
+                b.old_fix_dropped = getattr(b, "old_fix_dropped", 0) + 1
+                if b.old_fix_dropped == 1 or b.old_fix_dropped % 50 == 0:
+                    self.log("old_fix_not_carried", robot=b.name, n=b.old_fix_dropped, age_s=round(age, 2),
+                             why="every step since the picture holds a pose correction")
+                return None
+            dx, dy, dth, doubt, n_corr = mv
         dist = math.hypot(dx, dy)
-        sig = math.hypot(float(ev.get("sigma", 0.5)), self.ODO_P95_PER_CM / 2.45 * dist)
-        th2 = None if th is None else ((float(th) + (nowp[3] - own[2]) + 180.0) % 360.0) - 180.0
+        # doubt (a 95 % figure, like ODO_P95_PER_CM x distance) joins the drift as an sd
+        sig = math.hypot(float(ev.get("sigma", 0.5)), self.ODO_P95_PER_CM / 2.45 * dist, doubt / 2.45)
+        th2 = None if th is None else ((float(th) + dth + 180.0) % 360.0) - 180.0
         b.old_fix_n = getattr(b, "old_fix_n", 0) + 1
         if b.old_fix_n == 1 or b.old_fix_n % 50 == 0:
             self.log("old_fix_carried", robot=b.name, n=b.old_fix_n, age_s=round(age, 2), moved_cm=round(dist, 1),
-                     max_age_s=self.fix_max_age_s(b))
+                     max_age_s=self.fix_max_age_s(b), corrections_removed=n_corr, doubt_cm=round(doubt, 2))
         if b.old_fix_n == 1:
             self.say("%s: a camera picture reached the run %.1f s old (the robot takes fixes up to %.1f s old): its "
                      "position is carried forward by the %.0f cm the robot drove since and sent as a fix for now, "
@@ -1765,7 +1873,17 @@ class Coordinator:
         """One re-plan of this run: (points in the plan, the time it took)."""
         c = self.__dict__.setdefault("plan_costs", [])
         c.append((int(points), float(cpu_s)))
-        del c[:-20]
+        del c[:-self.PLAN_COST_KEEP_N]
+
+    PLAN_COST_KEEP_N = 20     # [chosen] the fit uses the run's newest this-many re-plans, so it follows a Pi that slows
+    #                           as it heats (18 Nov: the processor clock fell about 4 %). DOE: yes, with the points
+    #                           planned ahead (report question 4): 10 / 20 / all against how well the next re-plan's
+    #                           time is predicted, on the Pi's own re-plan record
+    PLAN_FIT_MIN_N = 3        # [chosen] a line (fixed + per point) is fitted from this many re-plans on: two points
+    #                           always lie on a line, a third is the first check of it. No DOE: the smallest number
+    #                           that can disagree with a line; before it the school Pi's line is scaled
+    PLAN_FIT_MIN_SPREAD = 2   # [chosen] ... and only when the re-plans differ by at least this many points, else the
+    #                           slope is fitted to noise. DOE: with PLAN_COST_KEEP_N, same data
 
     def plan_cost(self):
         """(fixed s, s per point, how it is known) of a re-plan on this machine now. With re-plans of at least two
@@ -1776,7 +1894,7 @@ class Coordinator:
         if not c:
             return a0, c0, "the school Pi's (nothing measured in this run yet)"
         xs, ys = [float(p_) for p_, _ in c], [float(t_) for _, t_ in c]
-        if len(c) >= 3 and max(xs) - min(xs) >= 2:
+        if len(c) >= self.PLAN_FIT_MIN_N and max(xs) - min(xs) >= self.PLAN_FIT_MIN_SPREAD:
             mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
             sxx = sum((x - mx) ** 2 for x in xs)
             slope = max(0.0, sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx)
@@ -2747,6 +2865,15 @@ class Coordinator:
     #                               docs/results/e23-school-fixes/real_stop_miss.json). The starting guess for a run's
     #                               normal scatter; the run's own stops replace it once it has MISS_OWN_N of them
     MISS_OWN_N = 5                # [chosen] a run's own scatter counts from this many stops on. No DOE: bookkeeping
+    # (e23c, audit of e23) The same record with each stop's own +- added (how far from its point the robot may have
+    # been, 95 %): median and median absolute deviation of (miss + +-) over the same 131 stops. MEASURED
+    # (docs/results/e23-school-fixes/real_stop_miss.json, "seed_miss_plus_pm"; a test recomputes it)
+    MISS_PM_SEED_CM = (6.58, 1.35)
+    REACH_TOL_CAP = 1.5           # [chosen] the run's own stops may widen either tolerance to at most this many times
+    #                               the table's measured one (school: 5.5 -> 8.3 cm, 12.6 -> 18.8 cm), and never
+    #                               narrow it below the measured one. Replaying the 131 school stops, 1.5 and 2.0 refuse
+    #                               the same 17. No DOE: how far off a stop may be and still serve as that point is a
+    #                               question of what the points are for (report, question for Nick)
     MISS_MADS = 3.0               # the usual robust outlier rule: beyond 3 scaled MADs (1.4826 x MAD) of the median.
     #                               A convention, not tuned here. No DOE
 
@@ -2759,6 +2886,8 @@ class Coordinator:
             when it is far outside what stops at this table normally do (school: 5.5 cm; the stops the 18 Nov report
             lists stood 8.8 to 77 cm away)."""
         import safety_rules as SR
+        if REACH_TOL_BOUNDED:
+            return self.reach_tols(speed)[0]
         derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(speed)) + float(plus_minus_cm or 0.0)
         m = self.__dict__.get("stop_misses") or []
         if len(m) >= self.MISS_OWN_N:
@@ -2767,6 +2896,39 @@ class Coordinator:
         else:
             med, mad = self.MISS_SEED_CM
         return round(max(derived, med + self.MISS_MADS * 1.4826 * mad), 1)
+
+    @staticmethod
+    def _scatter(values, seed, own_n, mads):
+        """median + `mads` scaled MADs of the values once there are own_n of them, else of the seed (median, MAD)."""
+        if len(values) >= own_n:
+            med = statistics.median(values)
+            mad = statistics.median([abs(v - med) for v in values])
+        else:
+            med, mad = seed
+        return med + mads * 1.4826 * mad
+
+    def reach_tols(self, speed=None):
+        """(e23c, audit of e23) (how far the stop's best position may be from the point, how far position + its own +-
+        may be) for a stop to count. The audit found three faults in e23's one tolerance:
+          * it was built from EVERY stop, refused ones too, so misses widened it (the real 16:11 run: 6.0 -> 25.5 cm
+            after four refused P29 stops; a fifth 24 cm away would have been credited);
+          * the stop's own +- was ADDED to it, so the less the run knew where the robot was, the easier a stop
+            counted (18 Nov 15:03, P01: 5.6 cm off with +-10.9 cm, credited);
+          * nothing bounded it.
+        Now: both come from stops that were REACHED only; a stop counts when its best position is within the first
+        AND its position plus its own +- is within the second (more doubt never helps); each lies between the
+        table's measured value and REACH_TOL_CAP times it.
+          first:  the normal scatter of how far stops stand from their points (median + 3 scaled MADs), never under
+                  where drives end (track error and stopping distance, both measured);
+          second: the same for (distance + the stop's own +-)."""
+        import safety_rules as SR
+        derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(speed))
+        out = []
+        for key, seed in (("stop_misses_reached", self.MISS_SEED_CM), ("stop_far_reached", self.MISS_PM_SEED_CM)):
+            base = max(self._scatter((), seed, self.MISS_OWN_N, self.MISS_MADS), derived)
+            own = self._scatter(self.__dict__.get(key) or [], seed, self.MISS_OWN_N, self.MISS_MADS)
+            out.append(round(min(max(base, own), self.REACH_TOL_CAP * base), 1))
+        return out[0], out[1]
 
     def record_point(self, b, point, t0, t1, interrupted=False, target=None):
         """One stop at a production point. (e23) Returns False when the robot's best position was NOT at the point
@@ -2818,18 +2980,43 @@ class Coordinator:
             words += " (camera %s reported moved: counted in)" % ", ".join(sorted(moved))
         if POINT_CREDIT_REACHED and target is not None and rec.get("x") is not None:
             miss = math.hypot(rec["x"] - float(target[0]), rec["y"] - float(target[1]))
-            tol = self.reach_tol_cm(rec.get("plus_minus_cm"))
+            pm = float(rec.get("plus_minus_cm") or 0.0)
+            tol = self.reach_tol_cm(pm)
+            tol_far = self.reach_tols()[1] if REACH_TOL_BOUNDED else None
+            ok = bool(miss <= tol and (tol_far is None or miss + pm <= tol_far))
             sm = self.__dict__.setdefault("stop_misses", [])
-            sm.append(miss)                # every stop, reached or not: the run's own scatter (robust to the far ones)
+            sm.append(miss)                # every stop, reached or not (e23's scatter, MIRLT_REACH_TOL=e23; the record)
             del sm[:-200]
+            if ok:
+                # (e23c) the run's own scatter is learned from the stops that were reached, never from the misses
+                for key, val in (("stop_misses_reached", miss), ("stop_far_reached", miss + pm)):
+                    q = self.__dict__.setdefault(key, [])
+                    q.append(val)
+                    del q[:-200]
             rec.update(target=[round(float(target[0]), 2), round(float(target[1]), 2)], miss_cm=round(miss, 1),
-                       reach_tol_cm=tol, reached=bool(miss <= tol))
-            if miss > tol:
+                       reach_tol_cm=tol, reached=ok)
+            if tol_far is not None:
+                rec["reach_tol_with_pm_cm"] = tol_far
+            if not ok and miss <= tol:
+                rec["words"] = "%s (%s): NOT REACHED: it cannot be said to have stood at the point: its best " \
+                               "position is %.1f cm from it (at %.1f, %.1f; the point is at %.1f, %.1f) but that " \
+                               "position is only known to \u00b1%.1f cm, so it may have been %.1f cm away (a stop " \
+                               "counts when that is within %.1f cm, the normal for stops at this table), %s" % (
+                                   point, b.name, miss, rec["x"], rec["y"], target[0], target[1], pm, miss + pm,
+                                   tol_far, rec.get("source"))
+            elif not ok and tol_far is not None:
+                rec["words"] = "%s (%s): NOT REACHED: it stood %.1f cm from the point (at %.1f, %.1f; the point is " \
+                               "at %.1f, %.1f; a stop counts within %.1f cm: the normal scatter of the stops that " \
+                               "were reached at this table; this position's own \u00b1 is %.1f cm), %s" % (
+                                   point, b.name, miss, rec["x"], rec["y"], target[0], target[1], tol, pm,
+                                   rec.get("source"))
+            elif not ok:
                 rec["words"] = "%s (%s): NOT REACHED: it stood %.1f cm from the point (at %.1f, %.1f; the point is " \
                                "at %.1f, %.1f; a stop counts within %.1f cm: the larger of where drives end plus " \
                                "this position's own \u00b1%.1f cm and the normal scatter of stops), %s" % (
                                    point, b.name, miss, rec["x"], rec["y"], target[0], target[1], tol,
                                    rec.get("plus_minus_cm") or 0.0, rec.get("source"))
+            if not ok:
                 self.__dict__.setdefault("not_reached", []).append(rec)
                 self.log("point_not_reached", **rec)
                 self.say("POINT " + rec["words"] + ": not counted as a visit")

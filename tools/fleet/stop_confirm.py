@@ -35,17 +35,26 @@ checks and follow runs were stopped 3 s after they began, and two starts found "
   * the listen and the `stop` are skipped while the watcher is cancelled.
 Switch MIRLT_STOP_UNNAMED=wait: the watch as before e23 (asks for the slot names until someone presses "carry on").
 
+(e23 audit fix, 19 Nov) When NO robot answered that first `stop`, the watch settled all the same and the page said
+"Stopped: every robot confirmed". Nothing had confirmed. Now a never-named robot is settled as "confirmed" only when at
+least one robot answered; with no answer the `stop` goes out again (UNNAMED_TRIES in all, RETRY_S apart) and the watch
+then ends saying "`stop` sent N times; no robot answered" (state "unanswered", never "confirmed"). It still ends, so
+cause A (the watch that never ended) stays fixed. Switch MIRLT_STOP_NO_ANSWER=first: settled by the first `stop` whether
+or not a robot answered, as e23 was built (the page's words are honest either way).
+
 Changelog
   2026-11-12a  first version (Mission Control build)
   2026-11-19e23  robots that were never named are settled by one answered `stop` (school 16 / 18 Nov: the watcher that
                  never ended); cancel() for a new Start; MIRLT_STOP_UNNAMED
+  2026-11-19e23c (audit of e23) no robot answered: never "every robot confirmed"; the `stop` is sent UNNAMED_TRIES times,
+                 then "sent, no robot answered" (MIRLT_STOP_NO_ANSWER); add_jobs and the watcher share a lock
 """
 import os
 import signal
 import threading
 import time
 
-VERSION = "stop-confirm-2026-11-19e23"   # e23: unnamed robots settled by one answered stop, cancel(). Before: "stop-confirm-2026-11-12a"
+VERSION = "stop-confirm-2026-11-19e23c"   # e23c: no answer is never "confirmed"; resend; a lock. Before: "stop-confirm-2026-11-19e23"   # e23: unnamed robots settled by one answered stop, cancel(). Before: "stop-confirm-2026-11-12a"
 
 # A process whose command line holds one of these drives robots (or simulates them).
 DRIVER_WORDS = ("run_plan.py", "rp_shim.py", "freeroam.py", "calib_run.py", "fleet_sim.py", "sim_shim.py",
@@ -60,6 +69,13 @@ AFTER_WORDS = ("upload_session.py", "site_fit.py", "replay_clips.py", "pi_monito
 ESCALATE_S = 25.0
 RETRY_S = 3.0             # chosen: a robot that has not answered is sent `stop` again this often (three UDP copies a
                           # time, stop_all.STOP_REPEATS). No DOE: a repeated `stop` is harmless, and it never ends
+# (e23c) [chosen] How many times a `stop` goes out for robots that were never named when NO robot has answered, before
+# the watch ends as "sent, no robot answered". From existing data: one try is three UDP copies and a 1 s listen
+# (stop_all.STOP_REPEATS, LISTEN_S); the worst packet loss on record is 1 in 10 (27 Oct), so an awake robot's answer is
+# missed in at most about 1 try in 10, and in 3 tries in about 1 in 1000. The "1 in 1000" is the chosen part. No DOE: an
+# extra `stop` is harmless, and a sleeping robot (school: checks in every 60 min) answers no number of tries.
+UNNAMED_TRIES = 3
+SETTLED = ("confirmed", "unanswered")     # (e23c) states the watch asks no more about
 LISTEN_S = 1.0            # stop_all.LISTEN_S: idle robots answer a `stop` at once and send a status line about once a s
 
 
@@ -75,6 +91,16 @@ def unnamed_once():
         return SG.value("MIRLT_STOP_UNNAMED") != "wait"
     except Exception:  # noqa: BLE001  (the stop never depends on another module)
         return os.environ.get("MIRLT_STOP_UNNAMED", "once") != "wait"
+
+
+def no_answer_resend():
+    """(e23c) No robot answered the `stop` for never-named robots: resend (UNNAMED_TRIES in all) and then say that none
+    answered (MIRLT_STOP_NO_ANSWER=resend, the default); first: settled by the first `stop`, as e23 was built."""
+    try:
+        import safety_group as SG
+        return SG.value("MIRLT_STOP_NO_ANSWER") != "first"
+    except Exception:  # noqa: BLE001
+        return os.environ.get("MIRLT_STOP_NO_ANSWER", "resend") != "first"
 
 
 def nameable(r):
@@ -194,6 +220,8 @@ class StopWatch:
         self.cancelled = None                 # (e23) why it was ended early (a new Start)
         self.heard_all = {}                   # (e23) every robot that answered a `stop` of this watch: {name: ip}
         self.unnamed_once = unnamed_once()
+        self.no_answer_resend = no_answer_resend()   # (e23c)
+        self.lock = threading.RLock()         # (e23c) add_jobs (the page's thread) against step / state (the watcher)
 
     # -- the work ------------------------------------------------------------------------------------------------
     def live_drivers(self):
@@ -223,7 +251,11 @@ class StopWatch:
             self.say(w)
 
     def step(self):
-        """One pass. Returns True when every robot has confirmed."""
+        """One pass. Returns True when every robot has confirmed (or, e23c, is settled as unanswered)."""
+        with self.lock:
+            return self._step()
+
+    def _step(self):
         if self.done_t is not None or self.cancelled:
             return True
         live = self.live_drivers()
@@ -238,13 +270,13 @@ class StopWatch:
             self.events.append([round(now - self.t0, 1), "every driving process has ended"])
         if self.practice or not self.robots:
             for r in self.robots.values():
-                if r["state"] != "confirmed":
+                if r["state"] not in SETTLED:
                     r["state"], r["words"] = "confirmed", "stopped with the simulator" if self.practice else \
                         "its run has ended"
             self.done_t = now
             return True
         # real robots: each must answer a `stop` on the log port
-        todo = [r for r in self.robots.values() if r["state"] != "confirmed"]
+        todo = [r for r in self.robots.values() if r["state"] not in SETTLED]
         if not todo:
             self.done_t = now
             return True
@@ -259,7 +291,15 @@ class StopWatch:
                 self.send_stop([r.get("ip") for r in due if r.get("ip")])
             except Exception:  # noqa: BLE001  (a stop that cannot be sent is said, and tried again)
                 pass
-        heard = self.listen(LISTEN_S) if self.listen else None
+        # (e23c) the listen runs without the lock: a second Stop (add_jobs) or the page (state) is not held up for it
+        self.lock.release()
+        try:
+            heard = self.listen(LISTEN_S) if self.listen else None
+        finally:
+            self.lock.acquire()
+        if self.done_t is not None or self.cancelled:      # ended meanwhile (a new Start, or "carry on")
+            return True
+        todo = [r for r in self.robots.values() if r["state"] not in SETTLED]   # a Stop pressed meanwhile joined
         if heard is None:
             for r in due:
                 r["state"], r["words"] = "waiting", "stop sent (try %d); the robots' log port is held by another " \
@@ -276,27 +316,47 @@ class StopWatch:
             elif self.unnamed_once and not nameable(r):
                 # (e23) never named in this run and no address: nobody can answer as "Alpha". The `stop` went to every
                 # robot on the WiFi and the log port was read: that is all that can be known, so it is settled here
-                who = ", ".join("%s at %s" % kv for kv in sorted(self.heard_all.items())) or "no robot"
-                r["state"] = "confirmed"
-                r["words"] = "not named yet in this run: `stop` went to every robot on the WiFi (%s answered)" % who
-                r["confirmed_t"] = round(now - self.t0, 1)
+                who = ", ".join("%s at %s" % kv for kv in sorted(self.heard_all.items()))
                 r["unnamed"] = True
+                if who:
+                    r["state"] = "confirmed"
+                    r["words"] = "not named yet in this run: `stop` went to every robot on the WiFi (%s answered)" % who
+                    r["confirmed_t"] = round(now - self.t0, 1)
+                elif self.no_answer_resend and r["tries"] < UNNAMED_TRIES:
+                    # (e23c) nobody answered: that is not a confirmation. Sent again, UNNAMED_TRIES in all
+                    if r in due:
+                        r["state"] = "no answer"
+                        r["words"] = "not named yet in this run: `stop` sent to every robot on the WiFi %d time%s, no " \
+                                     "robot has answered yet (sending %d in all)" % (
+                                         r["tries"], "" if r["tries"] == 1 else "s", UNNAMED_TRIES)
+                else:
+                    r["state"] = "unanswered"          # settled, and NOT confirmed
+                    r["words"] = "not named yet in this run: `stop` sent to every robot on the WiFi %d time%s; no " \
+                                 "robot answered (asleep, off, or out of WiFi?)" % (
+                                     r["tries"], "" if r["tries"] == 1 else "s")
+                    r["settled_t"] = round(now - self.t0, 1)
             elif r in due:
                 r["state"], r["words"] = "no answer", "stop sent %d time%s, no answer yet (asleep, off, or out of " \
                                                       "WiFi?)" % (r["tries"], "" if r["tries"] == 1 else "s")
-        if all(r["state"] == "confirmed" for r in self.robots.values()):
+        if all(r["state"] in SETTLED for r in self.robots.values()):
             self.done_t = self.clock()
+            if any(r["state"] == "unanswered" for r in self.robots.values()):
+                self.events.append([round(self.done_t - self.t0, 1), "`stop` sent, no robot answered: the watch ends"])
             return True
         return False
 
     def go_on(self, who=""):
         """The person says to carry on without the robots that have not answered (switched off, asleep, out of the
         WiFi). Only once every driver has ended; those robots are named in the record as not confirmed."""
+        with self.lock:
+            return self._go_on(who)
+
+    def _go_on(self, who=""):
         if self.done_t is not None or self.drivers_gone_t is None:
             return False
-        left = [r["name"] for r in self.robots.values() if r["state"] != "confirmed"]
+        left = [r["name"] for r in self.robots.values() if r["state"] not in SETTLED]
         for r in self.robots.values():
-            if r["state"] != "confirmed":
+            if r["state"] not in SETTLED:
                 r["state"], r["words"] = "not confirmed", "no answer; you said to carry on without it"
         self.events.append([round(self.clock() - self.t0, 1), "carried on without %s (%s)" % (", ".join(left) or
                                                                                             "nobody", who or "page")])
@@ -311,14 +371,17 @@ class StopWatch:
             return True
         if self.drivers_gone_t is None and self.live_drivers():
             return False
-        left = [r["name"] for r in self.robots.values() if r["state"] != "confirmed"]
-        for r in self.robots.values():
-            if r["state"] != "confirmed":
-                r["state"], r["words"] = "not confirmed", "no answer before %s" % why
-        self.events.append([round(self.clock() - self.t0, 1), "ended: %s%s" % (
-            why, (" (%s had not answered)" % ", ".join(left)) if left else "")])
-        self.cancelled = why
-        self.done_t = self.clock()
+        with self.lock:
+            if self.done_t is not None:
+                return True
+            left = [r["name"] for r in self.robots.values() if r["state"] not in SETTLED]
+            for r in self.robots.values():
+                if r["state"] not in SETTLED:
+                    r["state"], r["words"] = "not confirmed", "no answer before %s" % why
+            self.events.append([round(self.clock() - self.t0, 1), "ended: %s%s" % (
+                why, (" (%s had not answered)" % ", ".join(left)) if left else "")])
+            self.cancelled = why
+            self.done_t = self.clock()
         th = self.thread
         if th is not None and th.is_alive() and th is not threading.current_thread():
             th.join(LISTEN_S + 2.0)           # at most one listen (LISTEN_S) is under way
@@ -326,14 +389,17 @@ class StopWatch:
 
     def add_jobs(self, jobs):
         """(e23, one watcher at a time) A second Stop while this watch runs: anything new that was running joins it."""
-        have = {j.pgid for j in self.jobs}
-        for j in jobs:
-            if j.pgid in have:
-                continue
-            self.jobs.append(j)
-            for r in j.robots:
-                self.robots.setdefault(r["name"], dict(r, state="stop sent", words="stop sent", job=j.name, tries=0))
-        self.events.append([round(self.clock() - self.t0, 1), "Stop pressed again: the same watch carries on"])
+        # (e23c, audit) under the watch's lock: the watcher thread iterates self.robots and self.jobs while this adds
+        with self.lock:
+            have = {j.pgid for j in self.jobs}
+            for j in jobs:
+                if j.pgid in have:
+                    continue
+                self.jobs.append(j)
+                for r in j.robots:
+                    self.robots.setdefault(r["name"], dict(r, state="stop sent", words="stop sent", job=j.name,
+                                                           tries=0))
+            self.events.append([round(self.clock() - self.t0, 1), "Stop pressed again: the same watch carries on"])
 
     def run(self, tick_s=0.5):
         while not self.step():
@@ -346,16 +412,34 @@ class StopWatch:
 
     # -- what the page shows -------------------------------------------------------------------------------------
     def state(self):
+        with self.lock:
+            return self._state()
+
+    def _state(self):
         done = self.done_t is not None
-        rs = [{k: r.get(k) for k in ("name", "ref", "state", "words", "tries", "confirmed_t", "unnamed")}
-              for r in self.robots.values()]
+        rs = [{k: r.get(k) for k in ("name", "ref", "state", "words", "tries", "confirmed_t", "unnamed", "settled_t")}
+              for r in list(self.robots.values())]
         n_ok = sum(r["state"] == "confirmed" for r in rs)
+        unans = [r for r in rs if r["state"] == "unanswered"]
+        unnamed = [r for r in rs if r.get("unnamed") and r["state"] == "confirmed"]
         if done and self.cancelled:
             words = "Stopped (%s)." % self.cancelled
         elif done and any(r["state"] == "not confirmed" for r in rs):
             words = "Stopped; %s never answered (you carried on without %s)." % (
                 ", ".join(r["name"] for r in rs if r["state"] == "not confirmed"),
                 "it" if sum(r["state"] == "not confirmed" for r in rs) == 1 else "them")
+        elif done and unans:
+            # (e23c) nothing answered: never "confirmed"
+            n = max(r.get("tries") or 1 for r in unans)
+            words = "Stop sent %d time%s to every robot on the WiFi; no robot answered (asleep, off, or out of WiFi?). " \
+                    "Nothing is driving them from here: every run program has ended (%.0f s after STOP)." % (
+                        n, "" if n == 1 else "s", self.done_t - self.t0)
+            if n_ok:
+                words += " %s confirmed." % ", ".join(r["name"] for r in rs if r["state"] == "confirmed")
+        elif done and unnamed and self.no_answer_resend:
+            # (e23c) robots never named: say who answered, not "every robot" (fewer may have answered than there are)
+            words = "Stopped: `stop` went to every robot on the WiFi and %d answered (%s), %.0f s after STOP." % (
+                len(self.heard_all), ", ".join(sorted(self.heard_all)), self.done_t - self.t0)
         elif done:
             words = "Stopped: %s confirmed %.0f s after STOP." % (
                 "every robot" if rs else "the run", self.done_t - self.t0)

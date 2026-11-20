@@ -710,7 +710,10 @@ def test_a_point_is_not_moved_to_the_end_of_the_list_while_the_robot_dwells_at_i
     assert how == "deferred" and lab == stp["label"][3:] and after != before and sorted(map(str, after)) == sorted(map(str, before))
 
 
-def test_the_reach_tolerance_is_derived_and_a_missed_stop_is_not_done():
+def test_the_reach_tolerance_is_derived_and_a_missed_stop_is_not_done(monkeypatch):
+    # (e23c) the tolerance as e23 built it, now behind MIRLT_REACH_TOL=e23; the audit's fix is tested in
+    # test_e23c_audit_fixes.py
+    monkeypatch.setattr(RP, "REACH_TOL_BOUNDED", False)
     c = _point_coord()
     derived = math.hypot(SR.TRACK_P95_CM, SR.stop_cm(None))
     seed = c.MISS_SEED_CM[0] + 3.0 * 1.4826 * c.MISS_SEED_CM[1]        # the school's measured scatter: 5.5 cm
