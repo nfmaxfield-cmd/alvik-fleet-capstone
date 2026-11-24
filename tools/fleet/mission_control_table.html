@@ -43,6 +43,7 @@ button:disabled{opacity:.5;cursor:default}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:baseline}
 .top{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
 .top .brand{font-weight:700;font-size:16px;margin-right:4px}
+@media (min-width:981px){.top{flex-wrap:nowrap}.top .stop{flex:none}.top .pill,.top .ghost{flex:none}.top #place{flex:0 1 auto}}
 .grow{flex:1}
 .wrap{max-width:1480px;margin:0 auto;padding:16px 20px calc(var(--barh,110px) + 24px);display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
 .rail{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -112,7 +113,10 @@ details>summary{cursor:pointer}
   body.more .wrap>aside.rail #health,body.more .wrap>aside.rail #camtrust{display:block}
   .runbar .in{flex-wrap:nowrap;gap:8px}.runbar .kinds{display:none}.runbar select.kindsel{display:inline-block!important;max-width:42vw}
   .runbar .planlists{display:none}.runbar.sheet .planlists{display:block;position:fixed;left:0;right:0;bottom:var(--barh,64px);background:var(--panel);border-top:1px solid var(--line);padding:12px;max-height:60vh;overflow:auto;box-shadow:0 -6px 18px rgba(16,24,40,.16)}
-  .sheetbtn{display:inline-block}.runbar .hide-s,.runbar .upl{display:none}
+  .sheetbtn{display:inline-block;white-space:nowrap}.runbar .hide-s,.runbar .upl{display:none}
+  #runword,#soundbtn,#restartmc2{display:none}.statusline{font-size:13px}
+  .card.robot.idle{display:none}section.card{display:flex;flex-direction:column}section.card #planextra{order:5}
+  .runbar .in>b{white-space:normal;font-size:13.5px}.runbar #again{max-width:46vw!important}
   .runbar #start{padding:10px 14px!important;font-size:15px!important;white-space:nowrap}
   svg.map{max-height:none}.planrow>div{flex-basis:100%}}
 </style>
@@ -131,7 +135,7 @@ details>summary{cursor:pointer}
   <span class="pill hide-s" id="place" style="max-width:360px;overflow:hidden;text-overflow:ellipsis">...</span>
   <span class="pill" id="mode">...</span>
   <span class="grow"></span>
-  <span id="runword" class="small"></span>
+  <span id="runword" class="small" style="min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
   <button class="pill" id="soundbtn" title="Play a sound when a robot needs a hand">Sound: off</button>
   <button class="pill ok" id="safepill" title="Open the Safety group">Safety: auto</button>
   <button class="ghost" id="gear">Settings</button>
@@ -140,7 +144,7 @@ details>summary{cursor:pointer}
 <div id="deadband" role="alert"></div>
 <div id="statusline" class="statusline" role="status" aria-live="polite"></div>
 <main class="wrap">
-  <section class="card" style="padding:14px;min-width:0">
+  <section class="card" id="mapcard" style="padding:14px;min-width:0">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
     <div id="codebanner"></div>
     <div id="planextra"></div>
@@ -381,7 +385,8 @@ function questionsHTML() {   // a run that may ask (someone stays with the robot
 // (e24, finding 4) what needs a person NOW, from the run itself: a camera sending no pictures, every robot held (with
 // each one's reason), a robot named in the order that was not found. Red, at the top of the rail and in the status band.
 function runAlerts() { const s = st(); if (!s.running) return [];
-  const a = ((LIVE && LIVE.alerts) || s.alerts || []).slice();
+  const a = [], seen = new Set();
+  for (const x of ((s.alerts || []).concat((LIVE && LIVE.alerts) || []))) { const k = x.kind + "|" + (x.cam || ""); if (!seen.has(k)) { seen.add(k); a.push(x); } }
   const vo = s.visit_missing || {}; const names = Object.keys(vo);
   if (names.length) a.push({kind: "missing", title: `${names.join(", ")} ${names.length === 1 ? "was" : "were"} not found`, words: names.map(n => `${n} was named in the order and did not answer at the start: its points (${(vo[n] || []).join(", ")}) are taken by a robot that finishes its own list.`).join(" ")});
   return a; }
@@ -420,7 +425,7 @@ function wireHand() {
 function cardsHTML() {
   const rs = st().kind ? ((LIVE && LIVE.robots) || []) : [];
   if (!rs.length) { const names = (T && T.robots && T.robots.names) || (S && S.site && S.site.robots) || [];
-    return `<div class="card robot"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
+    return `<div class="card robot idle"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
   return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.waking ? esc(r.waking) : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
     ${(r.held || r.out) && r.held_why && going() ? `<div class="small" style="margin-top:3px;color:var(--amber)"><b>${r.held ? "Held" : "Out"} because:</b> ${esc(r.held_why)}.${r.held ? " It rejoins by itself when a camera sees it again." : ""}</div>` : ""}
     <div class="small" style="margin-top:4px">${r.x != null ? `Where: ${Math.round(r.x)}, ${Math.round(r.y)} cm` : "Where: not known yet"}${r.pm_cm != null ? ` <b>± ${r.pm_cm.toFixed(1)} cm</b>` : ""}${r.battery != null ? ` · battery ${esc(r.battery)} %` : ""}</div>
@@ -499,7 +504,7 @@ function runbarHTML() {
     <select class="kindsel" id="kindsel" style="display:none;padding:9px;border-radius:10px;border:1px solid var(--line);font:inherit" aria-label="Which run">${b.map(x => `<option value="${x.kind}" ${kind === x.kind ? "selected" : ""} ${x.ok ? "" : "disabled"}>${esc(x.title)}</option>`).join("")}</select>
     ${visit ? `<button class="ghost sheetbtn" id="sheetbtn">${sheetOpen ? "Close" : `Lists (${nPts})`}</button>` : ""}
     ${visit ? `<div class="planlists"><div class="tiny" style="margin-bottom:3px"><label><input type="radio" name="vpmode" id="vpshared" ${vpEach ? "" : "checked"}> One list, shared out</label> &nbsp;<label><input type="radio" name="vpmode" id="vpeach" ${vpEach ? "checked" : ""}> A list per robot</label></div>${vpEach ? vpEachHTML() : `<div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map((p, i) => `<span class="chip rm" data-rm="${i}" title="Click to take ${esc(p)} out">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div>`}</div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
-    <span class="upl">${uploadPill(T && T.upload)}</span><span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"}>Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</button>`;
+    <span class="upl">${uploadPill(T && T.upload)}</span><span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"} title="Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}">Start<span class="hide-s"> ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</span></button>`;
 }
 function vpEachHTML() {   // (2026-11-16) a row per robot: choose whose list the map's clicks join; its chips, Undo, Clear
   const w = vpWho();
@@ -673,7 +678,7 @@ function render() {
     $("restartmc2").onclick = async () => { if (!confirm("Restart Mission Control? The page reloads in a few seconds; nothing on the robots changes. (Not possible while a run is going.)")) return; try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } }; }
   const al = runAlerts();
   $("statusline").className = "statusline" + (al.length ? " alarm" : hl.running || hl.terminal ? " on" : "");
-  if (al.length && $("statusline").querySelector(".slw")) $("statusline").querySelector(".slw").textContent = al.map(a => a.title).join(" · ") + ". " + (hl.words || "");
+  if ($("statusline").querySelector(".slw")) $("statusline").querySelector(".slw").textContent = (al.length ? al.map(a => a.title).join(" · ") + ". " : "") + (hl.words || "Asking Mission Control what is going on...");
   document.documentElement.style.setProperty("--barh", ($("runbarbox").offsetHeight || 84) + "px");
   if ($("morebtn")) { $("morebtn").style.display = window.innerWidth <= 600 ? "block" : "none"; $("morebtn").textContent = document.body.classList.contains("more") ? "Hide Pi health and camera trust" : "Show Pi health and camera trust"; $("morebtn").onclick = () => { document.body.classList.toggle("more"); render(); }; }
   $("codebanner").innerHTML = cd.changed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg);margin-top:8px"><b>New code on the Pi.</b> <span class="small">${esc(cd.words || "")}</span> <button class="primary" id="restartmc" ${going() || cd.running ? "disabled" : ""}>Restart Mission Control</button></div>` : "";
