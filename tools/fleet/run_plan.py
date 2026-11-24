@@ -6883,8 +6883,10 @@ def _start_robots(coord, link, args, source, straight, auto):
             raise SystemExit("Battery under the %d %% floor: %s. Charge %s first (nothing was moved). [floor: %s]"
                              % (args.battery_floor, ", ".join("%s %d %%" % x for x in low),
                                 "it" if len(low) == 1 else "them", floor_words(args)))
-        warn(coord, "battery under the %d %% floor: %s: it runs anyway (charge it after)"
-             % (args.battery_floor, ", ".join("%s %d %%" % x for x in low)))
+        warn(coord, "battery under the %d %% floor: %s: %s"
+             % (args.battery_floor, ", ".join("%s %d %%" % x for x in low),
+                "it runs anyway (charge it after)" if not BATTERY_LOW_HOME
+                else "it does no further point and goes home (charge it before the next run)"))
     print("  " + "; ".join("%s: firmware %s, battery %s %%, boot %s" % (n, coord.bots[n].firmware,
                                                                        coord.bots[n].battery, coord.bots[n].boot)
                            for n in names) + "  [battery floor: %s]" % floor_words(args))

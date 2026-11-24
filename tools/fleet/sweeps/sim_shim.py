@@ -269,7 +269,8 @@ def install(sim, cond, seed):
     for bn, pct in (cond.get("battery") or {}).items():
         if bn in sim.robots:
             sim.robots[bn].battery = float(pct)
-            sim.event(dict(kind="battery_set", robot=bn, pct=float(pct)))
+            if hasattr(sim, "t_start"):      # (the simulator's log opens after this point)
+                sim.event(dict(kind="battery_set", robot=bn, pct=float(pct)))
     # ---- one robot out
     out = cond.get("robot_out")
     if out:
