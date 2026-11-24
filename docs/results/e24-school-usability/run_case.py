@@ -18,7 +18,7 @@ docs/results/e23-school-fixes/seed_runs.py (whose command it builds on), with th
   slow=6                  e23's planner slow-down (not with standin=)
   wall=600                the runner ends the run (Ctrl+C) after this many seconds of wall clock
   env=K=V,K=V             extra environment (Safety switches)
-  ahead=N                 MIRLT_PLAN_AHEAD_K=N (the plan-ahead DOE)
+  ahead=N | all           points planned ahead per robot fixed at N (MIRLT_PLAN_AHEAD_N), or the whole list (the plan-ahead DOE)
 Changelog
   2026-11-24  first version (e24).
 """
@@ -99,7 +99,10 @@ for case in sys.argv[3:]:
     if o.get("dump"):
         env["MIRLT_REPLAN_DUMP"] = os.path.join(folder + "-decs")
     if o.get("ahead"):
-        env["MIRLT_PLAN_AHEAD_K"] = o["ahead"]
+        if o["ahead"] == "all":
+            env["MIRLT_PLAN_AHEAD"] = "all"
+        else:
+            env["MIRLT_PLAN_AHEAD_N"] = o["ahead"]
     for kv in (o.get("env") or "").split(","):
         if "=" in kv:
             env[kv.split("=")[0]] = kv.split("=", 1)[1]

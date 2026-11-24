@@ -24,6 +24,7 @@ The fleet simulator (tools/sim/fleet_sim.py) with the school's conditions added,
   robot_out       {"name", "t", "mode"}: at t s after the plan starts the robot is out. "dead": stops where it is and
                   is never heard again (battery or WiFi gone); "lifted": picked up off the table (the firmware's
                   safe_lift ends its run; the camera no longer sees it)
+  battery         (e24) {"Bravo": 22}: that robot's battery in % from the start
   yaw_jump        (e24) [{"name", "t", "deg"}]: the robot's gyro yaw jumps deg (default 25) at the start of its first turn
                   of 20 deg or more at or after t s into the plan, while the robot has not turned (school 23 Nov, N1)
 
@@ -263,6 +264,12 @@ def install(sim, cond, seed):
                                target=round(target, 1)))
             return orig(target)
         rby.imu_turn_to = imu_turn_to
+    # ---- (e24) a robot's battery: "battery": {"Bravo": 22}: it reports that many % from the start (the school floor is
+    # 25 %; 23 Nov run 11: Bravo started at 19 %)
+    for bn, pct in (cond.get("battery") or {}).items():
+        if bn in sim.robots:
+            sim.robots[bn].battery = float(pct)
+            sim.event(dict(kind="battery_set", robot=bn, pct=float(pct)))
     # ---- one robot out
     out = cond.get("robot_out")
     if out:

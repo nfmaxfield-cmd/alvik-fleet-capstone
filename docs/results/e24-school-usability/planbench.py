@@ -10,7 +10,9 @@ two versions can be compared step for step. Run once per version, then compare t
 
     planbench.py --compare BEFORE.json AFTER.json [OUT.md]
 
-Prints, per re-plan: points planned, seconds before and after, and whether the two plans are the same step for step.
+Prints, per re-plan: points planned, seconds before and after (the FIRST time each version met that re-plan, in the
+run's own order: a map met earlier in the run is remembered by e24's planner, a new one is not), and whether the two
+plans are the same step for step.
 Changelog
   2026-11-24  first version (e24).
 """
@@ -41,10 +43,16 @@ def run(repo, decs, out, repeat):
     import planner as P
     res = []
     for f in sorted(glob.glob(os.path.join(decs, "dec_*.pkl"))):
-        best, fp, npts, err = None, None, None, None
+        best, fp, npts, err, first = None, None, None, None, None
         for _ in range(repeat):
             with open(f, "rb") as fh:
                 d = pickle.load(fh)          # a fresh copy each time: the planner changes what it is given
+            st = d["dec"]["s"]
+            for k in [k for k in list(st) if k not in P.DEFAULT_SETTINGS]:
+                del st[k]                     # a setting this version of the planner does not know (dwell_at_cm)
+            if "dwell_at_cm" in st:
+                st["dwell_at_cm"] = 0.0       # e24's drive-back for a stop due elsewhere is off here: both versions
+                #                               are given the same job, so the plans can be compared step for step
             t0 = time.perf_counter()
             try:
                 plan, _ev = P.obstacle_replan(d["dec"])
@@ -52,9 +60,13 @@ def run(repo, decs, out, repeat):
                 err = "%s: %s" % (type(e).__name__, e)
                 break
             dt = time.perf_counter() - t0
+            if best is None:
+                first = dt                    # the first time this version meets this re-plan, in the run's own order
+                #                               (what a run pays: a map met before is remembered, a new one is not)
             best = dt if best is None else min(best, dt)
             fp, npts = fingerprint(plan), points(plan)
-        res.append({"dec": os.path.basename(f), "s": None if best is None else round(best, 4), "points": npts,
+        res.append({"dec": os.path.basename(f), "s": None if best is None else round(best, 4),
+                    "first_s": None if first is None else round(first, 4), "points": npts,
                     "fingerprint": fp, "error": err, "stranded": None if err else plan.get("stranded")})
         print(res[-1], flush=True)
     json.dump({"version": VERSION, "repo": repo, "repeat": repeat, "replans": res}, open(out, "w"), indent=1)
@@ -70,8 +82,9 @@ def compare(a, b, out_md=None):
             continue
         eq = r["fingerprint"] == q["fingerprint"]
         same += eq
-        ratios.append(q["s"] / r["s"])
-        rows.append((r["dec"], r["points"], r["s"], q["s"], q["s"] / r["s"], eq))
+        ratios.append((q.get("first_s") or q["s"]) / (r.get("first_s") or r["s"]))
+        rows.append((r["dec"], r["points"], r.get("first_s") or r["s"], q.get("first_s") or q["s"],
+                     (q.get("first_s") or q["s"]) / (r.get("first_s") or r["s"]), eq))
     lines = ["| Re-plan | Points planned | Before (s) | After (s) | After / before | Same plan step for step |", "|---|---|---|---|---|---|"]
     for d, n, x, y, k, eq in rows:
         lines.append("| %s | %s | %.3f | %.3f | %.2f | %s |" % (d, n, x, y, k, "yes" if eq else "NO"))

@@ -1,0 +1,303 @@
+{
+ "version": "e24-planbench-2026-11-24",
+ "repo": "/home/claude/work/repo",
+ "repeat": 2,
+ "replans": [
+  {
+   "dec": "dec_000.pkl",
+   "s": 0.4973,
+   "first_s": 0.9959,
+   "points": 38,
+   "fingerprint": [
+    "3f122d1e1661",
+    135
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_001.pkl",
+   "s": 0.6089,
+   "first_s": 0.6399,
+   "points": 38,
+   "fingerprint": [
+    "705ce5505bd3",
+    134
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_002.pkl",
+   "s": 0.652,
+   "first_s": 1.1783,
+   "points": 38,
+   "fingerprint": [
+    "58d55a23d1e3",
+    149
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_003.pkl",
+   "s": 2.5346,
+   "first_s": 2.5732,
+   "points": 37,
+   "fingerprint": [
+    "6a9947424625",
+    149
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_004.pkl",
+   "s": 1.4583,
+   "first_s": 1.5538,
+   "points": 37,
+   "fingerprint": [
+    "85b5edef9d0e",
+    147
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2000.pkl",
+   "s": 0.0397,
+   "first_s": 0.0585,
+   "points": 3,
+   "fingerprint": [
+    "44e3a0d2009d",
+    12
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2001.pkl",
+   "s": 0.1509,
+   "first_s": 0.1509,
+   "points": 11,
+   "fingerprint": [
+    "28af257b1fae",
+    41
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2002.pkl",
+   "s": 0.049,
+   "first_s": 0.049,
+   "points": 4,
+   "fingerprint": [
+    "17567e617480",
+    20
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2003.pkl",
+   "s": 0.086,
+   "first_s": 0.1088,
+   "points": 6,
+   "fingerprint": [
+    "506132a5471d",
+    26
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2004.pkl",
+   "s": 0.0568,
+   "first_s": 0.0568,
+   "points": 6,
+   "fingerprint": [
+    "326cc6c06dd1",
+    23
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2005.pkl",
+   "s": 2.7627,
+   "first_s": 2.9401,
+   "points": 37,
+   "fingerprint": [
+    "9af06fb565d4",
+    5
+   ],
+   "error": null,
+   "stranded": [
+    "Bravo"
+   ]
+  },
+  {
+   "dec": "dec_2006.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (33.5, 13.6): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2007.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2008.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2009.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2010.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2011.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2012.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: robot Alpha is boxed in at (34.2, 9.9): move it by hand",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2013.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: no robots in the map",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2014.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: no robots in the map",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2015.pkl",
+   "s": null,
+   "first_s": null,
+   "points": null,
+   "fingerprint": null,
+   "error": "PlanError: no robots in the map",
+   "stranded": null
+  },
+  {
+   "dec": "dec_2016.pkl",
+   "s": 0.5923,
+   "first_s": 0.6837,
+   "points": 37,
+   "fingerprint": [
+    "233b937e1b21",
+    142
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2017.pkl",
+   "s": 0.5562,
+   "first_s": 0.5695,
+   "points": 37,
+   "fingerprint": [
+    "233b937e1b21",
+    142
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2018.pkl",
+   "s": 0.5523,
+   "first_s": 0.5861,
+   "points": 37,
+   "fingerprint": [
+    "233b937e1b21",
+    142
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2019.pkl",
+   "s": 0.7397,
+   "first_s": 0.7862,
+   "points": 37,
+   "fingerprint": [
+    "1b63f0dc5e47",
+    142
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2020.pkl",
+   "s": 0.3703,
+   "first_s": 0.3703,
+   "points": 29,
+   "fingerprint": [
+    "afeb8f0dfa3a",
+    114
+   ],
+   "error": null,
+   "stranded": []
+  },
+  {
+   "dec": "dec_2021.pkl",
+   "s": 0.4928,
+   "first_s": 0.493,
+   "points": 30,
+   "fingerprint": [
+    "2c4b345ece30",
+    117
+   ],
+   "error": null,
+   "stranded": []
+  }
+ ]
+}

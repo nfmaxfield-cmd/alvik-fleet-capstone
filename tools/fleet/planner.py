@@ -196,6 +196,31 @@ def _grid_key(world, body, s):
         return None
 
 
+def _grid_near(ck):
+    """A remembered grid whose map is this one MINUS a few shapes: (its key, the polygons to add, the circles to add),
+    the one with the fewest to add; None when there is none (or more than GRID_ADD_MAX to add: then from nothing)."""
+    best = None
+    polys, circles = set(ck[2]), set(ck[3])
+    for k in _GRID_CACHE:
+        if k[:2] != ck[:2] or k[4:] != ck[4:]:
+            continue
+        kp, kc = set(k[2]), set(k[3])
+        if not (kp <= polys and kc <= circles):
+            continue
+        n_add = len(polys - kp) + len(circles - kc)
+        if 0 < n_add <= GRID_ADD_MAX and (best is None or n_add < best[0]):
+            best = (n_add, k, polys - kp, circles - kc)
+    if best is None:
+        return None
+    add_p = [np.frombuffer(b, dtype=float).reshape(-1, 2) for _nm, b in best[2]]
+    add_c = [(tuple(np.frombuffer(b, dtype=float)), r) for _nm, b, r in best[3]]
+    return best[1], add_p, add_c
+
+
+GRID_ADD_MAX = 6     # shapes added to a remembered map before the grid is worked out from nothing instead. No DOE: past a
+#                      few shapes the windows overlap and from-nothing costs the same
+
+
 class Grid:
     """Clearance grid for one World and the routes over it."""
 
@@ -241,6 +266,48 @@ class Grid:
                 self.turn_thr = body.r_turn + s.safety_margin_cm
                 self.los_thr = body.r_side + s.safety_margin_cm + 0.96 * c
                 _GRID_CACHE.move_to_end(ck)
+                return
+            near = _grid_near(ck) if ck is not None else None
+            if near is not None:
+                # (e24) the same map plus a few shapes (a held robot's outline, a new obstacle): the remembered grid's
+                # clearance with only the cells near each added shape worked out again, and its graph with the newly
+                # blocked cells' links taken out. The same rule as the circles' branch above ("only cells close enough
+                # to change free or the line-of-sight test need the new distance")
+                base_key, add_polys, add_circles = near
+                b_clear, _bf, b_edges, _bg, _bd = _GRID_CACHE[base_key]
+                self.clear = b_clear.copy()
+                cl2 = self.clear.reshape(self.ny, self.nx)
+                w = body.r_turn + s.safety_margin_cm + 2.0
+                for poly in add_polys:
+                    i0 = max(0, int((poly[:, 0].min() - w - x0) // c)); i1 = min(self.nx, int((poly[:, 0].max() + w - x0) // c) + 1)
+                    j0 = max(0, int((poly[:, 1].min() - w - y0) // c)); j1 = min(self.ny, int((poly[:, 1].max() + w - y0) // c) + 1)
+                    if i0 >= i1 or j0 >= j1:
+                        continue
+                    XX, YY = np.meshgrid(xs[i0:i1], ys[j0:j1])
+                    d = G.points_to_polygon(np.stack([XX.ravel(), YY.ravel()], axis=1), poly).reshape(j1 - j0, i1 - i0)
+                    np.minimum(cl2[j0:j1, i0:i1], d, out=cl2[j0:j1, i0:i1])
+                for (cx, cy), rr in add_circles:
+                    wc = rr + w
+                    i0 = max(0, int((cx - wc - x0) // c)); i1 = min(self.nx, int((cx + wc - x0) // c) + 1)
+                    j0 = max(0, int((cy - wc - y0) // c)); j1 = min(self.ny, int((cy + wc - y0) // c) + 1)
+                    if i0 >= i1 or j0 >= j1:
+                        continue
+                    d = np.hypot(xs[i0:i1][None, :] - cx, ys[j0:j1][:, None] - cy) - rr
+                    np.minimum(cl2[j0:j1, i0:i1], d, out=cl2[j0:j1, i0:i1])
+                self.turn_thr = body.r_turn + s.safety_margin_cm
+                self.free = self.clear >= self.turn_thr
+                er, ec, ew = b_edges
+                keep = self.free[er] & self.free[ec]
+                self._edges = (er[keep], ec[keep], ew[keep])
+                n = self.nx * self.ny
+                rr_, cc_, ww_ = self._edges
+                self.graph = csr_matrix((np.concatenate([ww_, ww_]), (np.concatenate([rr_, cc_]), np.concatenate([cc_, rr_]))),
+                                        shape=(n, n))
+                self._dij = {}
+                self.los_thr = body.r_side + s.safety_margin_cm + 0.96 * c
+                _GRID_CACHE[ck] = (self.clear, self.free, self._edges, self.graph, self._dij)
+                while len(_GRID_CACHE) > GRID_CACHE_N:
+                    _GRID_CACHE.popitem(last=False)
                 return
             self.clear = world.clearance(self.centres)              # (ny*nx,)
         self.turn_thr = body.r_turn + s.safety_margin_cm

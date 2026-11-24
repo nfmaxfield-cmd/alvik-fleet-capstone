@@ -1001,8 +1001,8 @@
    "resid_sd_s": 3.75,
    "n": 107
   },
-  "factor": null,
-  "calibrated": "see docs/results/e24-school-usability/planbench.json"
+  "factor": 15.1,
+  "calibrated": "the median over 17 re-plans (3 to 38 points planned) of the school Pi's measured line (4.98 s + 0.314 s a point) divided by the seconds the SAME re-plan takes on this machine with the code the school ran (39df4cf's planner); range 4.0 to 22.0. docs/results/e24-school-usability/planbench/. Re-measure on another machine: planbench.py"
  },
  "yaw_jump": {
   "what": "not part of the preset's every run: 4 jumps of +19 to +26 deg in 13 runs; injected per case (sim cond yaw_jump)",
