@@ -1,0 +1,13 @@
+{
+ "name": "e23",
+ "what": "e23's stand-in (19 Nov): both cameras freeze 1.5 s every 20 s and the next picture arrives that old; every re-plan 6 times as long. Kept as it was.",
+ "late": {
+  "every_s": 20.0,
+  "stall_s": 1.5,
+  "first_s": 20.0
+ },
+ "replan": {
+  "factor": 6.0
+ },
+ "version": "standin-e23-2026-11-19"
+}

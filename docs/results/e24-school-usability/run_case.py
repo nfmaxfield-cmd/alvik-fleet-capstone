@@ -85,12 +85,19 @@ for case in sys.argv[3:]:
            "--sim-arg=--max-s=1500"]
     if o.get("late"):
         cmd += ["--sim-late", o["late"]]
-    if o.get("standin"):
-        cmd += ["--sim-standin", o["standin"]]
     env = dict(os.environ, HOME=home, MIRLT_CONF_DIR=os.path.join(home, "conf"),
                MIRLT_HEARD_FILE=os.path.join(home, "conf", "heard_robots.json"))
+    if o.get("standin"):
+        # by the environment, so that the code before e24 (which has no --sim-standin option) gets the same stand-in:
+        # the simulated cameras read MIRLT_SIM_STANDIN themselves, the planner's slow-down is e23's MIRLT_SIM_REPLAN_SLOW
+        env["MIRLT_SIM_STANDIN"] = o["standin"]
+        pre = json.load(open(os.path.join(REPO, "tools", "sim", "standins", o["standin"] + ".json")))
+        if (pre.get("replan") or {}).get("factor"):
+            env["MIRLT_SIM_REPLAN_SLOW"] = str(pre["replan"]["factor"])
     if o.get("slow"):
         env["MIRLT_SIM_REPLAN_SLOW"] = o["slow"]
+    if o.get("dump"):
+        env["MIRLT_REPLAN_DUMP"] = os.path.join(folder + "-decs")
     if o.get("ahead"):
         env["MIRLT_PLAN_AHEAD_K"] = o["ahead"]
     for kv in (o.get("env") or "").split(","):

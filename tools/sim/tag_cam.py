@@ -8,7 +8,8 @@ Used by the sizing tests (tools/fleet/tag_sizing.py), the camera check-out's tes
 (tools/sim/fleet_sim.py --tag-cams), so the real detector (tools/fleet/tagcore.py) reads every simulated picture.
 The camera's true model (tools/recognition/cameras.py's CameraModel) is what a perfect setup would measure.
 """
-VERSION = "tag-cam-2026-11-19e23"   # e23: cfg late {every_s, stall_s, first_s}: the stream freezes for stall_s every every_s, then hands out the picture taken when the freeze began, stamped with its own time (school 18 Nov: the bridge stalled 1.5 s and the next pictures were 1.2-1.7 s old). Before: "tag-cam-2026-11-10e13"   # e13: cfg plain_roofs (robots with no roof tag). No version string before
+VERSION = "tag-cam-2026-11-24e24"   # e24: a named stand-in's per-robot camera losses (loss_model: cfg "losses" or MIRLT_SIM_STANDIN=<preset in tools/sim/standins/>), lengths drawn from the losses measured at school on 23 Nov, more on camera 1's half. Before: "tag-cam-2026-11-19e23"   # e23: cfg late {every_s, stall_s, first_s}: the stream freezes for stall_s every every_s, then hands out the picture taken when the freeze began, stamped with its own time (school 18 Nov: the bridge stalled 1.5 s and the next pictures were 1.2-1.7 s old). Before: "tag-cam-2026-11-10e13"   # e13: cfg plain_roofs (robots with no roof tag). No version string before
+import json
 import math
 import os
 import sys
@@ -474,6 +475,9 @@ def serve_live(sim, cfg, out_dir):
         sim.log("serving the simulated tag camera %s (%dx%d) at http://127.0.0.1:%d/live" % (c.name, c.W, c.H, port))
     period = 1.0 / float(cfg.get("fps", 12.0))
     t_first, held = [None], {}          # (e23) late pictures (cfg "late")
+    losses = loss_model(cfg, sim)          # (e24) the named stand-in's per-robot losses (cfg "losses" / MIRLT_SIM_STANDIN)
+    if losses is not None and losses.get("late") and not cfg.get("late"):
+        cfg = dict(cfg, late=losses["late"])
     n = 0
     prev = {}
     low = cfg.get("low_res") or {}
@@ -501,6 +505,8 @@ def serve_live(sim, cfg, out_dir):
             # (11-05h) cfg["dark"]: [[x0, y0, x1, y1]] where no camera reads a tag (glare, a dark patch, the far end)
             if name in ids and any(d[0] <= rb.x <= d[2] and d[1] <= rb.y <= d[3] for d in cfg.get("dark") or []):
                 covered.add(ids[name])
+        if losses is not None and losses.get("draw"):
+            covered |= {ids[n_] for n_ in losses["draw"](t_cap, rel) if n_ in ids}
         rs = []
         for name, rb in sim.robots.items():
             if name not in ids or rb.lifted:
@@ -548,6 +554,76 @@ def serve_live(sim, cfg, out_dir):
         _time.sleep(max(0.0, period - (_time.time() - t_cap)))
     for srv in servers:
         srv.shutdown()
+
+
+def standin_preset(name):
+    """tools/sim/standins/<name>.json (a named stand-in for a real Pi: e23, school23), or None."""
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "standins", "%s.json" % os.path.basename(str(name)))
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def loss_model(cfg, sim):
+    """(e24) A stand-in's camera losses per robot. cfg "losses" (a preset's block) or the environment's
+    MIRLT_SIM_STANDIN=<preset name>. Each robot loses its fix at random moments, at the preset's rate for the half of
+    the table it is in (more on camera 1's half, x below the middle; the one-robot rate with one robot), for a length
+    drawn from the lengths MEASURED at school. From the plan's start. Returns {"draw": f(t, rel) -> set of robot
+    names not read now, "late": e23's freeze block if the preset has one} or None."""
+    import random as _random
+    ls = cfg.get("losses")
+    pre = None
+    if ls is None and os.environ.get("MIRLT_SIM_STANDIN"):
+        pre = standin_preset(os.environ["MIRLT_SIM_STANDIN"])
+        if pre is None:
+            sim.log("SIMULATOR: no stand-in preset named %r (tools/sim/standins/): none used" % os.environ["MIRLT_SIM_STANDIN"])
+            return None
+        ls = pre.get("losses")
+    out = {"late": (pre or {}).get("late")}
+    if not ls:
+        return out if out["late"] else None
+    rng = _random.Random(int(getattr(sim.args, "seed", 0) or 0) * 7919 + 23)
+    rate = ls.get("per_robot_minute") or {}
+    two = [float(v) for v in ls.get("lengths_two_robots_s") or [1.3]]
+    one = [float(v) for v in ls.get("lengths_one_robot_s") or two]
+    f = sim.m["floor"]
+    x_mid = (f["x_min"] + f["x_max"]) / 2.0
+    state = {}                                   # robot -> (lost until, last frame time)
+    log = []
+    sim.log("SIMULATOR: stand-in losses on (%s): %.1f a minute on camera 1's half, %.1f on the other, %.1f with one "
+            "robot; lengths drawn from %d measured losses" % ((pre or {}).get("name") or "cfg", rate.get("cam1_half", 0),
+                                                              rate.get("other_half", 0), rate.get("one_robot", 0),
+                                                              len(two)))
+
+    def draw(t, rel):
+        gone = set()
+        if rel < 0:
+            return gone
+        live = [n for n, rb in sim.robots.items() if not rb.lifted]
+        for n in live:
+            rb = sim.robots[n]
+            until, t_prev = state.get(n, (0.0, t))
+            if t < until:
+                gone.add(n)
+                state[n] = (until, t)
+                continue
+            per_min = rate.get("one_robot", 0.8) if len(live) < 2 else (
+                rate.get("cam1_half", 6.3) if rb.x < x_mid else rate.get("other_half", 2.0))
+            if rng.random() < per_min / 60.0 * max(0.0, min(1.0, t - t_prev)):
+                L = rng.choice(one if len(live) < 2 else two)
+                until = t + L
+                gone.add(n)
+                log.append((round(rel, 2), n, L))
+                try:
+                    sim.event(dict(kind="standin_loss", robot=n, t=round(rel, 2), s=L))
+                except Exception:  # noqa: BLE001
+                    pass
+            state[n] = (until, t)
+        return gone
+    out["draw"] = draw
+    return out
 
 
 # ------------------------------------------------------------------------------------------- the practice room

@@ -410,6 +410,10 @@ SWITCHES = [
      "A STANDING robot (anywhere: waiting for a plan, after a turn, just rejoined, in its dwell) stays put when "
      "the camera loses it: no turn-back and no hold while it has not moved (Nick 24 Nov; 13 of the 16 real turn- "
      "backs on 23 Nov were standing robots). act: e23, only a robot in its dwell at a point stays", "e24"),
+    ("MIRLT_PLAN_FAST", "1", "0", "M F",
+     "The planner's geometry worked out with every polygon side in one step and its repeated look-ups remembered "
+     "(the same numbers, several times quicker: on 23 Nov 113 of 114 re-plans at school were over their 2 s budget "
+     "and a crossed-lists first plan took 79 s). 0: the arithmetic as before e24", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

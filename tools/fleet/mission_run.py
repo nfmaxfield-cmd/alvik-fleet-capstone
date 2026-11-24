@@ -1783,6 +1783,19 @@ def run(args):
             tcfg["dark"] = [[float(v) for v in d.split(",")] for d in args.sim_dark]
         if args.sim_clock_skew:
             tcfg["clock_skew_s"] = float(args.sim_clock_skew)     # (11-05h) the pictures stamped on a skewed clock
+        if getattr(args, "sim_standin", ""):
+            # (e24) a named stand-in for a real Pi (tools/sim/standins/<name>.json): its camera losses per robot and
+            # how many times slower it plans. school23: set from Jay-Sun's 23 Nov runs
+            sys.path.insert(0, os.path.join(TOOLS, "sim"))
+            import tag_cam as _TCs
+            pre_ = _TCs.standin_preset(args.sim_standin)
+            if pre_ is None:
+                raise SystemExit("No simulator stand-in named %r (tools/sim/standins/). Nothing moved." % args.sim_standin)
+            os.environ["MIRLT_SIM_STANDIN"] = args.sim_standin
+            fac_ = (pre_.get("replan") or {}).get("factor")
+            if fac_:
+                os.environ.setdefault("MIRLT_SIM_REPLAN_SLOW", str(fac_))
+            say("SIMULATOR STAND-IN %s: %s" % (args.sim_standin, pre_.get("what", "")))
         if getattr(args, "sim_late", ""):
             # (e23) late pictures as on the school Pi (18 Nov): EVERY,STALL[,FIRST] s: the stream freezes for STALL
             # every EVERY s and the next picture is that old when it comes
@@ -2342,6 +2355,7 @@ def main(argv=None):
                    "point-fix simulator first (found however many, heading nudge, compass check after a restart)")
     g.add_argument("--sim-tag-yaw", default="", metavar="NAME=DEG,...", help="(11-05h) those robots' roof tags are "
                    "turned on them by DEG (the simulator draws and reads them so)")
+    g.add_argument("--sim-standin", default="", metavar="NAME", help="(e24, dry) a named stand-in for a real Pi from tools/sim/standins/ (school23: camera losses per robot drawn from the 23 Nov school runs, more on camera 1's half; re-plans as slow as the school Pi; e23: the 19 Nov stand-in)")
     g.add_argument("--sim-late", default="", metavar="EVERY,STALL[,FIRST]", help="(e23, dry) late pictures: the simulated cameras freeze for STALL s every EVERY s (from FIRST s on) and the next picture arrives that old, stamped with its own time (school 18 Nov)")
     g.add_argument("--sim-clock-skew", type=float, default=0.0, metavar="S",
                    help="(11-05h) the simulated cameras stamp their pictures S s off the Pi's clock")

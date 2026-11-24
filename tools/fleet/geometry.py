@@ -53,8 +53,9 @@ def points_in_polygon(p, poly):
     return inside
 
 
-def points_to_polygon(p, poly):
-    """Distance from points to a filled polygon (0 inside)."""
+def _points_to_polygon_loop(p, poly):
+    """Distance from points to a filled polygon (0 inside). The way before e24 (one numpy call per polygon side),
+    kept behind MIRLT_PLAN_FAST=0 and as the reference the fast one is tested against."""
     p = np.atleast_2d(np.asarray(p, float))
     poly = np.asarray(poly, float)
     d = np.full(len(p), np.inf)
@@ -62,6 +63,47 @@ def points_to_polygon(p, poly):
         d = np.minimum(d, point_seg_dist(p, poly[i], poly[(i + 1) % len(poly)]))
     d[points_in_polygon(p, poly)] = 0.0
     return d
+
+
+def _points_to_polygon_fast(p, poly):
+    """(e24, school 23 Nov: 113 of 114 re-plans over budget) The same distances, every polygon side in ONE numpy
+    call: the same arithmetic per element, so the same numbers; about 5 times quicker for the planner's small
+    polygons (a profile of the crossed 20 + 20 plan had 9,395 calls and 73,424 one-side calls under them)."""
+    p = np.atleast_2d(np.asarray(p, float))
+    poly = np.asarray(poly, float)
+    if len(poly) == 0:
+        return np.full(len(p), np.inf)
+    a = poly
+    b = np.roll(poly, -1, axis=0)
+    ab = b - a                                           # (M, 2)
+    den = np.sum(ab * ab, axis=-1)                       # (M,)
+    ap = p[:, None, :] - a[None, :, :]                   # (N, M, 2)
+    ok = den > 1e-12
+    t = np.where(ok, np.sum(ap * ab[None], axis=-1) / np.where(ok, den, 1.0), 0.0)
+    t = np.clip(t, 0.0, 1.0)
+    q = a[None] + t[..., None] * ab[None]
+    df = p[:, None, :] - q
+    d = np.sqrt(np.sum(df * df, axis=-1)).min(axis=1)
+    # even-odd inside test, every side at once
+    x, y = p[:, 0][:, None], p[:, 1][:, None]
+    x1, y1, x2, y2 = a[None, :, 0], a[None, :, 1], b[None, :, 0], b[None, :, 1]
+    cond = (y1 > y) != (y2 > y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xint = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+    inside = np.logical_xor.reduce(cond & (x < xint), axis=1)
+    d[inside] = 0.0
+    return d
+
+
+def _fast_on():
+    try:
+        import safety_group as SG
+        return SG.flag("MIRLT_PLAN_FAST")
+    except Exception:  # noqa: BLE001  (used outside tools/fleet's path)
+        return True
+
+
+points_to_polygon = _points_to_polygon_fast if _fast_on() else _points_to_polygon_loop
 
 
 def _seg_seg_dist(a, b, c, d):

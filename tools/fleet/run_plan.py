@@ -1657,6 +1657,18 @@ class Coordinator:
 
         slow = float(os.environ.get("MIRLT_SIM_REPLAN_SLOW") or 1.0) if getattr(self.args, "dry_run", False) else 1.0
 
+        dump = os.environ.get("MIRLT_REPLAN_DUMP") if getattr(self.args, "dry_run", False) else None
+        if dump:
+            # (e24, simulator only) each re-plan's input kept, so the same re-plans can be timed on two versions of
+            # the planner (docs/results/e24-school-usability/planbench.py)
+            try:
+                import pickle
+                os.makedirs(dump, exist_ok=True)
+                with open(os.path.join(dump, "dec_%03d.pkl" % len(os.listdir(dump))), "wb") as f_:
+                    pickle.dump({"dec": dec, "cause": str(cause)}, f_)
+            except Exception as e_:  # noqa: BLE001
+                self.log("replan_dump_failed", why=str(e_))
+
         def work():
             t0 = time.perf_counter()
             try:
