@@ -36,6 +36,7 @@ for jp in sorted(glob.glob(os.path.join(ACC, "[AB]-*-s*.json"))):
     except Exception:  # noqa: BLE001
         pass
     th, vr = s.get("turn_heading") or {}, s.get("visit_result") or {}
+    bl = s.get("blind") if isinstance(s.get("blind"), dict) else {}     # (a list of blind spells before e24)
     tr, sim = d.get("truth") or {}, d.get("sim") or {}
     rows.append(dict(
         code="before" if m.group(1) == "B" else "after", case=m.group(2), seed=int(m.group(3)),
@@ -47,8 +48,8 @@ for jp in sorted(glob.glob(os.path.join(ACC, "[AB]-*-s*.json"))):
         closest_robots_cm=tr.get("closest_middles_cm"), contact=sim.get("contact"),
         headline=vr.get("headline"), missed_lines=sum(len(r.get("missed") or []) for r in (vr.get("robots") or {}).values()),
         retried=len(vr.get("retried") or []), heading_checks=th.get("checks"), heading_corrected=len(th.get("corrected") or []),
-        yaw_jumps=len(th.get("yaw_jumps") or []), standing_stays=(s.get("blind") or {}).get("standing_stays"),
-        slowed=(s.get("blind") or {}).get("slowed")))
+        yaw_jumps=len(th.get("yaw_jumps") or []), standing_stays=bl.get("standing_stays"),
+        slowed=bl.get("slowed")))
 os.makedirs(OUT, exist_ok=True)
 with open(os.path.join(OUT, "runs.jsonl"), "w") as f:
     for r in rows:
