@@ -1011,6 +1011,46 @@ def stop_lead_specs(args, out):
     return out_
 
 
+def roam_fr_early(args):
+    """Is this run handed to the free-roam controller (which takes none of run_plan's late arguments)?"""
+    return float(getattr(args, "roam_min", 0) or 0) > 0
+
+
+def calibrated_specs(args, out):
+    """(e24, school 23 Nov: AL-EB54's new calibration was never in force) {run name: "gyro_scale:1.079,wheel_scale:
+    0.9743,gyro_drift_dps:0.0037"} from the Pi's calibrated_robots.json (calib_run keeps each robot's fitted values by
+    WiFi name), through the binding's names. Before e24 every mission start sent the GENERAL corrections (1.075 / 0.979
+    / 0) to every robot and so wrote over what its calibration had saved on it. A dry run reads only a file seeded in
+    its own session."""
+    files = [os.path.join((args.site_ or {}).get("conf_dir") or "", "calibrated_robots.json")]
+    if args.dry:
+        files = [os.path.join(os.path.dirname(out), "calibrated_robots.json"), os.path.join(out, "calibrated_robots.json")]
+    recs = {}
+    for f_ in files:
+        try:
+            with open(f_) as fh:
+                recs.update(json.load(fh))
+        except (OSError, ValueError):
+            pass
+    names = dict(getattr(args, "aliases_", None) or {})          # WiFi name -> run name
+    run_names = [r.strip() for r in str(args.robots).split(",") if r.strip()]
+    out_ = {}
+    for key, rec in recs.items():
+        n = names.get(key) or (key if key in run_names or args.dry else None)
+        vals = (rec or {}).get("values") or {}
+        try:
+            spec = ",".join("%s:%.4f" % (k, float(vals[k])) for k in ("gyro_scale", "wheel_scale", "gyro_drift_dps")
+                            if vals.get(k) is not None)
+        except (TypeError, ValueError):
+            continue
+        if n and spec:
+            out_[n] = (spec, key, str((rec or {}).get("last") or ""))
+    if out_:
+        say("CALIBRATION (each robot's own, from its last calibration run): %s" % "; ".join(
+            "%s (%s, %s) %s" % (n, v[1], v[2][:16], v[0].replace(":", " ").replace(",", ", ")) for n, v in sorted(out_.items())))
+    return {n: v[0] for n, v in out_.items()}
+
+
 def experiment_unseen(args, out):
     """(11-05h, Jay-Sun 5 Nov: without the second camera any run on half the table needs Dr. Sodhi's OK) An experiment
     whose robots are assigned points the cameras cannot read is refused, saying which and why; --allow-half-table runs
@@ -1742,6 +1782,9 @@ def run(args):
         fr_len = len(rp)
     for n_, spec_ in sorted((stop_lead_specs(args, out) if not getattr(args, "no_stop_lead", False) else {}).items()):
         rp += ["--stop-lead", "%s=%s" % (n_, spec_)]     # (e07) each robot's stop lead from its last calibration
+    if SG_().value("MIRLT_CALIBRATED_CORR") != "prior" and not roam_fr_early(args):
+        for n_, spec_ in sorted(calibrated_specs(args, out).items()):
+            rp += ["--calibrated", "%s=%s" % (n_, spec_)]    # (e24) each robot's own fitted corrections, not the general ones
     rp += list(args.rp_arg)
     cond = {}
     tag_setup_thread = None

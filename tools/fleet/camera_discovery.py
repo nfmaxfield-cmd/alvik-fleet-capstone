@@ -50,7 +50,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-VERSION = "camera-discovery-2026-11-19e23"   # e23 (school 18 Nov, cause B: two starts hung for 4-5 min inside
+VERSION = "camera-discovery-2026-11-24e24"   # e24 (school 23 Nov, N3: naming gave tag 3 to the robot that had not moved it): each robot's move is followed by a wait until the pictures are still again (settle), its tag is looked for only then and only where its motion was found (on_moved gets where; the in-picture rule checks the distance too). MIRLT_NAMING_SETTLE=0: as before. Before: "camera-discovery-2026-11-19e23"   # e23 (school 18 Nov, cause B: two starts hung for 4-5 min inside
 #   cv2.VideoCapture with no message): find_cameras probes only USB capture nodes no other program holds (the
 #   recorder's cameras are its streams; the Pi's codec nodes are not cameras), opens each in a child process with a
 #   time limit from the measured open times, and says what it looked for, found and skipped. MIRLT_CAMERA_PROBE=e13:
@@ -82,6 +82,10 @@ BG_FRAMES = 5            # pictures of the still table per camera before each ro
 WIGGLE_DEG = 30.0        # CHOSEN (e14): the find-me wiggle on the spot (+- this, then back). A square roof turned 30 deg
                          # changes a band round its four corners (about a third of its area at the robot's own size),
                          # well over MIN_AREA_FRAC; 90 deg would look the same as the start (a square). DOE row (e14)
+TAG_ON_ROBOT_BODIES = 1.5   # a roof tag belongs to the robot whose motion is within this many body sizes (plus the stroke)
+#                             of it in the picture: the tag is on the roof (6 cm up), so a tilted camera (52 deg at school)
+#                             shifts it by at most 6 x tan 52 = 7.7 cm, under one body (9.5 cm); half a body more for the
+#                             motion's own centre. Derived from the geometry; no DOE
 SEEN_K = 3.0             # CHOSEN: a camera sees the robot when the changed area during its stroke is this many times
                          # the largest change in the same camera while every robot stood still (and at least
                          # MIN_AREA_FRAC of a robot). DOE row (docs/doe-backlog.md, e13)
@@ -603,6 +607,53 @@ def still(cams, n=BG_FRAMES):
         c.light = round(float(c.bg.mean()), 1)
 
 
+try:
+    import safety_group as _SGd
+    SETTLE_ON = _SGd.flag("MIRLT_NAMING_SETTLE")
+except Exception:  # noqa: BLE001  (run from another folder: the safe default)
+    SETTLE_ON = True
+SETTLE_QUIET_N = 3       # the table counts as still again after this many picture-to-picture comparisons in a row with no
+#                          change the size of a robot's (MIN_AREA_FRAC). No DOE: the motion detector's own "nothing moved"
+SETTLE_MAX_S = 8.0       # [chosen] the longest wait for that. The pictures were about 2 s late while the robots were
+#                          named on 23 Nov (school report, 2.6); a stroke lasts 2.4 s: both, with room. DOE: no (it only
+#                          bounds a wait that normally ends in under a second)
+
+
+def settle(cams, max_s=None, need=None, on_frame=None):
+    """(e24, school 23 Nov N3) Wait until every camera's pictures show a still table again. Pictures can be seconds
+    late on a loaded Pi: on 23 Nov the late pictures of AL-E7DC's stroke were read while AL-EB54 made its own, tag 3
+    "moved with" AL-EB54 and the run would not start. Each robot's move is now followed by this wait, so its last
+    pictures have arrived before its tag is looked for and before the next robot moves. Returns the seconds waited
+    (max_s when the pictures never went still: said by the caller)."""
+    max_s = SETTLE_MAX_S if max_s is None else float(max_s)
+    need = SETTLE_QUIET_N if need is None else int(need)
+    t0, quiet, prev = time.time(), 0, {}
+    while time.time() - t0 < max_s:
+        moving = got = False
+        for c in cams:
+            g = c.grab()
+            if g is None:
+                continue
+            got = True
+            c.frames += 1
+            if on_frame is not None:
+                on_frame(c, g)                      # (the pictures of the wait belong to the move being watched)
+            p = prev.get(c.name)
+            prev[c.name] = g
+            if p is None or p.shape != g.shape:
+                moving = True                       # nothing to compare yet
+                continue
+            rpx = _robot_px(c)
+            if int(_mask(g, p, max(MIN_T, getattr(c, "thr", MIN_T))).sum()) > MIN_AREA_FRAC * rpx * rpx:
+                moving = True
+        if not got:
+            break                                   # no camera gives pictures: nothing to wait for
+        quiet = 0 if moving else quiet + 1
+        if quiet >= need:
+            break
+    return time.time() - t0
+
+
 def stroke_record(cams, mover, robot, stroke_cm=None, frames_per_leg=6):
     """Robot `robot` strokes forward and back; every camera's pictures are kept: {cam: [(phase, k, grey)]}."""
     L = nudge_cm() if stroke_cm is None else float(stroke_cm)
@@ -616,6 +667,10 @@ def stroke_record(cams, mover, robot, stroke_cm=None, frames_per_leg=6):
                 c.frames += 1
     snap("pre", 0)
     r1 = mover(robot, +L, lambda k: snap("fwd", k), frames_per_leg)
+    if SETTLE_ON:
+        # (e24, N3) late pictures: the forward leg's pictures are all in before its end is photographed (on 23 Nov the
+        # pictures were about 2 s late: the "end" picture showed the robot barely started)
+        settle(cams, on_frame=lambda c, g: rec[c.name].append(("fwd", 99, g)))
     snap("fwd_end", 0)
     r2 = mover(robot, -L, lambda k: snap("back", k), frames_per_leg)
     snap("end", 0)
@@ -637,6 +692,8 @@ def wiggle_record(cams, turner, robot, deg=WIGGLE_DEG, frames_per_leg=6):
                 c.frames += 1
     snap("pre", 0)
     r1 = turner(robot, +deg, lambda k: snap("fwd", k), frames_per_leg)
+    if SETTLE_ON:
+        settle(cams, on_frame=lambda c, g: rec[c.name].append(("fwd", 99, g)))      # (e24, N3) late pictures are in
     snap("fwd_end", 0)
     r2 = turner(robot, -deg, lambda k: snap("back", k), frames_per_leg)
     snap("end", 0)
@@ -835,6 +892,8 @@ def analyse(cam, frames, stroke_cm, tag_det=None, tag_z=6.0):
                 continue
             if abs(_wrap(math.degrees(math.atan2(mv[1], mv[0])) - h_img)) > 45:
                 continue
+            if SETTLE_ON and math.dist(np.asarray(d0.center), (hx, hy)) > TAG_ON_ROBOT_BODIES * body_px + stroke_px:
+                continue          # (e24, N3) a tag that moved somewhere else on the table is not this robot's
             best_t = (tid, d0)
         if best_t is not None:
             tid, d0 = best_t
@@ -890,8 +949,21 @@ def discover(cams, robots, mover, stroke_cm=None, tag_det=None, typed=None, log=
         refused = [m for m in (fr.get("_moves") or []) if isinstance(m, dict) and m.get("result") not in (None, "done")]
         if refused:
             rec.setdefault("refused", {})[rb] = "%s %s" % (refused[0].get("result"), refused[0].get("info") or "")
+        if SETTLE_ON:
+            # (e24, N3) its last pictures are in before its tag is looked for, and before the next robot moves
+            w_ = settle(cams)
+            rec.setdefault("settle_s", {})[rb] = round(w_, 2)
+            if w_ >= SETTLE_MAX_S:
+                rec["notes"].append("%s: the pictures were still changing %.0f s after its move (very late pictures, "
+                                    "or something else moving on the table)" % (rb, w_))
         if on_moved is not None:
-            t_ = on_moved(rb, mode, t0, time.time())
+            # where the motion found it (the camera with a model that saw it biggest): its tag must be THERE
+            seen_ = [n_ for n_ in per[rb] if per[rb][n_].get("seen") and per[rb][n_].get("where_cm") is not None]
+            where_ = per[rb][max(seen_, key=lambda n_: per[rb][n_].get("body_px", 0))]["where_cm"] if seen_ else None
+            try:
+                t_ = on_moved(rb, mode, t0, time.time(), where_) if SETTLE_ON else on_moved(rb, mode, t0, time.time())
+            except TypeError:
+                t_ = on_moved(rb, mode, t0, time.time())          # a caller written before e24 (four arguments)
             if t_ is not None:
                 rec.setdefault("tag_moved", {})[rb] = int(t_)     # the run's own tag reads moved with it
     for c in cams:
@@ -1009,7 +1081,9 @@ class SimRig:
     without roof tags (a plain white roof)."""
 
     def __init__(self, table=(396.0, 168.0), robots=None, tags=True, extra_blind=True, renamed=True, seed=3,
-                 size=(640, 480)):
+                 size=(640, 480), late=0):
+        # (e24) late: every camera hands out the picture it took `late` pictures ago (a loaded Pi's lag: school 23 Nov)
+        self.late, self._queue = int(late), {}
         import tag_cam as TCAM
         L, W = table
         self.table = (0.0, 0.0, L, W)
@@ -1036,7 +1110,14 @@ class SimRig:
     def grabber(self, cam):
         def grab():
             cov = () if self.tags else tuple(range(len(self.robots)))
-            return cam.render(self.draw(), t=self.t, covered=cov)
+            g = cam.render(self.draw(), t=self.t, covered=cov)
+            if self.late <= 0:
+                return g
+            q = self._queue.setdefault(cam.name, [])
+            q.append(g)
+            if len(q) > self.late + 1:
+                del q[0]
+            return q[0]
         return grab
 
     def mover(self, robot, cm, on_tick, n):

@@ -443,3 +443,139 @@ def test_a_held_robot_is_never_given_up_on_and_a_rejoined_robot_without_a_route_
     assert RP.Coordinator.rejoinable(c, b)              # 23 Nov run 5: out for good after its 10th rejoin
     src = open(os.path.join(FLEET, "run_plan.py")).read()
     assert "rejoin_waits_for_route" in src
+
+
+# =================================================== AL-EB54: a robot's own calibration is what a run sends
+def test_a_calibrated_robot_is_sent_its_own_corrections_not_the_general_ones():
+    """School 23 Nov: AL-EB54 was recalibrated (0.9743 / 1.0790 / 0.0037) and every run still reported the general
+    0.9790 / 1.0750 / 0: each start sent the general corrections over what the calibration had saved on the robot."""
+    import argparse
+    import engine_checks as EC
+    args = argparse.Namespace(calibrated=["Bravo=gyro_scale:1.0790,wheel_scale:0.9743,gyro_drift_dps:0.0037"],
+                              corrections=True, send=[], border_cm=0, obstacle_readings=0)
+    assert RP.calibrated_for(args, "Bravo") == {"gyro_scale": 1.079, "wheel_scale": 0.9743, "gyro_drift_dps": 0.0037}
+    assert RP.calibrated_for(args, "Alpha") == {}
+
+    class _Link:
+        def __init__(self):
+            self.sent = []
+
+        def send_name(self, n, c):
+            self.sent.append((n, c))
+
+    class _Coord:
+        day = None
+        m = {}
+
+        def __init__(self):
+            self.bots = {"Alpha": RP.Bot("Alpha"), "Bravo": RP.Bot("Bravo")}
+    link, coord = _Link(), _Coord()
+    want = RP.send_settings(coord, link, args, ["Alpha", "Bravo"])
+    assert want["Bravo"]["wheel_scale"] == "0.9743" or float(want["Bravo"]["wheel_scale"]) == 0.9743
+    assert float(want["Bravo"]["gyro_scale"]) == 1.079 and float(want["Bravo"]["gyro_drift_dps"]) == 0.0037
+    gen = EC.base_corrections("Alpha")
+    assert float(want["Alpha"]["wheel_scale"]) == round(gen["wheel_scale"], 4)       # no record: the general ones
+    assert [c for n, c in link.sent if n == "Bravo" and c.startswith("set wheel_scale")] == ["set wheel_scale 0.9743"]
+    # a corrupt record never reaches a robot
+    args.calibrated = ["Bravo=gyro_scale:10.79,wheel_scale:0.9743"]
+    assert RP.calibrated_for(args, "Bravo") == {"wheel_scale": 0.9743}
+
+
+# ============================================================== D5: per-Pi choices and the capture rate
+def test_a_pis_own_choices_live_beside_its_camera_names_not_in_the_repos_site_file(tmp_path, monkeypatch):
+    """Jay-Sun's 18 and 23 Nov edits (camera 2 on, capture 15 -> 10) were made in the tracked site file on the Pi: the
+    Pi differed from GitHub and every update needed a hand merge."""
+    import sites as SI
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MIRLT_SITE", "school-conference")
+    s = SI.load("school-conference")
+    assert s["cameras"]["side"]["use"] is True                  # Jay-Sun's 18 Nov change, now the repo's
+    assert s["capture"]["fps"] == 10 and s["capture"]["fps_auto"]["choices"] == [10, 15]
+    assert SI.capture_fps(s)[0] == 10.0
+    SI.set_local(s, "cameras.side.use", "false")
+    SI.set_local(s, "capture.fps", 15)
+    s2 = SI.load("school-conference")
+    assert s2["cameras"]["side"]["use"] is False and s2["capture"]["fps"] == 15 and SI.capture_fps(s2)[0] == 15.0
+    assert s2["_local"] == {"cameras.side.use": False, "capture.fps": 15}
+    assert "export MIRLT_CAPTURE_FPS=15" in SI.env_lines(s2)
+    SI.set_local(s, "capture.fps", None)
+    assert SI.load("school-conference")["capture"]["fps"] == 10
+    with pytest.raises(ValueError):
+        SI.set_local(s, "robots", "x")                           # not a per-Pi setting
+    with pytest.raises(ValueError):
+        SI.set_local(s, "capture.fps", "fast")
+    # an edited site file against the repo's: the per-Pi keys come out as choices, anything else is named
+    repo_text = open(os.path.join(FLEET, "sites", "school-conference.json")).read()
+    edited = repo_text.replace('"fps": 10,', '"fps": 15,', 1).replace('"tracking": "tags"', '"tracking": "lights"', 1)
+    got, other = SI.local_from_edits("school-conference", edited, repo_text)
+    assert got == {"capture.fps": 15} and any(w.startswith("tracking:") for w in other)
+
+
+def test_the_capture_rate_follows_what_the_bridge_can_read(tmp_path, monkeypatch):
+    """23 Nov: with two robots the bridge read camera 2 about 3.9 times a second and camera 1 about 1.5; with one
+    robot 8.6 and 4.9. Capturing more than twice what is read only costs the recorder's core."""
+    sys.path.insert(0, os.path.join(TOOLS, "pi"))
+    import capture_rate as CR
+    import sites as SI
+
+    def run(name, per_s):
+        f = tmp_path / name
+        (f / "bridge").mkdir(parents=True)
+        rows = ["t,cam,ms,windows,full_searches,grey,found,mode,t_done"]
+        for cam, r in per_s.items():
+            rows += ["%.3f,%s,90,1,1,170,1,roi,%.3f" % (1000 + k / r, cam, 1000.1 + k / r) for k in range(int(120 * r))]
+        (f / "bridge" / "detect_times.csv").write_text("\n".join(rows) + "\n")
+        return str(f)
+    two = run("two-robots", {"overhead": 1.5, "side": 3.9})
+    one = run("one-robot", {"overhead": 4.9, "side": 8.6})
+    assert CR.decide(two, [10, 15])["fps"] == 10 and CR.decide(one, [10, 15])["fps"] == 15
+    assert CR.decide(str(tmp_path), [10, 15])["fps"] is None             # no record: nothing decided
+    monkeypatch.setenv("HOME", str(tmp_path))
+    s = SI.load("school-conference")
+    assert CR.in_force(s)[0] == 10.0 and "starting rate" in CR.in_force(s)[1]
+    said = []
+    CR.note(one, s, say=said.append)
+    assert CR.in_force(s)[0] == 15.0 and "CHANGED from 10" in said[-1]
+    CR.note(two, s, say=said.append)                                      # the busiest of the last runs governs
+    assert CR.in_force(s)[0] == 10.0
+    SI.set_local(s, "capture.fps", 15)                                    # a rate set by hand on this Pi wins
+    assert CR.in_force(SI.load("school-conference"))[1].startswith("set by hand")
+
+
+# =============================================================== N3. naming: late pictures, the tag where it moved
+def test_a_tag_that_moved_somewhere_else_on_the_table_is_not_given_to_the_robot():
+    """School 23 Nov, run 3: AL-EB54's stroke was found by motion at (175, 101); the late pictures of AL-E7DC's stroke
+    made tag 3 "move" 62 cm away at (113, 105) in the same seconds; tag 3 was given to AL-EB54, its pin overwritten and
+    the run refused to start ("roof tag 4 is on the table but no robot of this run turned it")."""
+    import motion_find as MF
+
+    class _Eye:
+        def __init__(self, hist):
+            self.hist = hist
+
+        def window(self, tid, a, b):
+            return [r for r in self.hist[tid] if a <= r[0] <= b]
+    t0, t1 = 100.0, 103.0
+    # tag 3 (the other robot's, 62 cm away): its late reads show a 6 cm stroke inside this robot's time window
+    tag3 = [(98.0 + 0.2 * k, 113.0, 105.0 + (6.0 if 12 <= k <= 16 else 0.0), 90.0) for k in range(26)]
+    # tag 4 (this robot's own): not read at all here (as on 23 Nov), or read moving where the robot is
+    f = MF.tag_mover_from_eye(_Eye({3: tag3}))
+    assert f("AL-EB54", "stroke", t0, t1, (175.0, 101.0)) is None        # not its tag: nothing claimed
+    assert f("AL-EB54", "stroke", t0, t1) == 3                           # without the place (before e24): the wrong tag
+    tag4 = [(98.0 + 0.2 * k, 175.0 + (6.0 if 12 <= k <= 16 else 0.0), 101.0, 0.0) for k in range(26)]
+    f = MF.tag_mover_from_eye(_Eye({3: tag3, 4: tag4}))
+    assert f("AL-EB54", "stroke", t0, t1, (175.0, 101.0)) == 4
+
+
+def test_naming_with_pictures_two_seconds_late_gives_each_robot_its_own_tag():
+    """The discovery's own simulator with every camera handing out the picture it took 8 pictures ago (the school Pi
+    while robots were named on 23 Nov: about 2 s late). After each robot's move the start waits until the pictures
+    are still again, so the move's own pictures are in before its tag is looked for and before the next robot moves."""
+    import camera_discovery as CD
+    assert CD.SETTLE_ON
+    rig = CD.SimRig(robots={"Alpha": [113.0, 105.0, 90.0], "Bravo": [175.0, 101.0, 89.0]}, extra_blind=False, late=8)
+    rec = CD.discover(rig.caminfos(), ["Alpha", "Bravo"], rig.mover, tag_det=rig.tag_detector(), log=lambda *a: None)
+    assert {n: r["tag_id"] for n, r in rec["robots"].items()} == {"Alpha": 0, "Bravo": 1}
+    assert all(r["cameras"] for r in rec["robots"].values()) and set(rec["settle_s"]) == {"Alpha", "Bravo"}
+    w = rec["robots"]["Bravo"]["where_cm"]
+    assert math.hypot(w[0] - 175.0, w[1] - 101.0) < 6.0

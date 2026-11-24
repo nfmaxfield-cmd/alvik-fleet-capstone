@@ -66,6 +66,12 @@ TAG_NEAR_CM = 8.0        # a roof tag read this near the robot's motion position
                          # body's half diagonal + 1 cm. Chosen; no DOE (the wiggle binding confirms it after)
 
 
+TAG_STROKE_NEAR_CM = 14.0   # (e24) a tag counts as "on" a robot found by motion when it was read within this (plus the
+#                             stroke's length: the motion's place may be either end) of that place: TAG_NEAR_CM (8) plus
+#                             the motion's own 95 % error at school (2.45 x 1.5 cm = 3.7) and the cameras' agreement
+#                             there (2 cm). Derived from those; no DOE. School, run 3: the wrong tag was 62 cm away
+
+
 def enabled():
     """Robot finding by motion: on unless MIRLT_CAMERA_DISCOVERY=off (e14: on by default once the simulator passed)."""
     return os.environ.get("MIRLT_CAMERA_DISCOVERY", "on").strip().lower() not in ("off", "0", "no")
@@ -114,10 +120,13 @@ def find(cams, names, mover, turner=None, modes=None, tag_moved=None, readable=N
     import camera_discovery as CD
     tags = {}
 
-    def moved(n, mode, t0, t1):
+    def moved(n, mode, t0, t1, where=None):
         if tag_moved is not None:
             try:
-                tags[n] = tag_moved(n, mode, t0, t1)
+                try:
+                    tags[n] = tag_moved(n, mode, t0, t1, where)     # (e24, N3) its tag must be where it was found
+                except TypeError:
+                    tags[n] = tag_moved(n, mode, t0, t1)            # a tag_moved written before e24
                 return tags[n]
             except Exception as e:  # noqa: BLE001  (a tag read never stops the finding)
                 log("  (%s: the tag reads during its move could not be read: %s)" % (n, e))
@@ -168,7 +177,7 @@ def tag_mover_from_eye(eye, stroke_cm=None):
     import camera_discovery as CD
     L = CD.nudge_cm() if stroke_cm is None else float(stroke_cm)
 
-    def f(name, mode, t0, t1):
+    def f(name, mode, t0, t1, where=None):
         best = None
         for tid in list(getattr(eye, "hist", {}).keys()):
             rs = eye.window(tid, t0 - 3.0, t1 + 0.5)
@@ -177,6 +186,10 @@ def tag_mover_from_eye(eye, stroke_cm=None):
             if not pre or not mid:
                 continue
             p0 = pre[-1]
+            if where is not None and CD.SETTLE_ON and math.hypot(p0[1] - where[0], p0[2] - where[1]) > TAG_STROKE_NEAR_CM + L:
+                # (e24, school 23 Nov N3) a tag that moved somewhere else on the table is not this robot's: tag 3 stood
+                # 62 cm from where AL-EB54's own motion was found, and was given to it (late pictures of AL-E7DC's stroke)
+                continue
             if mode == "wiggle":
                 d = max(abs(wrap180(r[3] - p0[3])) for r in mid)
                 score = d if d > 0.5 * CD.WIGGLE_DEG else None

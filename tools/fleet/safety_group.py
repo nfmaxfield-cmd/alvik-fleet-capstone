@@ -439,6 +439,15 @@ SWITCHES = [
      "A Visit points run's time limit follows its own plan: 4 times the first plan's length (the school's finished "
      "runs took 1.2 to 3.3 times theirs), and past that it ends only once no new point has been reached for 4 "
      "times the plan's time per point. fixed: the typed limit (900 s from Mission Control), as before e24", "e24"),
+    ("MIRLT_CALIBRATED_CORR", "robot", "prior", "M",
+     "A robot that has been through a calibration run is sent its OWN fitted wheel and gyro corrections at each "
+     "start and re-check. prior: every robot gets the general ones (1.075 / 0.979 / 0), which wrote over what a "
+     "calibration had saved on the robot (school 23 Nov: AL-EB54 recalibrated, never in force)", "e24"),
+    ("MIRLT_NAMING_SETTLE", "1", "0", "M C T",
+     "Naming the robots: after each robot's own move the start waits until the pictures show a still table again "
+     "(late pictures are in), looks for its roof tag only then, and only where its motion was found. 0: as before "
+     "e24 (on 23 Nov late pictures of one robot's stroke gave its tag to the other robot and the run would not "
+     "start)", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

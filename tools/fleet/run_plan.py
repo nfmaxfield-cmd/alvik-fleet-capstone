@@ -2519,8 +2519,8 @@ class Coordinator:
                 self.log("all_held_wait", robots=held, since_s=round(t - min(getattr(b, "out_t", t) for b in
                                                                               self.bots.values() if b.out), 1))
                 self.say("NEEDS A HAND: every robot is held (%s), still and safe; the run waits for them and goes on as "
-                         "soon as one is heard and checked again (being held never ends it: Stop or Ctrl+C does, "
-                         "or the run's time limit; MIRLT_HELD_NEVER_END=0 gives the old 90 s end)" % ", ".join(held))
+                         "soon as one is heard and checked again (being held never ends by itself: Stop or Ctrl+C "
+                         "ends the run, or its time limit; MIRLT_HELD_NEVER_END=0 gives the old 90 s end)" % ", ".join(held))
         elif not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) <
                                          self.REJOIN_WAIT_S for b in self.bots.values()):
             self.abort = "every robot is out (none heard again within %.0f s)" % self.REJOIN_WAIT_S
@@ -6418,6 +6418,17 @@ def send_settings(coord, link, args, names):
         cmds = list(getattr(args, "send", None) or [])
         if args.corrections:
             cmds += EC.corrections_cmds(n, coord.day, notes)
+            # (e24, school 23 Nov: AL-EB54 was recalibrated and every run still reported 0.9790 / 1.0750 / 0) the
+            # general corrections above were sent to EVERY robot at every start and every re-check, over whatever its
+            # calibration run had saved on it. A robot with a calibration record gets its OWN fitted values instead
+            # (mission_run --calibrated, from the Pi's calibrated_robots.json by WiFi name).
+            # MIRLT_CALIBRATED_CORR=prior: the general ones for everyone, as before
+            own_cal = calibrated_for(args, n)
+            if own_cal:
+                cmds = [c for c in cmds if not any(c.startswith("set %s " % k) for k in own_cal)]
+                cmds += ["set %s %.4f" % (k, v) for k, v in sorted(own_cal.items())]
+                notes.append("%s: its OWN calibration is used (%s), not the general corrections" % (
+                    n, ", ".join("%s %.4f" % kv for kv in sorted(own_cal.items()))))
         own = EC.robot_settings_cmds(n)          # its own settings (Left's 10 cm stop limit, question 59): every run
         if own:
             cmds += own
@@ -6444,6 +6455,34 @@ def send_settings(coord, link, args, names):
         print("  " + x)
     coord.sent_settings = want
     return want
+
+
+def calibrated_for(args, name):
+    """(e24) {param: value} of robot `name`'s own calibration from --calibrated NAME=gyro_scale:V,wheel_scale:V,...
+    ({} when it has none, or MIRLT_CALIBRATED_CORR=prior). Values outside CAL_SANE (a mistyped or corrupt record) are
+    left out and the general correction stays for that value."""
+    if SG.value("MIRLT_CALIBRATED_CORR") == "prior":
+        return {}
+    out = {}
+    for spec in getattr(args, "calibrated", None) or []:
+        n, _, rest = str(spec).partition("=")
+        if n.strip() != name:
+            continue
+        for kv in rest.split(","):
+            k, _, v = kv.partition(":")
+            try:
+                v = float(v)
+            except ValueError:
+                continue
+            lo, hi = CAL_SANE.get(k.strip(), (None, None))
+            if lo is not None and lo <= v <= hi:
+                out[k.strip()] = v
+    return out
+
+
+# [chosen] what a fitted correction may be and still be sent: 20 % either side of 1 for the scales (the fleet's fitted
+# values lie between 0.97 and 1.08) and 1 deg/s of drift. It only keeps a corrupt record off a robot. DOE: no (a guard)
+CAL_SANE = {"gyro_scale": (0.8, 1.2), "wheel_scale": (0.8, 1.2), "gyro_drift_dps": (-1.0, 1.0)}
 
 
 def read_back(coord, link, want, tries=EC.READBACK_TRIES):
@@ -7749,6 +7788,9 @@ def main(argv=None):
     ap.add_argument("--corrections", choices=("auto", "yes", "no"), default="auto",
                     help="send each robot's stored driving corrections (gyro_scale, wheel_scale, gyro_drift_dps: "
                          "e02_fit.PRIOR, corrections.json, today's warm-up); auto = real robots only")
+    ap.add_argument("--calibrated", action="append", default=[], metavar="NAME=gyro_scale:V,wheel_scale:V,gyro_drift_dps:V",
+                    help="(e24) a robot's own fitted corrections from its last calibration run: sent instead of the "
+                         "general ones (repeatable; mission_run passes them from calibrated_robots.json)")
     ap.add_argument("--day-state", help="the day's robot state file (default ~/.config/mirlt/day/<date>.json; dry "
                                         "runs: one in the session folder)")
     ap.add_argument("--yes", action="store_true", help="don't ask before starting")

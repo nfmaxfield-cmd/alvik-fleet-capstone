@@ -1,0 +1,59 @@
+=== the rebuilt Pi before the update ===
+6c7c109 Jay-Sun: school site capture 15 -> 10 fps; log Alvik 4 recalibration
+6ef063c Merge remote-tracking branch 'origin/main'
+dc3cfd6 Jay-Sun: Visit points card can show the side camera (camera 2); log camera 2 port move
+efa28ca Jay-Sun: turn camera 2 (side) back on at the school site for two-camera tracking
+294d937 e23c check: turn-backs over 20 simulated runs per version; the fix pass does not cause more (chance)
+ M tools/fleet/sites/school-conference.json
+?? tools/fleet/mission_control.html.bak-1118b
+?? tools/fleet/sites/school-conference.json.bak-1123
+
+=== getting the update command onto the Pi (the first update's two steps) ===
+=== python3 <the fetched update_pi.py>, typed in the Pi's code folder ===
+UPDATE: bringing this Pi to GitHub's newest code.
+1. Closing Mission Control (it is started again at the end) ...
+   it was not open.
+2. Getting GitHub's newest code ...
+   GitHub's newest: f86619f e24 5d: update: a value changed in a commit on the Pi and changed back by hand is still the Pi's choice
+   This Pi: 6c7c109 Jay-Sun: school site capture 15 -> 10 fps; log Alvik 4 recalibration; 3 commits made on this Pi; 1 changed file not committed
+3. Backing up everything that is only on this Pi ...
+   branch pi-backup-20261124-112711; folder <scratch>/home/mirlt-backups/20261124-112711
+4. Putting the code on GitHub's newest ...
+   now at: f86619f e24 5d: update: a value changed in a commit on the Pi and changed back by hand is still the Pi's choice
+5. Carrying this Pi's own choices out of the edited site file (into the Pi's own file) ...
+   kept on this Pi: capture.fps = 15 (<scratch>/home/.config/mirlt/sites/school-conference/site_local.json)
+   (the capture rate is now set by hand on this Pi. For the rate that follows the Pi's measured load instead: ./run-fleet-pi.sh local unset capture.fps)
+   cameras.side.use: GitHub's file now says the same as this Pi did: nothing to keep
+6. Checking the result ...
+   the site file loads: ok
+   the programs compile: ok
+   the Safety group reads: ok
+   the launcher script is whole: ok
+
+PASS: this Pi is on GitHub's newest code (f86619f e24 5d: update: a value changed in a commit on the Pi and changed back by hand is still the Pi's choice).
+3 commits made on this Pi are not on GitHub; they are kept on the branch pi-backup-20261124-112711:
+  6c7c109 Jay-Sun: school site capture 15 -> 10 fps; log Alvik 4 recalibration (Jay-Sun)
+  dc3cfd6 Jay-Sun: Visit points card can show the side camera (camera 2); log camera 2 port move (Jay-Sun)
+  efa28ca Jay-Sun: turn camera 2 (side) back on at the school site for two-camera tracking (Jay-Sun)
+  kept: the Pi's commits: branch pi-backup-20261124-112711 (look: git log pi-backup-20261124-112711)
+  kept: copies and patches: <scratch>/home/mirlt-backups/20261124-112711
+  kept: the uncommitted changes: git stash (named pi-backup-20261124-112711; see: git stash list)
+  kept: this Pi's own choices: <scratch>/home/.config/mirlt/sites/school-conference/site_local.json
+  left where they were (not part of the code): tools/fleet/mission_control.html.bak-1118b, tools/fleet/sites/school-conference.json.bak-1123
+Nothing was deleted. To put the Pi back as it was before this update: git reset --hard pi-backup-20261124-112711
+
+=== checks after the update (exit 0) ===
+HEAD == GitHub's newest: yes
+backup branch pi-backup-20261124-112711 holds the Pi's old HEAD: yes
+Jay-Sun's 3 commits on it: 3
+the edited site file's copy is byte-identical in the backup folder: yes
+stash kept: stash@{0}: On main: pi-backup-20261124-112711
+loose .bak files still in place and unchanged: yes
+working tree clean of tracked changes: yes
+this Pi's own choices: { "capture.fps": 15}
+Camera 2 (side): ON. Capture rate: 15 a second (set by hand on this Pi (site_local.json)).
+second update (already up to date):
+   This Pi: f86619f e24 5d: update: a value changed in a commit on the Pi and changed back by hand is still the Pi's choice
+   Already on GitHub's newest code: nothing to update.
+
+PASS: this Pi already has GitHub's newest code (f86619f e24 5d: update: a value changed in a commit on the Pi and changed back by hand is still the Pi's choice). Nothing was changed.
