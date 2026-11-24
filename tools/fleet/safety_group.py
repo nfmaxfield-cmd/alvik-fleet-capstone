@@ -46,7 +46,7 @@ Changelog
                  camera after every turn), MIRLT_SIGINT_RESTORE, MIRLT_WRAPUP_GUARD, MIRLT_VEER_RULE and
                  MIRLT_BLIND_STANDING (picture stalls: slow, or stay put), MIRLT_PLAN_FAST, MIRLT_POINT_RETRY,
                  MIRLT_HELD_POINTS, MIRLT_REJOIN_CAP, MIRLT_REJOIN_STRANDED, MIRLT_BATTERY_LOW, MIRLT_VISIT_TIME_LIMIT,
-                 MIRLT_CALIBRATED_CORR, MIRLT_NAMING_SETTLE, MIRLT_DWELL_PLACE.
+                 MIRLT_CALIBRATED_CORR, MIRLT_NAMING_SETTLE, MIRLT_DWELL_PLACE, MIRLT_CRAWL_AGAIN.
 """
 import os
 import sys
@@ -457,6 +457,12 @@ SWITCHES = [
      "A re-plan that begins with a point's stop while the robot is no longer at that point (turned back or re-"
      "seeded after it arrived) plans the drive to the point again first. where: the stop is made where the robot "
      "stands, refused as not reached, and the point never visited (23 Nov run 7: P28 judged 198 cm away)", "e24"),
+    ("MIRLT_CRAWL_AGAIN", "1", "0", "M C T",
+     "The start's watched crawl (3 cm) measures a roof tag's turn. When its answer is not near a quarter turn (a "
+     "tag is stuck on square, so such an answer means the short crawl was read badly), the robot crawls once more "
+     "and the two answers are averaged before one is used and remembered. 0: the first answer is used as measured, "
+     "as before e24 (a simulator run on the school stand-in took +67 deg for a tag at +90 and missed three "
+     "points).", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

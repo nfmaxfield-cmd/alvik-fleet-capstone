@@ -656,3 +656,38 @@ def test_a_stop_due_at_a_point_the_robot_is_no_longer_at_gets_its_drive_back():
     new1, labs1 = first_steps({"dwell_at_cm": 12.0})
     assert new1["robots"]["Alpha"]["steps"][0]["type"] == "wait" and not new1.get("returns")
     assert not any(l == "point 1" for _t, l in labs1)
+
+
+def test_a_crawl_answer_between_two_quarter_turns_is_measured_again_and_averaged(monkeypatch):
+    """(found by the e24 acceptance runs) A 3 cm crawl read badly gave +67 deg for a tag at +90: every heading of that
+    robot was 23 deg out and three points were missed. Such an answer is measured once more and averaged."""
+    import run_plan as RP
+
+    class C:
+        def __init__(self):
+            self.logged = []
+
+        def log(self, kind, **kw):
+            self.logged.append((kind, kw))
+    fres = {"robots": {"Bravo": {"meas": {"heading": -1.0, "tag_off": 0.0}}}}
+    calls = []
+
+    def second(coord, link, args, n, pos, guess, rect):
+        calls.append(pos)
+        return 104.0, (10.0, 13.0)
+    monkeypatch.setattr(RP, "crawl_heading", second)
+    assert hasattr(RP, "crawl_again_if_between"), "before e24 the first answer was used as measured"
+    c = C()
+    # the tag reads -1, the crawl says 66: a turn of +67, 23 deg from a quarter turn: crawl again; (66 + 104) / 2 = 85 -> +86, snapped to +90
+    h, pos = RP.crawl_again_if_between(c, None, None, "Bravo", fres, (66.0, (10.0, 10.0)), 0.0, (0, 0, 100, 100))
+    assert calls == [(10.0, 10.0)] and abs(h - 85.0) < 0.01 and pos == (10.0, 13.0)
+    import observe as OB
+    assert OB.snap(OB.wrap180(h - (-1.0))) == 90.0
+    # an answer near a quarter turn is not crawled again
+    calls.clear()
+    assert RP.crawl_again_if_between(c, None, None, "Bravo", fres, (78.0, (10.0, 10.0)), 0.0, (0, 0, 100, 100)) == (78.0, (10.0, 10.0))
+    assert calls == []
+    # the old way behind its switch
+    monkeypatch.setenv("MIRLT_CRAWL_AGAIN", "0")
+    assert RP.crawl_again_if_between(c, None, None, "Bravo", fres, (66.0, (10.0, 10.0)), 0.0, (0, 0, 100, 100)) == (66.0, (10.0, 10.0))
+    assert calls == []
