@@ -180,6 +180,10 @@ def main(argv=None):
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_dir = os.path.join(os.path.expanduser(os.environ.get("MIRLT_BACKUP_DIR") or "~/mirlt-backups"), stamp)
     branch = "pi-backup-" + stamp
+    n_ = 1
+    while git("rev-parse", "--verify", "-q", "refs/heads/" + branch, check=False).returncode == 0:
+        n_ += 1                        # two updates in the same second: never an existing backup's name
+        branch = "pi-backup-%s-%d" % (stamp, n_)
     say("UPDATE: bringing this Pi to GitHub's newest code%s." % (" (check only: nothing is changed)" if only_check else ""))
     kept = []          # where local things were kept, for the last lines
     local_before = {}  # each site_local.json this update wrote: what it held before (None: it did not exist)
@@ -235,7 +239,7 @@ def main(argv=None):
     target = git("rev-parse", "origin/main").stdout.strip()
     tsub = git("log", "-1", "--format=%h %s", "origin/main").stdout.strip()
     base = git("merge-base", "HEAD", "origin/main", check=False).stdout.strip() or head
-    own = [ln for ln in git("log", "--format=%h %an: %s", "%s..HEAD" % target, "--no-merges").stdout.splitlines() if ln]
+    own = [ln for ln in git("log", "--format=%h %s (%an)", "%s..HEAD" % target, "--no-merges").stdout.splitlines() if ln]
     changed = [ln for ln in git("status", "--porcelain").stdout.splitlines() if ln and not ln.startswith("??")]
     loose = [ln[3:] for ln in git("status", "--porcelain").stdout.splitlines() if ln.startswith("??")]
     incoming = set(git("ls-tree", "-r", "--name-only", "origin/main").stdout.split("\n"))
@@ -248,6 +252,13 @@ def main(argv=None):
     edits = site_files_edited(base)
     if head == target and not changed:
         say("   Already on GitHub's newest code: nothing to update.")
+        if not only_check:
+            if was_open:
+                say("3. Starting Mission Control again ...")
+                open_mc()
+            say("")
+            say("PASS: this Pi already has GitHub's newest code (%s). Nothing was changed." % tsub)
+            return 0
     if only_check:
         for ln in own:
             say("   would keep (branch %s): %s" % (branch, ln))
@@ -353,6 +364,13 @@ def main(argv=None):
                 upstream = [k for k in SI.local_from_edits(name, mine, base_text)[0] if k not in got]
                 for k in upstream:
                     say("   %s: GitHub's file now says the same as this Pi did: nothing to keep" % k)
+                # a value this Pi ran with that GitHub's file now sets differently, and that was not an edit of this
+                # Pi's (it equals what the Pi started from): GitHub's is used, and the line to keep the old one is said
+                for k, v in sorted(same.items()):
+                    if k not in got:
+                        say("   %s: this Pi ran with %s (the value it was given, not an edit made here); GitHub's file "
+                            "now says otherwise and GitHub's is used. To keep %s on this Pi: ./run-fleet-pi.sh local "
+                            "set %s %s" % (k, json.dumps(v), json.dumps(v), k, json.dumps(v)))
                 for w in other:
                     say("   NOT carried over (it is in the backup; tell Nick if it matters): %s" % w)
             except Exception as e:  # noqa: BLE001  (the backup has the file whatever happens here)
