@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# (2026-11-24 e24, the usability audit) `update`: this Pi brought to GitHub's newest code with one command (closes Mission
+# Control, backs up every local change, carries this Pi's own choices over, checks, restarts, PASS / FAIL:
+# tools/pi/update_pi.py). `local`: choices that belong to this one Pi (camera 2 on or off, a capture rate by hand),
+# kept out of the repo's site file. Typing no command, `help` or a mistyped command prints a short list (and "did you
+# mean ...?"), not this whole comment (`help all` prints it). `mc-stop` waits until Mission Control has really closed.
+# `stop` (the recorder) asks first and points to `stopall` (the robots); `stop yes` is the old way without the question.
 # (2026-11-13 e22) `timing`: the free-roam controller's tick timed on the Pi itself (tools/pi/plan_timing_bench.py; nothing
 # moves, no camera): the slowest 1 in 100 ticks against the 50 ms loop.
 # (2026-11-12 Mission Control build) `freeroam-upload`: Mission Control's free roam on the robots uploads its logs and
@@ -129,6 +135,39 @@ IPS="--robot 192.168.1.250 --robot 192.168.1.252 --robot 192.168.1.253"
 # used to fall back to home's robots and picture size in silence). Two exceptions: `site` (to switch to a good one) and
 # `stopall` (the emergency stop never waits on a file: it still broadcasts `stop`).
 WHAT0="${1:-}"
+# (e24) the update and the short help never wait on the site file (an update is how a broken one is put right)
+if [ "$WHAT0" = update ]; then shift; exec python3 tools/pi/update_pi.py "$@"; fi
+short_help() {
+  cat <<'HELP_EOF'
+The commands used most (type them after ./run-fleet-pi.sh ):
+  mc              open Mission Control (the page that starts and watches runs); it prints the address to open
+  mc-stop         close Mission Control (a run of its own stops first)
+  stopall         STOP every robot now (works in the middle of any run)
+  update          bring this Pi to GitHub's newest code: backs up local changes, checks, restarts, says PASS or FAIL
+  space           free space on the card and the USB drive (space --move: finished runs to the USB drive)
+  local           what is set on this Pi only (camera 2 on/off, capture rate); local set <key> <value> changes one
+  site            which site is in use (home, school-conference) and the list
+  check           ask every robot for its status (battery, firmware)
+  visit P01,P05   Visit points from the terminal (add dry to practise in the simulator)
+  selfcheck       a new Pi's setup tested, one PASS / WARN / FAIL line each
+  help all        every command, with its history
+HELP_EOF
+}
+ALL_COMMANDS="timing bench ladder turncheck doe doe-run doe-finish reupload-frames doe-status doe-stop freeroam freeroam-run freeroam-finish freeroam-upload freeroam-status freeroam-stop monday practice mc site jay-bundle camcheck visit mc-stop space clean-uploaded uploads ladder-status ladder-reset setup rec check stopall calib calib-upload selfcheck address settings dance turn calibrate one cross watch brick stop update local help school-setup"
+case "$WHAT0" in
+  ""|help|-h|--help)
+    if [ "${2:-}" = all ]; then sed -n '2,/^set -u$/p' "$0" | sed '$d'; else short_help; fi
+    [ -n "$WHAT0" ]; exit $? ;;
+esac
+case " $ALL_COMMANDS " in
+  *" $WHAT0 "*) ;;
+  *)
+    # (e24, the audit's finding 9: a mistyped command printed 90 lines of this file's comments, changelog first)
+    NEAR="$(python3 -c "import difflib,sys; m=difflib.get_close_matches(sys.argv[1], sys.argv[2].split(), 1, 0.6); print(m[0] if m else '')" "$WHAT0" "$ALL_COMMANDS" 2>/dev/null)"
+    if [ -n "$NEAR" ]; then echo "Unknown command '$WHAT0'. Did you mean $NEAR?   ./run-fleet-pi.sh $NEAR"
+    else echo "Unknown command '$WHAT0'."; fi
+    echo; short_help; exit 1 ;;
+esac
 # (2026-11-04) the school Pi's setup runs before anything else here needs the site or the Python packages
 if [ "$WHAT0" = school-setup ]; then shift; exec bash tools/pi/school_setup.sh "$@"; fi
 if SITE_ENV="$(python3 tools/fleet/sites.py env 2>&1)"; then eval "$SITE_ENV"; IPS="$MIRLT_ROBOT_ARGS"
@@ -618,8 +657,22 @@ case "$WHAT" in
       echo "If the window closed: tmux attach -t visit   (Ctrl+C in it stops every robot)"
     fi ;;
   mc-stop)
-    if tmux has-session -t mc 2>/dev/null; then tmux send-keys -t mc C-c; sleep 3; tmux send-keys -t mc Enter 2>/dev/null; echo "Mission Control is closing (a run of its own stops first)."
-    else echo "Mission Control is not running in tmux session mc: if it runs in a terminal window, Ctrl+C there."; fi ;;
+    # (e24, the audit's finding 9: it said "is closing" without looking) waits until Mission Control's port is free
+    # (at most 40 s [chosen; no DOE: a patience]) and says what it found. `mc-stop quick`: the 3 s of before e24
+    MCP=8095
+    mc_up() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1', $MCP)) == 0 else 1)" 2>/dev/null; }
+    if tmux has-session -t mc 2>/dev/null; then
+      tmux send-keys -t mc C-c
+      if [ "${1:-}" = quick ]; then sleep 3; tmux send-keys -t mc Enter 2>/dev/null; echo "Mission Control is closing (a run of its own stops first)."; exit 0; fi
+      echo "Closing Mission Control (a run of its own stops first) ..."
+      for k in $(seq 1 40); do mc_up || break; sleep 1; done
+      tmux send-keys -t mc Enter 2>/dev/null
+      if mc_up; then echo "Mission Control has NOT closed after 40 s. See its window: tmux attach -t mc   (press Ctrl+C there; leave with Ctrl+B, then D)"; exit 1
+      else echo "Mission Control is closed. Open it again: ./run-fleet-pi.sh mc"; fi
+    elif mc_up; then echo "Mission Control is open but not in tmux session mc: go to the terminal window it runs in and press Ctrl+C there."; exit 1
+    else echo "Mission Control is not running."; fi ;;
+  local)           # (e24) choices that belong to this one Pi (tools/fleet/sites.py local ...)
+    python3 tools/fleet/sites.py local "$@" ;;
   space)           # free space on the card and the USB drive, the biggest folders; --move (e14): finished run folders
                    # moved to the USB drive (a link left in logs/, nothing deleted)
     shift; python3 tools/fleet/diskguard.py space "$@" ;;
@@ -706,6 +759,15 @@ case "$WHAT" in
   brick)
     run_test brick tools/fleet/examples/phase0_cross.json --brick-watch ;;
   stop)
+    # (e24, the audit's finding 9) `stop` stops the RECORDER (and uploads the day's Phase 0 sessions), not the robots:
+    # it asks first and says which command stops the robots. `stop yes`: no question (as before e24)
+    if [ "${1:-}" != yes ]; then
+      echo "This stops the camera RECORDER and uploads today's Phase 0 sessions. It does NOT stop the robots."
+      echo "To stop the robots:           ./run-fleet-pi.sh stopall"
+      echo "To close Mission Control:     ./run-fleet-pi.sh mc-stop"
+      if [ -t 0 ]; then read -r -p "Stop the recorder? Type yes and press Enter: " ANS; else ANS=""; fi
+      [ "$ANS" = yes ] || { echo "Nothing was stopped."; exit 0; }
+    fi
     OUT="$(cat /tmp/fleet_rec_out 2>/dev/null || echo "$HOME/recordings")"
     tmux kill-window -t fleet:bridge 2>/dev/null || true
     for d in $(ls -td logs/$DAY-*-p0-* logs/$DAY-ladder 2>/dev/null); do
@@ -713,6 +775,8 @@ case "$WHAT" in
     done
     python3 tools/pi/upload_session.py --recordings "$OUT" --stop-recorder --no-logs --tag "p0-$DAY-recording" || true
     tmux kill-session -t fleet 2>/dev/null || true ;;
+  help|update)     # (answered before the site file is read, above)
+    short_help ;;
   *)
-    sed -n '2,89p' "$0"; exit 1 ;;
+    short_help; exit 1 ;;
 esac

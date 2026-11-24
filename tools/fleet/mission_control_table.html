@@ -344,7 +344,8 @@ function drawPlan(on) {
       <div class="source">Show camera: ${["overhead", "side"].map(c => `<a href="#" data-vpcam="${c}" style="${vpCam === c ? "font-weight:700;text-decoration:none;color:var(--ink)" : ""}">${c === "side" ? "side (camera 2)" : "overhead"}</a>`).join(" | ")} &middot; <a href="#" id="vprefresh">New picture</a>. Source: the camera's live picture and its model from the setup (${esc((VP.model || "").split("/").slice(-2).join("/") || "none")}).</div>`;
     if (pic.dataset.h !== h) { pic.innerHTML = h; pic.dataset.h = h;
       const img = $("vpimg");
-      img.onerror = () => { img.style.display = "none"; };
+      // no live picture (practice before any run, a camera unplugged): the last setup picture, else no picture at all (never a broken one)
+      img.onerror = () => { if (!img.dataset.fb) { img.dataset.fb = "1"; img.src = `/api/tags/picture?cam=${vpCam}&t=${vpStamp}`; } else { img.style.display = "none"; } };
       img.onclick = ev => { const b = img.getBoundingClientRect(), u = (ev.clientX - b.left) / b.width * sz[0], v = (ev.clientY - b.top) / b.height * sz[1];
         let best = null, bd = 1e9; for (const [l, q] of Object.entries(px)) { const d = Math.hypot(q[0] - u, q[1] - v); if (d < bd) { bd = d; best = l; } }
         if (best && bd <= sz[0] / 12) vpAdd(best); else flash("That click is too far from any sticker in the picture: click nearer one, or use the map.", true); };

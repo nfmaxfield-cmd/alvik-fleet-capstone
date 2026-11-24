@@ -28,8 +28,8 @@
   },
   "side": {
    "label": "Camera 2 (over the corner 2 half)",
-   "use": false,
-   "note": "switched off 5 Nov 2026 (Nick: one camera for now); kept, not deleted: set use true and camera_names.side to turn it back on"
+   "use": true,
+   "note": "ON since 18 Nov 2026 (Jay-Sun: second EMEET C950 at the door end for zones 3-4; brought into the repo 24 Nov, e24). It was off 5-18 Nov (Nick: one camera for now). Off on ONE Pi: ./run-fleet-pi.sh local set cameras.side.use false (this file stays as it is)"
   }
  },
  "_note_camera_names": "camera_names (5 Nov 2026): which USB camera is which when this site's folder has no cameras.json (tools/pi/camnames.py; an existing cameras.json always wins, e.g. after camnames.py --set). A name matches when it is part of the camera's own name. side \"\" = camera 2 switched off (the EMEET C950 is the one to name when it comes back). Home's camera names are never used for this site.",
@@ -41,7 +41,12 @@
  "capture": {
   "width": 1280,
   "height": 960,
-  "fps": 15
+  "fps": 10,
+  "fps_auto": {
+   "choices": [10, 15],
+   "start": 10,
+   "note": "(e24, Nick 24 Nov) the rate is decided from the Pi's measured load after each real run (tools/pi/capture_rate.py): 10 to start (Jay-Sun's 23 Nov value; the 23 Nov runs showed no measured difference between 15 and 10). By hand on one Pi: ./run-fleet-pi.sh local set capture.fps 15"
+  }
  },
  "tracking": "tags",
  "tags": {

@@ -36,6 +36,14 @@ Which site is used: MIRLT_SITE in the environment, else the one saved by `sites.
     python3 tools/fleet/sites.py get robot_args  # e.g. "--robot 192.168.1.250 ..." (for the launchers)
     python3 tools/fleet/sites.py env             # export lines for the launchers (MIRLT_CONF_DIR, ...)
 
+(e24, Nick 24 Nov) Choices that belong to ONE computer (camera 2 on or off, a capture rate set by hand) live in
+<conf dir>/site_local.json, laid over the site file, so a Pi never differs from GitHub:
+    python3 tools/fleet/sites.py local                             # what is set on this computer
+    python3 tools/fleet/sites.py local set cameras.side.use false
+    python3 tools/fleet/sites.py local unset capture.fps
+The capture rate (capture.fps) is the START value where the site has capture.fps_auto: after real runs it follows the
+Pi's measured load (tools/pi/capture_rate.py).
+
 No WiFi password is ever stored here or anywhere in this repo: the robots' networks are typed by Nick into the
 firmware's secrets.h (git-ignored) on his laptop.
 """
@@ -289,6 +297,7 @@ def load(name=None):
     cd = d.get("conf_dir") or (BASE_CONF if name == DEFAULT_SITE else BASE_CONF + "/sites/" + name)
     d["conf_dir"] = os.path.expanduser(cd)
     apply_overrides(d)
+    apply_local(d)          # (e24) this computer's own choices (camera 2 on or off, a capture rate set by hand)
     md = d.get("mc_dir") or ("logs/mission-control" if name == DEFAULT_SITE else "logs/mission-control-" + name)
     d["mc_dir"] = md if os.path.isabs(md) else os.path.join(REPO, md)
     for k, r in enumerate(d["robots"]):
@@ -331,6 +340,140 @@ def apply_overrides(d):
             d[k] = v
     d["_overrides"] = dict(ov)
     return d
+
+
+# -- (e24, Nick 24 Nov D5) per-Pi choices, out of the tracked site file -------------------------------------------------
+# On 18 and 23 Nov Jay-Sun changed the school's site file ON THE PI (camera 2 on, capture 15 -> 10): the Pi's copy then
+# differed from GitHub and every update needed a hand merge. Choices that belong to ONE computer now live beside its
+# camera names, in <conf dir>/site_local.json, laid over the repo's site file (which stays the default):
+#     ./run-fleet-pi.sh local                               # what is set on this Pi
+#     ./run-fleet-pi.sh local set cameras.side.use false    # camera 2 off on this Pi
+#     ./run-fleet-pi.sh local set capture.fps 15            # the capture rate by hand (else decided from the load)
+#     ./run-fleet-pi.sh local unset capture.fps             # back to the repo's value / the automatic rate
+LOCAL_FILE = "site_local.json"
+LOCAL_KEYS = {"cameras.overhead.use": bool, "cameras.side.use": bool, "capture.fps": float, "capture.width": int,
+              "capture.height": int}
+
+
+def local_path(site):
+    return os.path.join(site["conf_dir"], LOCAL_FILE)
+
+
+def read_local(site):
+    try:
+        with open(local_path(site)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _local_value(key, value):
+    """The value in the key's own kind, or ValueError in plain words."""
+    kind = LOCAL_KEYS[key]
+    if kind is bool:
+        if isinstance(value, bool):
+            return value
+        v = str(value).strip().lower()
+        if v in ("1", "true", "on", "yes"):
+            return True
+        if v in ("0", "false", "off", "no"):
+            return False
+        raise ValueError("%s takes true or false, not %r" % (key, value))
+    try:
+        v = kind(float(value))
+    except (TypeError, ValueError):
+        raise ValueError("%s takes a number, not %r" % (key, value))
+    if v <= 0:
+        raise ValueError("%s must be over 0" % key)
+    return v
+
+
+def apply_local(d):
+    """Lay this computer's site_local.json over the site. Keys not in LOCAL_KEYS, or of the wrong kind, are left out
+    and named in d["_local_refused"] (the launchers say them; nothing is guessed)."""
+    used, refused = {}, {}
+    for k, v in read_local(d).items():
+        if k not in LOCAL_KEYS:
+            refused[k] = "not a per-Pi setting (allowed: %s)" % ", ".join(sorted(LOCAL_KEYS))
+            continue
+        try:
+            v = _local_value(k, v)
+        except ValueError as e:
+            refused[k] = str(e)
+            continue
+        node = d
+        parts = k.split(".")
+        for a in parts[:-1]:
+            if not isinstance(node.get(a), dict):
+                node[a] = {}
+            node = node[a]
+        node[parts[-1]] = int(v) if k == "capture.fps" and float(v).is_integer() else v
+        used[k] = v
+    if used:
+        d["_local"] = used
+    if refused:
+        d["_local_refused"] = refused
+    return d
+
+
+def set_local(site, key, value):
+    """Save one per-Pi choice (None removes it: the repo's value again). Returns the file's contents."""
+    if key not in LOCAL_KEYS:
+        raise ValueError("not a per-Pi setting: %s (allowed: %s)" % (key, ", ".join(sorted(LOCAL_KEYS))))
+    cur = read_local(site)
+    if value is None:
+        cur.pop(key, None)
+    else:
+        cur[key] = _local_value(key, value)
+    os.makedirs(site["conf_dir"], exist_ok=True)
+    with open(local_path(site), "w") as f:
+        json.dump(cur, f, indent=1)
+    return cur
+
+
+def local_from_edits(site_name, edited_text, repo_text):
+    """(for `./run-fleet-pi.sh update`) The differences between a site file edited on this computer and the repo's
+    version of it, as per-Pi choices: {key: value} for the LOCAL_KEYS that differ, and a list of other differences
+    (kept in the update's backup, said to the person, not applied)."""
+    try:
+        mine, theirs = json.loads(edited_text), json.loads(repo_text)
+    except ValueError as e:
+        return {}, ["the edited file is not valid JSON (%s): kept in the backup only" % e]
+    out, other = {}, []
+
+    def get(d, key):
+        for a in key.split("."):
+            if not isinstance(d, dict) or a not in d:
+                return None
+            d = d[a]
+        return d
+    for k in LOCAL_KEYS:
+        a, b = get(mine, k), get(theirs, k)
+        if a is not None and a != b:
+            out[k] = a
+
+    def walk(a, b, path):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for kk in sorted(set(a) | set(b)):
+                walk(a.get(kk), b.get(kk), path + [kk])
+        elif a != b:
+            key = ".".join(path)
+            if key not in LOCAL_KEYS and not key.endswith(".note") and not key.startswith("capture.fps_auto"):
+                other.append("%s: this Pi had %s, the repo has %s" % (key, json.dumps(a)[:80], json.dumps(b)[:80]))
+    walk(mine, theirs, [])
+    return out, other
+
+
+def capture_fps(site):
+    """(e24) The recorder's capture rate in force and why: a rate set by hand on this Pi, else decided from the Pi's
+    measured load (tools/pi/capture_rate.py) when the site file has capture.fps_auto, else the site file's."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pi"))
+        import capture_rate as CRT
+        return CRT.in_force(site)
+    except Exception as e:  # noqa: BLE001  (the launchers always get a rate)
+        return float((site.get("capture") or {}).get("fps", 25)), "the site file's (%s)" % e
 
 
 def set_override(site, key, value):
@@ -390,7 +533,7 @@ def env_lines(site=None):
            "export MIRLT_ROBOTS=%s" % _q(",".join(robot_names(s))),
            "export MIRLT_ROBOT_ARGS=%s" % _q(robot_args(s)),
            "export MIRLT_CAPTURE=%s" % _q("--width %d --height %d" % (s["capture"]["width"], s["capture"]["height"])),
-           "export MIRLT_CAPTURE_FPS=%d" % int(s["capture"].get("fps", 25)),
+           "export MIRLT_CAPTURE_FPS=%d" % int(capture_fps(s)[0]),
            "export MIRLT_PI_ADDR=%s" % _q(s["pi"].get("address", ""))]
     return out
 
@@ -407,10 +550,15 @@ def words(site=None):
              "  robots: %s" % (rb or "none listed"),
              "  tracking: %s" % ("AprilTags on the roofs" if s["tracking"] == "tags" else "the robots' lights and outlines"),
              "  cameras: %s" % "; ".join("%s = %s" % (k, v.get("label", k)) for k, v in s["cameras"].items()),
-             "  pictures: %d x %d at %d a second" % (s["capture"]["width"], s["capture"]["height"],
-                                                    s["capture"].get("fps", 25)),
+             "  pictures: %d x %d at %d a second (%s)" % ((s["capture"]["width"], s["capture"]["height"]) +
+                                                         (int(capture_fps(s)[0]), capture_fps(s)[1])),
              "  calibrations and camera names: %s" % s["conf_dir"],
              "  Mission Control's folder: %s" % os.path.relpath(s["mc_dir"], REPO)]
+    if s.get("_local"):
+        lines.append("  set on this computer only (%s): %s" % (local_path(s), ", ".join(
+            "%s = %s" % (k, json.dumps(v)) for k, v in sorted(s["_local"].items()))))
+    for k, why in sorted((s.get("_local_refused") or {}).items()):
+        lines.append("  NOT USED from %s: %s: %s" % (LOCAL_FILE, k, why))
     if s.get("table"):
         lines.append("  table (typed): %s x %s cm" % (s["table"].get("length_cm"), s["table"].get("width_cm")))
     if s.get("run_tracking", s["tracking"]) != s["tracking"] or s.get("points"):
@@ -467,6 +615,43 @@ def main(argv=None):
             print(json.dumps(s.get(key), indent=1))
     elif cmd == "env":
         print("\n".join(env_lines()))
+    elif cmd == "local":
+        # (e24) this computer's own choices for the site in use (never in the repo)
+        s = load()
+        sub = argv[1] if len(argv) > 1 else "show"
+        try:
+            if sub == "set" and len(argv) >= 4:
+                set_local(s, argv[2], argv[3])
+                print("Saved on this computer: %s = %s (%s). It applies from the next start of Mission Control or "
+                      "the recorder." % (argv[2], argv[3], local_path(s)))
+            elif sub == "unset" and len(argv) >= 3:
+                set_local(s, argv[2], None)
+                print("Removed: %s is the repo's value again (%s)." % (argv[2], local_path(s)))
+            elif sub == "from-edits" and len(argv) >= 4:
+                with open(argv[2]) as f1, open(argv[3]) as f2:
+                    got, other = local_from_edits(s["name"], f1.read(), f2.read())
+                for k, v in sorted(got.items()):
+                    set_local(s, k, v)
+                    print("KEPT on this computer: %s = %s" % (k, json.dumps(v)))
+                for w in other:
+                    print("NOT CARRIED OVER (it is in the backup): %s" % w)
+                if not got and not other:
+                    print("No per-Pi difference in the edited site file.")
+            elif sub != "show":
+                raise ValueError("usage: local | local set <key> <value> | local unset <key>   (keys: %s)"
+                                 % ", ".join(sorted(LOCAL_KEYS)))
+        except ValueError as e:
+            raise SystemExit(str(e))
+        s = load()
+        loc = s.get("_local") or {}
+        print("Set on this computer only for %s (%s):" % (s["name"], local_path(s)))
+        print("\n".join("  %s = %s" % (k, json.dumps(v)) for k, v in sorted(loc.items())) or
+              "  nothing: every value is the repo's site file's")
+        for k, why in sorted((s.get("_local_refused") or {}).items()):
+            print("  NOT USED: %s: %s" % (k, why))
+        print("Camera 2 (side): %s. Capture rate: %g a second (%s)." % (
+            "ON" if ((s.get("cameras") or {}).get("side") or {}).get("use", True) else "off",
+            capture_fps(s)[0], capture_fps(s)[1]))
     else:
         raise SystemExit(__doc__)
     return 0
