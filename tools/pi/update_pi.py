@@ -149,8 +149,17 @@ def site_files_edited(base):
         except OSError:
             continue
         b = git("show", "%s:%s" % (base, p), check=False)
-        if b.returncode == 0 and b.stdout != mine:
-            out.append((p, mine, b.stdout))
+        if b.returncode != 0:
+            continue
+        # every version of the file the Pi's own commits made: a value changed there and changed back is still a
+        # choice made on this Pi (camera 2 turned on in a commit, then off again by hand)
+        hist = []
+        for c in git("rev-list", "%s..HEAD" % base, "--", p, check=False).stdout.split():
+            h = git("show", "%s:%s" % (c, p), check=False)
+            if h.returncode == 0:
+                hist.append(h.stdout)
+        if b.stdout != mine or any(h != b.stdout for h in hist):
+            out.append((p, mine, b.stdout, hist))
     return out
 
 
@@ -266,7 +275,7 @@ def main(argv=None):
             say("   would keep (stash + %s): %s" % (backup_dir, ln[3:]))
         for p in clash:
             say("   would move out of the new code's way (into %s): %s" % (backup_dir, p))
-        for p, _m, _b in edits:
+        for p, _m, _b, _h in edits:
             say("   would carry this Pi's own choices from %s into the Pi's own file" % p)
         say("")
         say("CHECK ONLY: nothing was changed. To update: ./run-fleet-pi.sh update")
@@ -334,15 +343,18 @@ def main(argv=None):
     if edits:
         say("5. Carrying this Pi's own choices out of the edited site file (into the Pi's own file) ...")
         sys.path.insert(0, os.path.join(REPO, "tools", "fleet"))
-        for p, mine, base_text in edits:
+        for p, mine, base_text, hist in edits:
             name = os.path.basename(p)[:-5]
             new_text = git("show", "origin/main:%s" % p, check=False).stdout
             try:
                 import sites as SI
                 got, other = SI.local_from_edits(name, mine, base_text)
+                touched = set(got)                       # keys this Pi edited: now, or in any of its own commits
+                for h in hist:
+                    touched |= set(SI.local_from_edits(name, h, base_text)[0])
                 # what GitHub's file now says anyway needs no copy on the Pi
                 same, _ = SI.local_from_edits(name, mine, new_text) if new_text else (got, [])
-                got = {k: v for k, v in got.items() if k in same}
+                got = {k: v for k, v in same.items() if k in touched}
                 conf = os.path.expanduser(json.loads(mine).get("conf_dir") or (
                     "~/.config/mirlt" if name == "home" else "~/.config/mirlt/sites/" + name))
                 lp = os.path.join(conf, SI.LOCAL_FILE)
@@ -361,8 +373,11 @@ def main(argv=None):
                     with open(lp, "w") as f:
                         json.dump(cur_local, f, indent=1)
                     kept.append("this Pi's own choices: %s" % lp)
-                upstream = [k for k in SI.local_from_edits(name, mine, base_text)[0] if k not in got]
-                for k in upstream:
+                for k, v in sorted(got.items()):
+                    if k == "capture.fps":
+                        say("   (the capture rate is now set by hand on this Pi. For the rate that follows the Pi's "
+                            "measured load instead: ./run-fleet-pi.sh local unset capture.fps)")
+                for k in sorted(touched - set(got)):
                     say("   %s: GitHub's file now says the same as this Pi did: nothing to keep" % k)
                 # a value this Pi ran with that GitHub's file now sets differently, and that was not an edit of this
                 # Pi's (it equals what the Pi started from): GitHub's is used, and the line to keep the old one is said
