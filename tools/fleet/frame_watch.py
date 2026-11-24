@@ -19,7 +19,7 @@ import os
 import threading
 import time
 
-VERSION = "2026-11-10e13"   # e13 (10 Nov, Nick: derived, risk-based thresholds): the camera's "no pictures" is now a
+VERSION = "2026-11-24e24"   # e24 (the audit's B6): the no-pictures warning names a real command (rec), not `status`. Before: "2026-11-10e13"   # e13 (10 Nov, Nick: derived, risk-based thresholds): the camera's "no pictures" is now a
 #                             gap longer than this stream's own normal gaps (derived from the pictures it sent), not a
 #                             fixed 3 s; what each ROBOT does is decided by the run from its own risk
 #                             (safety_rules.no_picture_limit). MIRLT_FRAME_WATCH_GAP=fixed: e12's 3 s. 2026-11-10a: e12

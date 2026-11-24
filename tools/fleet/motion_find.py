@@ -40,7 +40,7 @@ for _p in (HERE, TOOLS, os.path.join(TOOLS, "sim"), os.path.join(TOOLS, "recogni
 
 import numpy as np   # noqa: E402
 
-VERSION = "motion-find-2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (rehearsal c7f); a spot is proven readable on its own cell's evidence only; bring-back targets keep the site's planning margins. e14b: tagless only on proven-readable spots (Laplace rate); a target reached with no read or blocked by a robot is not tried again (rehearsal: it circled a target in a dim patch; held beside a parked robot)
+VERSION = "motion-find-2026-11-24e24"   # e24 (school 23 Nov, N3): a roof tag is taken as a robot's only when it was read where that robot's motion was found (tag_mover_from_eye's where; TAG_STROKE_NEAR_CM). Before: "motion-find-2026-11-10e14d"   # e14d: a robot brought back is bound by its tag's first read where the motion detector had it (rehearsal c7f); a spot is proven readable on its own cell's evidence only; bring-back targets keep the site's planning margins. e14b: tagless only on proven-readable spots (Laplace rate); a target reached with no read or blocked by a robot is not tried again (rehearsal: it circled a target in a dim patch; held beside a parked robot)
 
 # ---------------------------------------------------------------------------------------------- numbers (and why)
 STEP_CM = 5.0            # one bring-back step (calib_run RECOVER_STEP_CM, chosen there; DOE row there). Each step is

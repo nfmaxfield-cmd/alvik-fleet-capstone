@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""The fleet simulator (tools/sim/fleet_sim.py) with the school's conditions added, for the Monday sweep
+"""(2026-11-24e24: the yaw_jump condition (a gyro yaw jump at a turn's start, school 23 Nov N1); Ctrl+C reaches this
+program even when its parent ignores it.)
+
+The fleet simulator (tools/sim/fleet_sim.py) with the school's conditions added, for the Monday sweep
 (tools/fleet/sweeps/monday_sweep.py, 2026-10-27). Takes every fleet_sim.py argument, plus --sweep-cond FILE (JSON):
 
   drop_pct        lost packets, % each way (commands to a robot and its records back), drawn per packet, per robot,

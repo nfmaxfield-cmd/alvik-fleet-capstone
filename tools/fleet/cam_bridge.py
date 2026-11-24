@@ -27,7 +27,7 @@ Started by run-fleet-pi.sh; the dry runs start it against tools/sim/fleet_sim.py
 Writes to --out (default logs/<date-time>-bridge): track.csv (every picture: each robot's spot and status),
 events.jsonl (status changes, headings sent, obstacles), bridge_summary.json.
 """
-VERSION = "2026-11-12e21"   # e21: when both cameras see a robot and agree, each camera's sighting is sent on its own (cam_bridge:overhead / cam_bridge:side, its own noise and picture time) so each camera earns its own trust (MIRLT_BRIDGE_PER_CAMERA; 0: the merged "both" sighting). Before: "2026-11-10e14"   # e14 (school 17:46, the tag bridge's SIGTERM abort): once on the way out, SIGTERM and Ctrl+C only set a flag (orderly_exit.quiet_shutdown), never a raise inside a join or close. 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
+VERSION = "2026-11-24e24"   # e24 (the usability audit's B1): Ctrl+C reaches this program even when its parent ignores it (sigint_default.restore). Before: "2026-11-12e21"   # e21: when both cameras see a robot and agree, each camera's sighting is sent on its own (cam_bridge:overhead / cam_bridge:side, its own noise and picture time) so each camera earns its own trust (MIRLT_BRIDGE_PER_CAMERA; 0: the merged "both" sighting). Before: "2026-11-10e14"   # e14 (school 17:46, the tag bridge's SIGTERM abort): once on the way out, SIGTERM and Ctrl+C only set a flag (orderly_exit.quiet_shutdown), never a raise inside a join or close. 2026-11-10a (e12): frame_watch (no new picture from the overhead camera: said loudly, an event, a message to the run); orderly exit. No version string before
 
 import argparse
 import csv

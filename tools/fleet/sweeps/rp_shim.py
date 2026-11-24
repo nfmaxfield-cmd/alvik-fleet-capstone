@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""run_plan.py, unchanged, with its simulator swapped for sim_shim.py (the school's conditions), for the Monday sweep.
+"""(2026-11-24e24: Ctrl+C reaches this program even when its parent ignores it: sigint_default.restore.)
+
+run_plan.py, unchanged, with its simulator swapped for sim_shim.py (the school's conditions), for the Monday sweep.
 Meant to run in its own network namespace (`unshare -n`): it brings the namespace's loopback up first, so the
 simulated robots' ports (5005, 5006, 5010) never meet another dry run on this machine.
 

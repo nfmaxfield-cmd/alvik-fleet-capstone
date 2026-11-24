@@ -1,4 +1,11 @@
-"""Fleet planner: paths for every robot made of straight drives and turns in
+"""(Changelog, newest first.
+  2026-11-24e24  planning speed (school 23 Nov: 113 of 114 re-plans over budget): a map's base grid, its graph and the
+                 routes worked out on it are remembered across plans (_GRID_CACHE), two hot loops use one numpy / math
+                 call (sweeps_meet, _avoid_variants' radius); the same plans step for step (planbench.py).
+                 MIRLT_PLAN_FAST=0: as before. A point's stop that has not begun is not carried on, nor planned,
+                 away from its point: the drive there is planned again (dwell_at_cm; N4 / N7).)
+
+Fleet planner: paths for every robot made of straight drives and turns in
 place, timed so robots never come closer than `separation_cm`, written as
 plan.json (format in docs/data-formats.md, "Fleet plan").
 
