@@ -1640,6 +1640,13 @@ class Coordinator:
         if budget is not None:
             over["replan_budget_s"] = budget
         over["plan_ahead_points"] = self.plan_ahead_k() if PLAN_AHEAD_NEAR else 0      # (e23)
+        if SG.value("MIRLT_DWELL_PLACE") != "where":
+            try:
+                over["dwell_at_cm"] = float(self.reach_tols()[0]) * 2.0      # (e24, N7) see planner.obstacle_replan:
+                #   twice the run's own reach tolerance (a robot a few cm off its point still stops there and the stop
+                #   is judged as before; only one well away from it drives back). Derived from the tolerance; no DOE
+            except Exception:  # noqa: BLE001
+                pass
         if improving:
             over["replan_first_safe"] = False     # the background search for a shorter plan: the full search
         news = [ob] if ob else []
@@ -1818,6 +1825,11 @@ class Coordinator:
                "cpu_s": round(cpu, 3), "budget_s": over["replan_budget_s"], "events": events,
                "new_makespan_s": newplan["summary"]["makespan_s"], "stranded": newplan.get("stranded", []),
                "obstacle": ob, "states": job["states"], "old_plan": self.plan_no}
+        for r_ in newplan.get("returns") or []:
+            # (e24, N7) its stop was due at a point it is no longer at: the drive there is in the new plan again
+            self.log("dwell_returns", **r_)
+            self.say("%s is %.0f cm from %s, where its stop is due: it drives there again before it stops" % (
+                r_["robot"], r_["from_cm"], self._plabel(r_["point"])))
         n_now, n_later = self.points_in(newplan)
         rec["points_planned"], rec["points_later"], rec["plan_ahead"] = n_now, n_later, over.get("plan_ahead_points", 0)
         if not improving and n_now > 0:

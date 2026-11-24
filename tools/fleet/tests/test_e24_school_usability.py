@@ -579,3 +579,45 @@ def test_naming_with_pictures_two_seconds_late_gives_each_robot_its_own_tag():
     assert all(r["cameras"] for r in rec["robots"].values()) and set(rec["settle_s"]) == {"Alpha", "Bravo"}
     w = rec["robots"]["Bravo"]["where_cm"]
     assert math.hypot(w[0] - 175.0, w[1] - 101.0) < 6.0
+
+
+# ================================================================== the card: Mission Control's runs are moved too
+def test_mission_controls_finished_runs_move_to_the_usb_drive_when_the_card_is_low(tmp_path):
+    """School 23 Nov: the card fell from 0.8 to 0.55 GB, two starts were refused and one run was cut, with 16.7 GB free
+    on the USB drive. Mission Control keeps its runs in logs/mission-control-<site>/runs/<run>; the mover looked only at
+    folders directly under logs/, where the whole Mission Control folder counted as one run that was always "just
+    written"."""
+    import diskguard as DG
+    logs, drive = tmp_path / "logs", tmp_path / "usb"
+    runs = logs / "mission-control-school-conference" / "runs"
+    runs.mkdir(parents=True)
+    drive.mkdir()
+    now = time.time()
+    (logs / "mission-control-school-conference" / "settings.json").write_text("{}")
+    for k in range(5):
+        d = runs / ("20261123-1%d0000-visit-robots" % k)
+        (d / "run").mkdir(parents=True)
+        (d / "run" / "raw.csv").write_bytes(b"x" * 150_000)
+        (d / "visit_order.json").write_text('{"asked": "Alpha:P01"}')
+        t = now - (5 - k) * 3600 if k < 4 else now - 30             # the last one is running now
+        for f in [d / "run" / "raw.csv", d / "visit_order.json", d / "run", d]:
+            os.utime(f, (t, t))
+    rows = DG.run_folders(str(logs))
+    assert len(rows) == 5 and all("/runs/" in p for _, _, p in rows)     # each run is a unit (before: 1, the whole folder)
+    freed = [0]
+    said = []
+
+    def out(s):
+        said.append(s)
+        if s.startswith("  moved "):
+            freed[0] += 150_000
+    moved = DG.move_old_runs(str(logs), str(drive), floor_gb=0.0005, now=now, out=out, force=True,
+                             card_free=lambda: 0.0004 + freed[0] / 1e9, drive_free=lambda: 16.7, check_fs=False)
+    names = [m[0] for m in moved]
+    assert names and names == sorted(names) and "20261123-140000-visit-robots" not in names     # never the running one
+    for n in names:
+        link = runs / n
+        assert link.is_symlink() and (link / "run" / "raw.csv").stat().st_size == 150_000        # nothing lost
+        assert json.loads((link / "visit_order.json").read_text())["asked"] == "Alpha:P01"       # still readable in place
+    assert (logs / "mission-control-school-conference" / "settings.json").exists()               # its own files stay
+    assert DG.total_gb(str(tmp_path / "not" / "there" / "yet")) > 0                              # B12: never "of 0 GB"

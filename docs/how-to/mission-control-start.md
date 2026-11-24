@@ -1,150 +1,136 @@
-# Mission Control's Start screen (build e07, 6 Nov): Monday at the school table
+# Mission Control at the school table: start it, run Visit points, stop (updated 24 Nov 2026, build e24)
 
-Four big buttons and a red **STOP**. Nothing to type. Mission Control finds by itself whether it is at home, at
-school or somewhere new, finds the robots by their wiggle, and measures the table with the camera.
+One page runs everything: the table seen from above, the robots on it, a bar at the bottom to choose and start a run,
+and a red **STOP** that is always there. Nothing has to be typed to run. This guide is for the **new page** (the one
+that opens by default). The page as it was before 12 Nov is still at `/classic` (Settings > Open the old page); its old
+guide is `docs/archive/mission-control-start-e07-old-page.md`.
 
 Windows used below:
-- **Mac Terminal**: the Terminal app on the Mac (Spotlight: press Cmd+Space, type `Terminal`, press Enter).
-- **Pi window**: the Mac Terminal after you have logged in to the Pi (step 2). Its lines end in `nick@rfidthesis:~ $`.
-- **Browser**: Chrome or Safari on the Mac.
+- **PowerShell**: on the Windows laptop, press the Windows key, type `PowerShell`, press Enter. A blue or black window
+  opens with a line ending in `>`.
+- **Pi window**: the same PowerShell window after you have logged in to the Pi (step 2). Its lines end in `$`.
+- **Browser**: Chrome or Edge on the laptop.
 
-Type one box at a time, then press **Enter**.
+Type one box at a time, press **Enter**, and wait for the `$` (or `>`) to come back before the next box.
 
-## 1. Tailscale on the joincapstonedb account (Mac)
+## 1. Tailscale on the school's account (laptop)
 
-1. Top right of the Mac's screen, click the **Tailscale** icon.
-2. Click the account name at the top of its menu and choose **joincapstonedb**.
-3. You should see a tick next to it and `Connected`.
+1. Click the Tailscale icon near the clock (bottom right; it may be behind the small `^` arrow).
+2. If the account shown is not **joincapstonedb**, click the account name, then **joincapstonedb** (or "Log in to a
+   different account" and sign in as joincapstonedb).
+3. You should see `Connected`. If it says `Disconnected`, click **Connect**.
 
-## 2. Log in to the Pi (Mac Terminal)
+## 2. Log in to the school Pi (PowerShell)
 
 ```
 ssh nick@100.72.183.28
 ```
 
-Type nick's Pi password (nothing shows while you type), press **Enter**. You should see a line ending in
-`nick@rfidthesis:~ $`. This window is now the **Pi window**.
+Type the Pi's password if it asks (nothing shows while you type), press Enter. You should see a line ending in `$`.
+This window is now the **Pi window**. If it says `Connection timed out`, Tailscale is on the wrong account (step 1).
 
-## 3. Get Monday's version (Pi window)
+## 3. Go to the code (Pi window)
 
 ```
 cd ~/alvik-fleet-capstone
 ```
 
-```
-git pull
-```
+You should see the line change to end in `~/alvik-fleet-capstone $`.
 
-You should see `Fast-forward` (or `Already up to date.`).
-
-## 4. Restart Mission Control (Pi window)
-
-Only needed once after the `git pull` (an old Mission Control may still be running from last week):
+## 4. Get the newest version (Pi window), only when there is one
 
 ```
-./run-fleet-pi.sh mc-stop
+./run-fleet-pi.sh update
 ```
 
-You should see `Mission Control is closing` or `Mission Control is not running`. Then:
+One command does all of it: it closes Mission Control, backs up anything that was changed on this Pi, gets GitHub's
+newest code, checks it, and starts Mission Control again. Wait for the last lines. You should see a line starting with
+`PASS:`. If you see `FAIL:`, the line under it (`What to do:`) says what to type; the Pi is left exactly as it was.
+
+## 5. Open Mission Control (Pi window)
 
 ```
 ./run-fleet-pi.sh mc
 ```
 
-You should see, within about 10 seconds:
-- `This looks like the site school-conference ...` (only if it had to switch), and
-- `Mission Control is open: http://100.72.183.28:8095 in the laptop's browser`.
+You should see `Mission Control is open: http://100.72.183.28:8095 in the laptop's browser`. It keeps running if you
+close this window. (If it says `already open`, that is fine.)
 
-## 5. Put the robots down (at the table)
+## 6. Put the robots down (at the table)
 
-1. Switch on every robot you want to use. Any number works (1, 2, 3 ...).
-2. Put each one on the table at the **TV end** (where the camera sees it), at least a hand's width from the edges and
-   from each other. Nose direction does not matter.
-3. Jay-Sun must be in the room (the robots only drive at school while he is there).
+1. Switch on each robot you want to use.
+2. Put each on the table at least a hand's width from the edges, the outlet plates and each other. Which way it faces
+   does not matter.
+3. Jay-Sun must be in the room: at school the robots drive only while he is there.
 
-## 6. Open the page (Browser)
+## 7. Open the page (Browser)
 
-1. Go to `http://100.72.183.28:8095`
-2. You should see the **Start** screen:
-   - a red bar at the top saying `ROBOTS: the real robots` (if it says `PRACTICE`, the Pi's camera is not answering:
-     see the table at the end),
-   - **Place**: `School: the conference table`,
-   - **Robots**: `The camera sees 2 roof tags: 2 robots; each is named (Alpha, Bravo, ...) by its wiggle when a run
-     starts` (the number is how many robots you put down),
-   - **Area**: `Using the area the camera can see ...`,
-   - **Table**: `Table measured by the cameras: 396 x 168 cm` (or `The cameras measure the table by themselves at
-     the first run`),
-   - four big buttons: **Calibrate**, **Free roam**, **Visit points**, **Experiment routes**.
+Go to `http://100.72.183.28:8095`
 
-If a big **yellow** card says `One thing to do first: click the table's corners`, press **Show me the picture to
-click** and click the four corners in the order the page shows. This only appears when the camera cannot see the
-corner tiles; at school it should not appear.
+You should see:
+- at the top: **Mission Control**, the place (`School conference table ...`), a red pill `Robots (real)` and the red
+  **STOP** button;
+- under it one plain line, for example `Nothing is running. Robots: Alpha found; Bravo found.`;
+- the table from above with its stickers (P01 ... P40) and the grey outlet plates;
+- at the bottom: **Calibrate**, **Free roam**, **Visit points**, **Experiment routes** and a blue **Start** button.
 
-## 7. Run something (Browser)
+If a red band across the top says `Mission Control is not answering`, the page has lost the Pi: do step 5 again.
 
-1. Press one big button, for example **Visit points**.
-2. A box asks `Start Visit points on every robot on the table?`: press **OK**.
-3. A second box asks `Is he here?` (Jay-Sun): press **OK**.
-4. You should see a status box above the buttons, for example `Visit points is running.` with the time, and lines
-   such as `Found: Alpha at ..., Bravo at ...`, each robot wiggling, `TABLE SHARING: ...`, `SKIPPED (n points): ...
-   the camera does not read tags there` (the far half of the table: expected with one camera).
-5. The top of the page says `Visit points · 2:15` while it runs.
+## 8. Run Visit points
 
-What each button does:
+1. Click **Visit points** in the bottom bar.
+2. Choose the points. Three ways, use any:
+   - click stickers on the map, in the order to visit;
+   - click stickers in the camera's picture beside the map (`Show camera: overhead | side (camera 2)` switches
+     camera);
+   - type the order in the box above the map and press **Use it**: `P01,P05,P11` for one list, or
+     `Alpha:P01,P02,P08;Bravo:P35,P36,P34` for a list per robot.
+   Leave everything empty and Start shares all the points out between the robots. A list per robot is explained in
+   `docs/how-to/visit-points-lists.md`.
+3. Click **Start Visit points**.
+4. A panel asks once: tick **Jay-Sun is in the room** (needed) and the clear-space line, then click **Start**. It
+   remembers your ticks until Mission Control is restarted, so **Run again** does not ask a second time.
+5. While it runs the bar shows the time, **`3 of 6 points`** and a plain line (`Finding the robots`, `Naming each robot
+   by its wiggle`, `Driving`). Stickers turn green with a tick as they are reached. **Log** opens the whole run's log.
+6. If something needs you, a **red card** appears at the top right (for example `No pictures from the overhead camera`
+   or `Every robot is held`) and the line under the header turns red. Each robot's card says why it is held.
 
-| Button | What you will see | How long |
-|---|---|---|
-| **Calibrate** | Each robot in turn: `Naming each robot by its wiggle`, `Measuring each robot's wheels and turns`, `Checking the fix on a tour`, `Parking`, `Done` | about 40 min a robot |
-| **Free roam** | Every robot drives at once on smooth curves between points in its share of the table | about 10 min (Advanced changes it) |
-| **Visit points** | Every robot drives to its points in straight lines, turning on the spot | 5-15 min |
-| **Experiment routes** | Jay-Sun's next route (the button says which: `next is Experiment 1: in order`) | 5-10 min |
+## 9. When it ends
 
-**Experiment routes with one camera:** the routes use the whole table, and the camera reads only the TV-end half. The
-run then stops before anything moves and says which points the camera cannot read. That is Jay-Sun's agreement
-(half the table needs Dr. Sodhi's OK). With his OK: open **Advanced** at the bottom and tick **Experiments may use
-the half the camera cannot read (Dr. Sodhi agreed)**, then press the button again.
+A card at the top right says how it went:
+- `Done: all 6 points reached`, or
+- `Ended: 5 of 6 points reached`, then for each missed point **why** and **what to do next**.
 
-## 8. Stop (Browser)
+**Run again** (its name shows the lists it will run) starts the same lists again. **New run** goes back to the plan
+with your lists still there, to change them.
 
-Press the red **STOP** at the top right (it is on every screen), or **STOP every robot** in the status box. Every
-robot stops where it is. You should see `STOP sent: ...` under the buttons.
+## 10. Stop
 
-When a run ends, the robots are **sent to sleep right away** (the status box says so). To wake them for the next run
-you do nothing: the next run wakes them. To keep them awake instead: **Advanced**, untick **Robots sleep as soon as a
-run ends**.
+Click the red **STOP** (top right, always there) or **STOP every robot** in the bar. Each robot's pill turns green as
+it confirms; you should see `Stopped: every robot confirmed`. If a robot does not answer, the bar says so and why
+(asleep, off, or out of WiFi) and **STOP again** sends it again.
 
-## 9. Practice without robots (any computer)
-
-The same screen runs the simulator when no real camera answers (`PRACTICE` in the blue bar at the top). To practise
-on purpose, **Mac Terminal** (not the Pi window), in the repo folder:
+If the page itself does not answer, stop the robots from the Pi window:
 
 ```
-python3 tools/fleet/mission_control.py --sim-room school
+./run-fleet-pi.sh stopall
 ```
 
-then **Browser**: `http://127.0.0.1:8095`. `--sim-room home` and `--sim-room new` show the other places. Practice runs
-break things on purpose (roof tags turned, a dark patch, the camera's clock off, a robot restarting) so you can see
-the software cope.
+## 11. Practice without robots (any computer with the code)
 
-## Advanced (only if needed)
+```
+python3 tools/fleet/mission_control.py --dry --sim-room school
+```
 
-Closed by default, at the bottom of the Start screen. Nothing in it is needed to run.
-
-- **Typed values**: table length and width, roof tag height. These are first guesses only: the camera measures them,
-  and when the two disagree the camera wins and the difference is logged (`tagcal/disagreements.jsonl` on the Pi).
-  Saved on this Pi only.
-- **Firmware check**: `No check (old firmware allowed)` is the old `--min-firmware ""` override.
-- **Corner clicking**: automatic by default (only when no corner tile is seen).
-- **Line sensor marks with no drop**: logged only (Nick, 6 Nov). The e06 way is kept as a choice.
-- **Place**: `Always use school-conference` pins the site (the old `site` command); automatic otherwise.
-- **Show all the older screens**: brings back Connect ... Production.
+Then open `http://127.0.0.1:8095`. The top says `Practice (simulator)`; nothing real moves and nothing is asked.
 
 ## If something looks wrong
 
-| You see | Why | Do |
-|---|---|---|
-| Blue `PRACTICE` bar at the Pi's address | The Pi's camera recorder is not running | **Pi window:** `./run-fleet-pi.sh mc-stop`, then `./run-fleet-pi.sh mc` |
-| `Place: home` at school | No camera was found when Mission Control started | Plug the C920e in, then **Pi window:** `./run-fleet-pi.sh mc-stop`, then `./run-fleet-pi.sh mc` |
-| `No robot seen on the table yet` | The robots are off, or outside the camera's view | Switch them on; move them to the TV end |
-| A button is grey with a reason | That run cannot work here (the reason says why) | Read the reason; at home, Visit points and Experiment routes are grey (no points on the board) |
-| `A run is going: press Stop first` | Another run is still going | Press **STOP**, wait 10 s, press the button again |
+| What you see | What to do |
+|---|---|
+| A red band `Mission Control is not answering` | Pi window: `./run-fleet-pi.sh mc` |
+| `Not started, nothing moved: no such sticker on this site: P99` | Fix the typed order (stickers are P01 to P40) |
+| A red card about the Pi's card being nearly full | Pi window: `./run-fleet-pi.sh space --move` (finished runs go to the USB drive; nothing is deleted). From e24 this happens by itself at each start when the USB drive is plugged in |
+| A robot named in the order `was not found` | Switch that robot off and on, then Run again; meanwhile the other robot takes its points after its own |
+| `Unknown command 'mcstop'. Did you mean mc-stop?` | Type the suggested command |
+| The commands, in one screen | Pi window: `./run-fleet-pi.sh help` |

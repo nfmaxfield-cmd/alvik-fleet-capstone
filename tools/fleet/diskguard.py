@@ -56,7 +56,7 @@ FRAMES_GB_PER_H = 2.9   # measured, not chosen: 2026-10-27 21:34-22:03, both cam
                         # zipped to 1.42 GB in 29 min. A 4 h loop: ~12 GB of frames, ~24 GB with the upload's copy
 
 
-VERSION = "2026-11-10e14"   # e14 (school 18:07: a visit refused with the card at 0.52 GB while the USB drive had 22.4
+VERSION = "2026-11-24e24"   # e24 (school 23 Nov: the card ended two starts and cut a run with 16.7 GB free on the USB drive): Mission Control's own runs (logs/mission-control-<site>/runs/<run>) count as run folders and are moved (MIRLT_MOVE_NESTED=0: as before); auto_move: at every real start and after every real run, when the card has less than its floor plus a day's room (not only once it is under the floor); `space` reads the card's size where logs/ does not exist yet. Before: "2026-11-10e14"   # e14 (school 18:07: a visit refused with the card at 0.52 GB while the USB drive had 22.4
                           # GB free): finished run folders MOVED to the drive (never deleted), oldest first, with a
                           # link left where each was (move_old_runs; preflight does it by itself under the floor;
                           # `space --move`; MIRLT_MOVE_RUNS=0: as before). 2026-11-10a (e12, Nick 10 Nov): the card floor per site (card_stop_gb in the site file, school
@@ -145,8 +145,13 @@ def free_gb(path):
 
 
 def total_gb(path):
+    # (e24, the audit's B12: `space` said "7.8 GB free of 0 GB" where logs/ did not exist yet) the nearest existing
+    # parent, as free_gb
+    p = os.path.abspath(path)
+    while p and not os.path.exists(p) and os.path.dirname(p) != p:
+        p = os.path.dirname(p)
     try:
-        return shutil.disk_usage(path).total / GB
+        return shutil.disk_usage(p).total / GB
     except OSError:
         return None
 
@@ -342,8 +347,24 @@ def run_folders(logs):
         names = os.listdir(logs)
     except OSError:
         return out
+    paths = []
     for n in names:
         p = os.path.join(logs, n)
+        if os.path.islink(p) or not os.path.isdir(p):
+            continue
+        rd = os.path.join(p, "runs")
+        if NESTED_RUNS and os.path.isdir(rd) and not os.path.islink(rd):
+            # (e24, school 23 Nov: the card fell to its floor with 16.7 GB free on the USB drive and nothing was moved)
+            # Mission Control keeps its runs in logs/mission-control-<site>/runs/<run>: each of THOSE is a run folder.
+            # Before, the whole Mission Control folder counted as one run that was always "just written", so it never
+            # moved. Its other files (settings, presets, the map) stay on the card
+            try:
+                paths += [os.path.join(rd, m) for m in os.listdir(rd)]
+            except OSError:
+                pass
+            continue
+        paths.append(p)
+    for p in paths:
         if os.path.islink(p) or not os.path.isdir(p):
             continue
         newest = os.path.getmtime(p)
@@ -355,6 +376,30 @@ def run_folders(logs):
                     pass
         out.append((newest, folder_bytes(p), p))
     return sorted(out)
+
+
+NESTED_RUNS = os.environ.get("MIRLT_MOVE_NESTED", "1") != "0"   # (e24) 0: only folders directly under logs/, as before
+
+
+def auto_move(out=print, keep=(), logs=None):
+    """(e24, Nick: "make finished runs move to USB automatically when space is low, safely") Called at every real
+    start and after every real run: when the card has less room than its floor plus room for another day like the last
+    (margin_gb, derived) and a USB drive is plugged in, finished run folders are moved to the drive, oldest first
+    (move_old_runs: copied, checked file by file and byte by byte, only then removed, a link left where each was;
+    never a folder written in the last 30 min, never the run in `keep`). MIRLT_MOVE_RUNS=floor: only once the card is
+    UNDER its floor (e14's way, at `visit` starts only); =0: never. Returns what was moved."""
+    mode = os.environ.get("MIRLT_MOVE_RUNS", "1")
+    if mode in ("0", "floor"):
+        return []
+    logs = logs or os.path.join(REPO, "logs")
+    try:
+        d = drive_mount()
+        if d is None:
+            return []
+        return move_old_runs(logs, d, CARD_STOP_GB, out=out, keep=keep, force=True)
+    except Exception as e:  # noqa: BLE001  (moving never stops a start or the end of a run)
+        out("(moving finished run folders to the USB drive failed: %s)" % e)
+        return []
 
 
 def margin_gb(rows, now):

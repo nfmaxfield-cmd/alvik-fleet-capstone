@@ -161,6 +161,31 @@ def settings(over=None):
 # Grid and routes
 # ----------------------------------------------------------------------------
 
+try:
+    import safety_group as _SGp
+    PLAN_FAST = _SGp.flag("MIRLT_PLAN_FAST")
+except Exception:  # noqa: BLE001
+    PLAN_FAST = True
+import collections as _collections
+_GRID_CACHE = _collections.OrderedDict()
+GRID_ROUTES_N = 300  # remembered route tables per map before they are dropped and built again. No DOE: a memory size
+GRID_CACHE_N = 8      # how many maps' grids are remembered (a run's map changes only when an obstacle or a held robot's
+#                       outline comes or goes). No DOE: a memory size (about 0.5 MB each at the school's table)
+
+
+def _grid_key(world, body, s):
+    """What a base grid depends on, as one hashable key: the floor, its sides, every static shape, the body's radii,
+    the cell and the margin. None when it cannot be made (the grid is then worked out as before)."""
+    try:
+        return (tuple(world.box), repr(world.sides),
+                tuple((nm, np.asarray(p, float).round(6).tobytes()) for nm, p in world.polys),
+                tuple((nm, np.asarray(c_, float).round(6).tobytes(), round(float(r), 6)) for nm, c_, r in world.circles),
+                round(float(body.r_turn), 6), round(float(body.r_side), 6), float(s.cell_cm),
+                float(s.safety_margin_cm))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class Grid:
     """Clearance grid for one World and the routes over it."""
 
@@ -194,6 +219,19 @@ class Grid:
                     d = np.hypot(xs[i0:i1][None, :] - cx, ys[j0:j1][:, None] - cy) - rr
                     np.minimum(cl2[j0:j1, i0:i1], d, out=cl2[j0:j1, i0:i1])
         else:
+            # (e24, planning speed) the same map gives the same grid: its clearance, free cells, graph and the routes
+            # worked out on it are remembered across plans (a re-plan on an unchanged map started from nothing every
+            # time: about a quarter of a second here, seconds on the Pi). MIRLT_PLAN_FAST=0: worked out every time
+            ck = _grid_key(world, body, s) if PLAN_FAST else None
+            hit = _GRID_CACHE.get(ck) if ck is not None else None
+            if hit is not None:
+                self.clear, self.free, self._edges, self.graph, self._dij = hit
+                if len(self._dij) > GRID_ROUTES_N:
+                    self._dij.clear()               # (a bound on the remembered routes: about 0.2 MB each)
+                self.turn_thr = body.r_turn + s.safety_margin_cm
+                self.los_thr = body.r_side + s.safety_margin_cm + 0.96 * c
+                _GRID_CACHE.move_to_end(ck)
+                return
             self.clear = world.clearance(self.centres)              # (ny*nx,)
         self.turn_thr = body.r_turn + s.safety_margin_cm
         self.free = self.clear >= self.turn_thr
@@ -209,6 +247,10 @@ class Grid:
         else:
             self._graph()
         self._dij = {}
+        if base is None and PLAN_FAST and ck is not None:
+            _GRID_CACHE[ck] = (self.clear, self.free, self._edges, self.graph, self._dij)
+            while len(_GRID_CACHE) > GRID_CACHE_N:
+                _GRID_CACHE.popitem(last=False)
         # line-of-sight test threshold: half width + margin, plus the worst
         # error of reading clearance from the nearest cell centre (0.71 cell)
         # and of sampling the line every half cell (0.25 cell)
@@ -1063,7 +1105,7 @@ _OVERLAP_CACHE = {}
 
 def sweeps_meet(A, B, body, thr):
     """Do two swept areas come within thr of each other anywhere?"""
-    if np.hypot(*(A.c - B.c)) > A.r + B.r + thr:
+    if math.hypot(A.c[0] - B.c[0], A.c[1] - B.c[1]) > A.r + B.r + thr:      # (e24: math.hypot, the same number, quicker)
         return False
     key = (A.key, B.key, thr) if A.key is not None and B.key is not None else None
     if key is not None and key in _OVERLAP_CACHE:
@@ -1300,7 +1342,15 @@ class Planner:
         if job.park:
             mine.append(np.array(job.park_pose[:2], float))
 
+        mine_xy = np.array([[float(q[0]), float(q[1])] for q in mine]) if PLAN_FAST else None
+
         def radius(sp):
+            if mine_xy is not None and len(sp) == 2:
+                # (e24) every one of this robot's points in one step: the same distances, the same smallest one
+                dd = mine_xy - np.asarray(sp, float)[None, :]
+                room = float(np.sqrt(np.sum(dd * dd, axis=1)).min()) - self.grid.turn_thr - 0.5
+                r = min(R, room)
+                return r if r >= body.r_in else None
             room = min(float(np.linalg.norm(sp - q)) for q in mine) - self.grid.turn_thr - 0.5
             r = min(R, room)
             return r if r >= body.r_in else None
@@ -2343,6 +2393,7 @@ def obstacle_replan(dec):
     names = list(plan["robots"])
     k_ahead = int(s.get("plan_ahead_points", 0) or 0)
     held_back = {}                     # (e23) robot -> its items left for a later re-plan
+    returns_ = []                      # (e24, N7) robots sent back to the point their stop is due at
     # 3. new jobs: committed steps, then the rest of the tasks from the hold pose
     jobs = []
     for n in names:
@@ -2409,6 +2460,23 @@ def obstacle_replan(dec):
         # (Monday sweep 2026-10-27: seq_visits[-1:] kept only the last visit and dropped a warm-up robot's side feels)
         task_i = max(task_i, off)
         remaining = seq_visits[task_i - off:]
+        # (e24, school 23 Nov N7: "point P28" judged 198 cm from P28; once in the simulator, a 0.1 s "at point P27"
+        # pause 100 cm from P27) what is left starts with a point's STOP ("at point X") while the robot is no longer
+        # at X (it was turned back, re-seeded or re-checked after it arrived): the drive to X is put back before the
+        # stop. Before: the stop was planned where the robot stood, refused as not reached, and X never visited.
+        # dwell_at_cm (run_plan: the run's own reach tolerance) 0: as before
+        at_cm = float(s.get("dwell_at_cm", 0.0) or 0.0)
+        k_ = task_i - off
+        if at_cm > 0 and remaining and isinstance(remaining[0], dict) and "goto" not in remaining[0] and \
+                str(remaining[0].get("label", "")).startswith("at point ") and k_ >= 1:
+            prev_ = seq_visits[k_ - 1]
+            if isinstance(prev_, dict) and "goto" in prev_ and \
+                    str(prev_.get("label", "")) == str(remaining[0]["label"])[3:] and \
+                    math.hypot(hold[0] - prev_["goto"][0], hold[1] - prev_["goto"][1]) > at_cm:
+                remaining = [copy.deepcopy(prev_)] + list(remaining)
+                task_i -= 1
+                returns_.append({"robot": n, "point": str(prev_.get("label")), "from_cm": round(
+                    math.hypot(hold[0] - prev_["goto"][0], hold[1] - prev_["goto"][1]), 1)})
         if nxt["type"] == "arc" and remaining and isinstance(remaining[0], dict) and "arc" in remaining[0]:
             # part of the circle is done: the rest of it, from where the next arc step starts (not the whole circle again)
             left = [stp for stp in later if stp["type"] == "arc" and stp.get("task") == nxt.get("task")]
@@ -2433,6 +2501,8 @@ def obstacle_replan(dec):
                         t_limit_s=0.45 * s.replan_budget_s, allow_strand=True,
                         stop_at_first=bool(s.replan_first_safe), prefer_order=plan.get("priority_order"))
     newplan["mission_t0_s"] = round(dec.get("clock0", 0.0), 2)
+    if returns_:
+        newplan["returns"] = returns_
     for n, items in held_back.items():
         if n in newplan["robots"]:
             newplan["robots"][n]["later"] = copy.deepcopy(items)

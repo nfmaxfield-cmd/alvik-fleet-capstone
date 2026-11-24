@@ -42,11 +42,16 @@ Changelog
                  on the veer stage's early turn-back when the camera loses it.
   2026-11-19e23c the audit of e23: MIRLT_STOP_NO_ANSWER, MIRLT_OLD_FIX_JUMPS, MIRLT_REACH_TOL, MIRLT_WAKE_PARTIAL;
                  MIRLT_WAKE_WAIT's and MIRLT_STOP_UNNAMED's words corrected to what the code does.
+  2026-11-24e24  the school runs of 23 Nov and the usability audit (e24): MIRLT_TURN_HEADING (heading checked by the
+                 camera after every turn), MIRLT_SIGINT_RESTORE, MIRLT_WRAPUP_GUARD, MIRLT_VEER_RULE and
+                 MIRLT_BLIND_STANDING (picture stalls: slow, or stay put), MIRLT_PLAN_FAST, MIRLT_POINT_RETRY,
+                 MIRLT_HELD_POINTS, MIRLT_REJOIN_CAP, MIRLT_REJOIN_STRANDED, MIRLT_BATTERY_LOW, MIRLT_VISIT_TIME_LIMIT,
+                 MIRLT_CALIBRATED_CORR, MIRLT_NAMING_SETTLE, MIRLT_DWELL_PLACE.
 """
 import os
 import sys
 
-VERSION = "safety-group-2026-11-19e23c"   # e23c: four switches from the audit of e23, two descriptions corrected. Before: "safety-group-2026-11-19e23b"   # e23b: MIRLT_VEER_AT_POINT. Before: "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
+VERSION = "safety-group-2026-11-24e24"   # e24: fifteen switches for the 23 Nov school runs and the usability audit (see the changelog). Before: "safety-group-2026-11-19e23c"   # e23c: four switches from the audit of e23, two descriptions corrected. Before: "safety-group-2026-11-19e23b"   # e23b: MIRLT_VEER_AT_POINT. Before: "safety-group-2026-11-19e23"   # e23: eleven switches for the school fixes of 19 Nov (see the changelog). Before: "safety-group-2026-11-16ko"   # 2026-11-16ko: MIRLT_KEEPOUT_ROOM (the room the paths keep from a site's keep-outs). Before: "safety-group-2026-11-13e22c"   # e22c: MIRLT_BOX_ASK (off by default). Before: "safety-group-2026-11-13e22b"   # e22b: MIRLT_RESCUE_STILL. Before: "safety-group-2026-11-13e22"   # e22: MIRLT_SELF_RESCUE, MIRLT_ID_GUARD, MIRLT_FW_ESCAPE, MIRLT_PLAN_BUDGET (see the changelog). Before: "safety-group-2026-11-13e21b"   # e21b: the camera verdict whole by default (see the changelog). Before: "safety-group-2026-11-12e21"   # e21: one error shape and Nick's four stages (see the changelog). Before: "safety-group-2026-11-12e20"   # e20: MIRLT_CAMERA_TRUST, MIRLT_ODO_LEARN_TRUST, MIRLT_DETECTOR_ROUTE, MIRLT_MOTION_HEADING, MIRLT_PAIR_STAND_PART. Before: "safety-group-2026-11-12e19"   # e19: the Fable audit's switches (see the changelog). Before: "safety-group-2026-11-12e18b"   # e18b: five switches from the replay (ELIM_PAIR_GUARD, FAR_NAMED_CORRECT, RESEED_HEADING_KEEP, TRUST_FLEET, CURVE_SCALE_SAVE)
 
 # Each row: env name, default (automatic), the old way's value, the areas it touches, what it does (plain words),
 # the build that added it. "areas": F free roam, M missions (run_plan, School Visit tours), C calibration, T tracking
@@ -408,7 +413,7 @@ SWITCHES = [
      "needed a turn-back). ahead: e21's early turn-back when its doubt would reach an edge within the next 27.5 cm", "e24"),
     ("MIRLT_BLIND_STANDING", "stay", "act", "M",
      "A STANDING robot (anywhere: waiting for a plan, after a turn, just rejoined, in its dwell) stays put when "
-     "the camera loses it: no turn-back and no hold while it has not moved (Nick 24 Nov; 13 of the 16 real turn- "
+     "the camera loses it: no turn-back and no hold while it has not moved (Nick 24 Nov; 13 of the 16 real turn-"
      "backs on 23 Nov were standing robots). act: e23, only a robot in its dwell at a point stays", "e24"),
     ("MIRLT_PLAN_FAST", "1", "0", "M F",
      "The planner's geometry worked out with every polygon side in one step and its repeated look-ups remembered "
@@ -448,6 +453,10 @@ SWITCHES = [
      "(late pictures are in), looks for its roof tag only then, and only where its motion was found. 0: as before "
      "e24 (on 23 Nov late pictures of one robot's stroke gave its tag to the other robot and the run would not "
      "start)", "e24"),
+    ("MIRLT_DWELL_PLACE", "point", "where", "M",
+     "A re-plan that begins with a point's stop while the robot is no longer at that point (turned back or re-"
+     "seeded after it arrived) plans the drive to the point again first. where: the stop is made where the robot "
+     "stands, refused as not reached, and the point never visited (23 Nov run 7: P28 judged 198 cm away)", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

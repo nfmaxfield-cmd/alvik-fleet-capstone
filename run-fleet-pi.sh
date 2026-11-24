@@ -647,7 +647,8 @@ case "$WHAT" in
     shift; VX=""; VDRY=0
     for x in "$@"; do case "$x" in keep) VX="$VX --visit-keep-unreadable" ;; dry) VDRY=1 ;; esac; done
     if [ "$VDRY" = 1 ]; then
-      python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --sim-robots 1 --motion stopturn --visit-order "$ORD" $VX --practice-real --feel-table skip
+      VN="$(python3 -c "import sys; print(max(1, sys.argv[1].count(':')))" "$ORD")"     # (e24) a list per robot: as many practice robots as lists
+      python3 tools/fleet/mission_run.py --tracking tags --robots auto --split auto --sim-robots "$VN" --motion stopturn --visit-order "$ORD" $VX --practice-real --feel-table skip
     else
       python3 tools/fleet/diskguard.py preflight || exit 1
       start_recorder

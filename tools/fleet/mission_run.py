@@ -1625,6 +1625,10 @@ def run(args):
     fake = None
     if args.dry and args.sim_free:
         fake = dict((k, float(v)) for k, v in (kv.split("=") for kv in args.sim_free.split(",")))
+    if not args.dry:
+        # (e24) low on the card and a USB drive plugged in: finished run folders are moved there first (safely: copied,
+        # checked, then removed, a link left), so a start is not refused for a full card while the drive has room
+        DG.auto_move(out=say, keep=[out])
     guard = DG.Guard(card=out, frames_dir=frames_dir, fake=fake)
     say(guard.words(frames_on=not args.no_frames))
     st0 = guard.state()
@@ -2216,6 +2220,8 @@ def run(args):
             json.dump(summ, f, indent=1, default=str)
     except Exception as e:     # noqa: BLE001
         say("(pose timeline / refit not made: %s)" % e)
+    if not args.dry:
+        DG.auto_move(out=say, keep=[out])        # (e24) room made for the next start now, not at the next start
     if not args.dry and args.site_ and getattr(args, "tracking_", "") == "tags":
         # (e24, Nick 24 Nov D5) the capture rate follows the Pi's measured load: this run's own numbers are noted
         try:
