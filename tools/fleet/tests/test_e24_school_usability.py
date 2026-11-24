@@ -229,3 +229,192 @@ def test_the_quick_polygon_distance_gives_the_same_numbers_as_the_old_one():
         p = rng.uniform(-20, 120, (int(rng.integers(1, 30)), 2))
         assert np.array_equal(G._points_to_polygon_loop(p, poly), G._points_to_polygon_fast(p, poly))
     assert G.points_to_polygon is G._points_to_polygon_fast
+
+
+# ============================================================ D3 / D4 / Q-b / Q-c / N4. the points ledger
+class _Args:
+    on_problem = "keep_going"
+    visit_lists = "per_robot"
+    visit_missing = ""
+    lost_robot_points = "reassign"
+    dedupe_points = "on"
+    no_rejoin = False
+    battery_floor = 25
+    retry_s = 3.0
+
+
+def _item(p, xy):
+    return [{"goto": list(xy), "label": "point " + p}, {"wait_s": 5.0, "label": "at point " + p}]
+
+
+def _ledger_coord(lists, spots=None, missing=""):
+    """Two robots with a list each; every step of every list still unsent. lists = {"Alpha": ["P01", "P02"], ...}."""
+    spots = spots or {"P%02d" % k: [20.0 + 9.0 * k, 40.0 + (k % 5) * 20.0] for k in range(1, 41)}
+    c = RP.Coordinator.__new__(RP.Coordinator)
+    c.logged, c.said, c.sent = [], [], []
+    c.log = lambda ev, **k: c.logged.append((ev, k))
+    c.say = c.said.append
+    c.send = lambda n, text: c.sent.append((n, text))
+    c.source = _Src()
+    c.args = _Args()
+    c.args.visit_missing = missing
+    c.m = {"floor": dict(x_min=0.0, y_min=0.0, x_max=396.2, y_max=167.6), "obstacles": [], "spots": spots}
+    c.plan_no, c.t_run, c.plan_start = 0, RP.now() - 30.0, RP.now() - 30.0
+    c.planning, c.pending_replan, c.deferred = None, None, []
+    c.abort = None
+    c.names, c.bots, robots = [], {}, {}
+    for n, labs in lists.items():
+        vo, steps = [], []
+        for k, p in enumerate(labs):
+            vo += _item(p, spots[p])
+            steps += [{"type": "drive", "label": "point " + p, "task": 2 * k, "from": [0, 0, 0], "to": spots[p] + [0]},
+                      {"type": "wait", "label": "at point " + p, "task": 2 * k + 1, "phase": "dwell"}]
+        vo.append({"goto": [100.0, 80.0], "label": "home"})
+        steps.append({"type": "drive", "label": "home", "task": 2 * len(labs), "from": [0, 0, 0], "to": [100, 80, 0]})
+        robots[n] = {"start": [100.0, 80.0, 90.0], "visit_order": vo, "steps": steps, "task_offset": 0, "pending": None}
+        b = RP.Bot(n)
+        b.out = None
+        b.pose = (100.0, 80.0, 90.0)
+        b.stat = [dict(status="unsent", t_sent=0.0, text="", info="", sends=0) for _ in steps]
+        c.bots[n] = b
+        c.names.append(n)
+    c.plan = {"robots": robots, "settings": {}, "summary": {"makespan_s": 100.0}}
+    c.steps = lambda n: c.plan["robots"][n]["steps"]
+    RP.Coordinator.ledger_init(c)
+    return c
+
+
+def _done(c, n, upto_label=None, credit=()):
+    """Mark robot n's steps done up to and including the step labelled upto_label (all when None); credit the points."""
+    for st, stp in zip(c.bots[n].stat, c.steps(n)):
+        st["status"] = "done"
+        if upto_label is not None and stp["label"] == upto_label:
+            break
+    for p in credit:
+        c.__dict__.setdefault("points", []).append({"robot": n, "point": "point " + p})
+        c.__dict__.setdefault("done_labels", set()).add("at point " + p)
+
+
+def _watch(c, times=3):
+    for _ in range(times):
+        c._ledger_t = 0.0
+        RP.Coordinator.ledger_watch(c)
+
+
+def test_a_point_that_leaves_every_list_gets_a_line_and_is_tried_once_more_at_the_end_of_the_list():
+    """School 23 Nov: 13 of the 15 refused points were never credited; in run 1 a re-plan cut in as Alpha arrived at
+    P13 and the point vanished with no line (N4)."""
+    assert RP.POINT_RETRY
+    c = _ledger_coord({"Alpha": ["P01", "P13", "P02"], "Bravo": ["P21"]})
+    assert RP.Coordinator.ledger_counts(c) == (4, 0)
+    # a new plan left P13 out of Alpha's list (nothing written), while Alpha is still on its list
+    e = c.plan["robots"]["Alpha"]
+    e["visit_order"] = [v for v in e["visit_order"] if "P13" not in v["label"]]
+    keep = [k for k, stp in enumerate(e["steps"]) if "P13" not in stp["label"]]
+    e["steps"] = [e["steps"][k] for k in keep]
+    c.bots["Alpha"].stat = [c.bots["Alpha"].stat[k] for k in keep]
+    _done(c, "Alpha", "at point P01", credit=["P01"])
+    _watch(c)
+    drop = [k for ev, k in c.logged if ev == "point_dropped"]
+    assert len(drop) == 1 and drop[0]["point"] == "point P13" and drop[0]["list_of"] == "Alpha"
+    assert any("P13" in w and "in no robot's list" in w and "tried once more" in w for w in c.said)
+    assert RP.Coordinator.ledger_pending(c) is True                      # the run is not over while it waits
+    assert c.pending_replan is None and not [x for ev, x in c.logged if ev == "points_retried"]   # not yet: Alpha has P02
+    # Alpha reaches the end of its list (only its trip home left): P13 goes back in, once
+    _done(c, "Alpha", "at point P02", credit=["P02"])
+    _watch(c)
+    assert [k["points"] for ev, k in c.logged if ev == "points_retried"] == [["point P13"]]
+    assert "point P13" in RP.Coordinator.listed_labels(c, "Alpha") and c.pending_replan is not None
+    assert c.ledger["point P13"]["tries"] == 1
+    # it is missed again (refused): reported, not tried a third time
+    c.pending_replan = None
+    e = c.plan["robots"]["Alpha"]
+    e["visit_order"] = [v for v in e["visit_order"] if "P13" not in v["label"]]
+    if e.get("pending"):
+        e["pending"] = None
+    c.not_reached = [{"robot": "Alpha", "point": "point P13", "miss_cm": 19.1, "reach_tol_cm": 6.2, "t_run": 80.0}]
+    _watch(c)
+    assert len([1 for ev, k in c.logged if ev == "points_retried"]) == 1
+    assert RP.Coordinator.ledger_pending(c) is False
+    vr = RP.Coordinator.ledger_summary(c, "done")
+    assert vr["headline"] == "Ended: 2 of 4 points reached"
+    miss = vr["robots"]["Alpha"]["missed"]
+    assert [q["point"] for q in miss] == ["P13"] and miss[0]["tried_again"] and "19.1 cm" in miss[0]["why"]
+    assert "calibration" in miss[0]["next"]
+
+
+def test_done_is_said_only_when_every_point_was_reached():
+    c = _ledger_coord({"Alpha": ["P01", "P02"], "Bravo": ["P21"]})
+    _done(c, "Alpha", credit=["P01", "P02"])
+    _done(c, "Bravo", credit=["P21"])
+    vr = RP.Coordinator.ledger_summary(c, "done")
+    assert vr["headline"] == "Done: all 3 points reached" and not vr["robots"]["Alpha"]["missed"]
+    assert vr["robots"]["Alpha"]["reached_points"] == ["P01", "P02"]
+    # stopped by a person half way: the count, and the reason is the stop
+    c = _ledger_coord({"Alpha": ["P01", "P02"], "Bravo": ["P21"]})
+    _done(c, "Alpha", "at point P01", credit=["P01"])
+    vr = RP.Coordinator.ledger_summary(c, "interrupted")
+    assert vr["headline"] == "Ended: 1 of 3 points reached"
+    assert all("stopped before" in q["why"] for o in vr["robots"].values() for q in o["missed"])
+
+
+def test_with_a_list_per_robot_a_held_robots_points_wait_for_it():
+    """The audit's B4 (run 20261124-094026): Alpha held, its P08 went to Bravo, Bravo refused it, Alpha rejoined 80 s
+    later and went home without it."""
+    assert RP.HELD_POINTS_WAIT
+    c = _ledger_coord({"Alpha": ["P01", "P02", "P08"], "Bravo": ["P35", "P36"]})
+    c.handle_obstacle = lambda *a, **k: None
+    c.out_obstacle = lambda b: {"id": "out-" + b.name, "shape": "polygon", "points": [[0, 0], [1, 0], [1, 1]]}
+    c.control = lambda b, text, ok=None: None
+    _done(c, "Alpha", "at point P01", credit=["P01"])
+    a = c.bots["Alpha"]
+    RP.Coordinator.retire(c, a, "camera and its own pose disagreed 3 times in a minute", kind="restarted")
+    assert not [1 for ev, k in c.logged if ev == "points_reassigned"]
+    assert [k["points"] for ev, k in c.logged if ev == "points_wait"] == [["point P02", "point P08"]]
+    assert "point P08" not in RP.Coordinator.listed_labels(c, "Bravo")
+    assert RP.Coordinator.ledger_open(c)["point P08"] == "held"
+    # Bravo finishes its own list and Alpha is still held: now they go to Bravo
+    _done(c, "Bravo", "at point P36", credit=["P35", "P36"])
+    _watch(c)
+    assert [sorted(k["to"]["Bravo"]) for ev, k in c.logged if ev == "points_reassigned"] == [["point P02", "point P08"]]
+    assert a.handed_over is True
+
+
+def test_a_robot_named_in_the_order_and_not_found_has_its_points_taken_by_one_that_finished():
+    c = _ledger_coord({"Alpha": ["P01"]}, missing="Bravo:P35,P36")
+    assert RP.Coordinator.ledger_counts(c) == (3, 0) and c.ledger["point P35"]["absent"]
+    _done(c, "Alpha", "at point P01", credit=["P01"])
+    _watch(c)
+    assert [k["points"] for ev, k in c.logged if ev == "points_retried"] == [["point P35", "point P36"]]
+    assert {"point P35", "point P36"} <= RP.Coordinator.listed_labels(c, "Alpha")
+    vr = RP.Coordinator.ledger_summary(c, "interrupted")
+    assert vr["robots"]["Bravo"]["asked"] == 2 and vr["headline"] == "Ended: 1 of 3 points reached"
+
+
+def test_a_robot_under_the_battery_floor_finishes_its_point_goes_home_and_hands_over_the_rest():
+    """School 23 Nov, run 11: Bravo started at 19 % (floor 25 %) and ran its list."""
+    assert RP.BATTERY_LOW_HOME
+    c = _ledger_coord({"Alpha": ["P01", "P02"], "Bravo": ["P35", "P36", "P34"]})
+    b = c.bots["Bravo"]
+    _done(c, "Bravo", "point P35")                 # it has arrived at P35 and is about to dwell there
+    b.battery = 19
+    assert RP.Coordinator.battery_home(c, b, 25) is True
+    labs = [v["label"] for v in c.plan["robots"]["Bravo"]["visit_order"]]
+    assert labs == ["point P35", "at point P35", "home"]                 # this point, then home
+    assert {"point P36", "point P34"} <= RP.Coordinator.listed_labels(c, "Alpha")
+    assert c.pending_replan is not None and any("home spot" in w and "19 %" in w for w in c.said)
+    assert RP.Coordinator.battery_home(c, b, 25) is False                # once
+    # the only robot running: it finishes the run, as before
+    c = _ledger_coord({"Alpha": ["P01", "P02"]})
+    c.bots["Alpha"].battery = 19
+    assert RP.Coordinator.battery_home(c, c.bots["Alpha"], 25) is False
+
+
+def test_a_held_robot_is_never_given_up_on_and_a_rejoined_robot_without_a_route_is_not_held_again():
+    assert RP.REJOIN_NO_CAP and RP.REJOIN_STRANDED_WAIT
+    c = _ledger_coord({"Alpha": ["P01"], "Bravo": ["P21"]})
+    b = c.bots["Alpha"]
+    b.out, b.out_kind, b.out_entry, b.rejoins_n = "held", "restarted", {"steps": []}, 25
+    assert RP.Coordinator.rejoinable(c, b)              # 23 Nov run 5: out for good after its 10th rejoin
+    src = open(os.path.join(FLEET, "run_plan.py")).read()
+    assert "rejoin_waits_for_route" in src

@@ -414,6 +414,27 @@ SWITCHES = [
      "The planner's geometry worked out with every polygon side in one step and its repeated look-ups remembered "
      "(the same numbers, several times quicker: on 23 Nov 113 of 114 re-plans at school were over their 2 s budget "
      "and a crossed-lists first plan took 79 s). 0: the arithmetic as before e24", "e24"),
+    ("MIRLT_POINT_RETRY", "retry", "off", "M",
+     "Visit points: a point that was missed (a stop not at the point, no room to turn, refused, or dropped by a "
+     "new plan) gets a line with its reason and is tried once more when its robot reaches the end of its list, by "
+     "another robot when its own is held or was never found; then it is reported with what to do next. off: a "
+     "missed point is not tried again, as before e24", "e24"),
+    ("MIRLT_HELD_POINTS", "wait", "reassign", "M",
+     "With a list per robot, a held robot keeps its points while it is expected back and takes them up on "
+     "rejoining; another robot takes them only after finishing its own list, if the owner is still held then. "
+     "reassign: handed to the other robots the moment it is held (before e24; the points then lay inside the held "
+     "robot own outline and were dropped as no room to turn)", "e24"),
+    ("MIRLT_REJOIN_CAP", "none", "ten", "M",
+     "Never give up on a robot: a held robot may rejoin as often as it is found again. ten: after its 10th rejoin "
+     "it is out for good (23 Nov run 5 ended every robot is out this way after 470 s)", "e24"),
+    ("MIRLT_REJOIN_STRANDED", "wait", "hold", "M",
+     "A robot that rejoined and has no route in the next plan waits where it stands and the route is tried again. "
+     "hold: it is made a held obstacle again and re-checked later (no plan fits it back in: 18 times on 23 Nov, "
+     "50-100 s each)", "e24"),
+    ("MIRLT_BATTERY_LOW", "home", "finish", "M",
+     "A robot whose battery falls under the floor finishes the point it is on, then drives to its home spot; the "
+     "points it had left go to the other robots. With one robot running, or finish: it finishes the run (as before "
+     "e24) and says charge it", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

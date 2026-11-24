@@ -68,6 +68,11 @@ EDGE_SLOW_END = SG.flag("MIRLT_EDGE_SLOW_END")                 # the last part o
 VEER_AT_POINT_STAND = SG.value("MIRLT_VEER_AT_POINT") != "recover"   # (e23) no early turn-back for a robot standing in its dwell
 VEER_REACH = SG.value("MIRLT_VEER_RULE") != "ahead"            # (e24, Nick D1) a driving robot turns back only when its doubt could reach the edge; slow till then
 BLIND_STANDING_STAY = SG.value("MIRLT_BLIND_STANDING") != "act"   # (e24, Nick D2) a standing robot stays put on a picture stall, anywhere
+POINT_RETRY = SG.value("MIRLT_POINT_RETRY") != "off"           # (e24, Nick D3) a missed point is tried once more at the end of the list
+HELD_POINTS_WAIT = SG.value("MIRLT_HELD_POINTS") != "reassign"  # (e24, Q-c) with a list per robot, a held robot's points wait for it
+REJOIN_NO_CAP = SG.value("MIRLT_REJOIN_CAP") != "ten"          # (e24) never give up on a robot: no cap on its rejoins
+REJOIN_STRANDED_WAIT = SG.value("MIRLT_REJOIN_STRANDED") != "hold"   # (e24) a rejoined robot with no route yet waits for one
+BATTERY_LOW_HOME = SG.value("MIRLT_BATTERY_LOW") != "finish"   # (e24, Q-b) under the floor: this point, then home; the rest to the others
 TURN_HEADING_CHECK = SG.value("MIRLT_TURN_HEADING") != "off"     # (e24, N1) the camera's heading against its own after each turn
 PLAN_AHEAD_NEAR = SG.value("MIRLT_PLAN_AHEAD") != "all"        # fixed-order lists planned a few points ahead
 CREEP_MAX_CM = 8.0       # (e18) as freeroam_core.CREEP_MAX_CM (CHOSEN there; DOE noted there)
@@ -1740,6 +1745,16 @@ class Coordinator:
         rj = getattr(self, "rejoin_pending", None)
         if rj and not improving and now() > rj[1]:
             self.rejoin_pending = rj = None
+        if rj and not improving and newplan.get("stranded") and REJOIN_STRANDED_WAIT:
+            # (e24, school 23 Nov runs 5, 7, 10: "no plan fits it back in" 18 times; each made the robot a held
+            # obstacle again and cost a 50-100 s re-check) a rejoined robot the new plan has no route for yet is NOT
+            # held again: it stays in the run, standing where it is, as any robot waiting for a route does, and the
+            # route is tried again (the retry below). MIRLT_REJOIN_STRANDED=hold: as before
+            self.rejoin_pending = None
+            self.log("rejoin_waits_for_route", robot=rj[0], stranded=newplan["stranded"])
+            self.say("%s has no route in the new plan yet (%s without a route): it waits where it is and the route "
+                     "is tried again; it is not held again" % (rj[0], ", ".join(newplan["stranded"])))
+            rj = None
         if rj and not improving and newplan.get("stranded"):
             # within REJOIN_TRIAL_S of a rejoin, robots left without a route undo it (dry run 70 x 130: the rejoin's
             # own plan was fine, the next re-plan, after a false stop, left both robots without a route for good)
@@ -2148,7 +2163,19 @@ class Coordinator:
             return
         self.plan = self.without(self.plan, [b.name])
         if reassign and self.keep_going() and self.t_run_started():
-            self.reassign_points(b, why)
+            if HELD_POINTS_WAIT and self.per_robot_lists() and self.rejoinable(b):
+                # (e24, Nick's default Q-c; the audit's B4: Alpha's P08 went to Bravo, which refused it, and Alpha came
+                # back 80 s later and went home without it) with a list per robot, a held robot's points WAIT for it
+                # while it is expected back; it takes them up on rejoining. Another robot takes them only after
+                # finishing its own list, if it is still held then (ledger_watch)
+                left = [g[0]["label"] for g in self.remaining_points(b.out_entry, b.out_stat)]
+                self.log("points_wait", robot=b.name, why=why, points=left)
+                if left:
+                    self.say("%s is held: its own points (%s) wait for it; another robot takes them only after "
+                             "finishing its own list, if %s is still held then"
+                             % (b.name, ", ".join(x.replace("point ", "") for x in left), b.name))
+            else:
+                self.reassign_points(b, why)
         self.handle_obstacle(ob)
 
     # -- unconfirmed sensor obstacles (Nick, 2026-10-29 16:2x; front_stop.py) -------------------------------------
@@ -2386,7 +2413,8 @@ class Coordinator:
 
     def rejoinable(self, b):
         return (self.rejoin_on() and getattr(b, "out_kind", None) in ("silent", "restarted") and
-                getattr(b, "rejoins_n", 0) < self.REJOIN_MAX and not getattr(b, "rejoin_failed", None) and
+                (REJOIN_NO_CAP or getattr(b, "rejoins_n", 0) < self.REJOIN_MAX) and
+                not getattr(b, "rejoin_failed", None) and
                 getattr(b, "out_entry", None) is not None)
 
     def retry_later(self, b, why):
@@ -3149,6 +3177,8 @@ class Coordinator:
             b = self.bots[n]
             self.send(n, "status")
             if b.battery is not None and floor and b.battery < floor and not getattr(b, "low_said", False):
+                if BATTERY_LOW_HOME and self.battery_home(b, floor):
+                    continue
                 b.low_said = True
                 self.say("%s's battery is at %d %%, under the %s floor: it finishes this run; charge it before the "
                          "next" % (n, b.battery, floor_words(self.args)))
@@ -5422,6 +5452,352 @@ class Coordinator:
         self.log("blind_end", **rec)
         self.__dict__.setdefault("blinds", []).append(rec)
 
+    # -- (e24, Nick 24 Nov D3 / D4, Q-b, Q-c; school 23 Nov N4) the points ledger ---------------------------------------
+    # Every point asked for is followed from the start to the end of the run: asked how often, reached how often, and
+    # for every miss a plain reason. A point that is not done and has left every robot's list (refused stop, "no room to
+    # turn", a re-plan that cut in as the robot arrived: N4) gets a line the moment that is seen, and is tried ONCE more
+    # when its robot reaches the end of its list (by another robot when its own is held or was never found).
+    LEDGER_EVERY_S = 0.5        # how often the ledger is checked. No DOE: a polling period
+    POINT_RETRIES = 1           # Nick, 24 Nov (D3): retried once. Not chosen here
+
+    def per_robot_lists(self):
+        return getattr(self.args, "visit_lists", "") == "per_robot"
+
+    @staticmethod
+    def _plabel(lab):
+        return str(lab).replace("point ", "")
+
+    def ledger_init(self):
+        L = self.ledger = {}
+        self.ledger_order = []
+        dwell_s = None
+        for n, e in (self.plan.get("robots") or {}).items():
+            vo = [v for v in list(e.get("visit_order") or []) + list(e.get("later") or []) if isinstance(v, dict)]
+            for j, v in enumerate(vo):
+                lab = str(v.get("label") or "")
+                if not lab.startswith("point ") or "goto" not in v:
+                    continue
+                nxt = vo[j + 1] if j + 1 < len(vo) and str(vo[j + 1].get("label") or "") == "at " + lab else None
+                if nxt is not None and nxt.get("wait_s") is not None:
+                    dwell_s = nxt["wait_s"]
+                ent = L.get(lab)
+                if ent is None:
+                    ent = L[lab] = dict(owner=n, items=[v] + ([nxt] if nxt else []), asked=0, reached=0, tries=0,
+                                        why=None, by=[], seen_gone=0)
+                    self.ledger_order.append(lab)
+                ent["asked"] += 1
+        # lists of robots that were named in the order and not found at the start: nobody's yet
+        spots = self.m.get("spots") or {}
+        for part in str(getattr(self.args, "visit_missing", "") or "").split(";"):
+            n, _, labs = part.partition(":")
+            for p_ in [x.strip() for x in labs.split(",") if x.strip()]:
+                lab = "point " + p_
+                if p_ not in spots:
+                    continue
+                items = [{"goto": [float(spots[p_][0]), float(spots[p_][1])], "label": lab}]
+                if dwell_s is not None:
+                    items.append({"wait_s": dwell_s, "label": "at " + lab})
+                ent = L.get(lab)
+                if ent is None:
+                    ent = L[lab] = dict(owner=n.strip(), items=items, asked=0, reached=0, tries=0, by=[], seen_gone=0,
+                                        why="its robot %s was not found at the start" % n.strip(), absent=True)
+                    self.ledger_order.append(lab)
+                ent["asked"] += 1
+        if L:
+            self.log("ledger", asked=sum(e["asked"] for e in L.values()),
+                     lists={n: [self._plabel(l) for l in self.ledger_order if L[l]["owner"] == n]
+                            for n in sorted({e["owner"] for e in L.values()})})
+
+    def ledger_counts(self):
+        """Asked and reached so far (totals), from the credited stops."""
+        L = self.__dict__.get("ledger") or {}
+        got = {}
+        for r in self.__dict__.get("points", []):
+            got[r["point"]] = got.get(r["point"], 0) + 1
+        for lab, ent in L.items():
+            ent["reached"] = min(ent["asked"], got.get(lab, 0))
+            ent["by"] = sorted({r["robot"] for r in self.__dict__.get("points", []) if r["point"] == lab})
+        return sum(e["asked"] for e in L.values()), sum(e["reached"] for e in L.values())
+
+    def ledger_reason(self, lab):
+        """The newest plain reason this point is not done, from the run's own records."""
+        p_ = self._plabel(lab)
+        best = None
+        for r in self.__dict__.get("not_reached", []):
+            if r.get("point") == lab:
+                best = (r.get("t_run") or 0.0, "%s stopped %.1f cm from it (a stop counts within %.1f cm)" % (
+                    r.get("robot"), r.get("miss_cm") or 0.0, r.get("reach_tol_cm") or 0.0), "not_reached")
+        for q in list(self.__dict__.get("skipped", [])) + list(self.__dict__.get("skipped_retried", [])):
+            if q.get("point") == lab and (best is None or (q.get("t_run") or 0.0) >= best[0]):
+                why = str(q.get("why") or "")
+                kind = "no_room" if "no room to turn" in why else "unreachable" if "cannot be reached" in why else \
+                    "skipped"
+                best = (q.get("t_run") or 0.0, "%s skipped it: %s" % (q.get("robot"), why), kind)
+        if best is None:
+            return None, None
+        return best[1], best[2]
+
+    def ledger_at_end(self, n):
+        """Is robot n at the end of its list: everything done, or only its trip home left?"""
+        entry = self.plan["robots"].get(n)
+        b = self.bots[n]
+        if entry is None or b.out:
+            return False
+        if any(isinstance(v, dict) and str(v.get("label", "")).startswith("point ") for v in entry.get("later") or []):
+            return False
+        pend = (entry.get("pending") or {}).get("visits") or []
+        if any(isinstance(v, dict) and str(v.get("label", "")).startswith("point ") for v in pend):
+            return False
+        if not b.stat or all(st["status"] == "done" for st in b.stat):
+            return True
+        steps = self.steps(n)
+        i = next((k for k, st in enumerate(b.stat) if st["status"] != "done"), None)
+        rest = steps[i:] if i is not None else []
+        return not any(str(stp.get("label") or "").startswith(("point ", "at point ")) for stp in rest)
+
+    def ledger_open(self):
+        """{label: where it is} for every point not done: "listed" (in a running robot's list), "held" (waiting in a
+        held robot's list), "gone" (in nobody's list)."""
+        L = self.__dict__.get("ledger") or {}
+        self.ledger_counts()
+        listed, held = set(), set()
+        for n in self.names:
+            if n in self.plan["robots"]:
+                listed |= self.listed_labels(n)
+        for b in self.bots.values():
+            if b.out and getattr(b, "out_entry", None) is not None and (self.rejoinable(b) or
+                                                                         getattr(b, "out_kind", None) == "recovering"):
+                held |= {g[0]["label"] for g in self.remaining_points(b.out_entry, b.out_stat)}
+        return {lab: ("listed" if lab in listed else "held" if lab in held else "gone")
+                for lab, ent in L.items() if ent["reached"] < ent["asked"]}
+
+    def ledger_pending(self):
+        """Work the ledger still has to start: a missed point to try once more, or a held robot's points to hand to a
+        robot that has finished its own list. False when nobody is running (the run's other rules decide then)."""
+        if not POINT_RETRY and not HELD_POINTS_WAIT:
+            return False
+        L = self.__dict__.get("ledger") or {}
+        if not L or not self.names or not self.keep_going():
+            return False
+        op = self.ledger_open()
+        if POINT_RETRY and any(w == "gone" and L[lab]["tries"] < self.POINT_RETRIES for lab, w in op.items()):
+            return True
+        if HELD_POINTS_WAIT and self.per_robot_lists() and any(
+                w == "held" and not getattr(self.bots.get(L[lab]["owner"]), "handed_over", False)
+                for lab, w in op.items()):
+            return True
+        return False
+
+    def ledger_watch(self):
+        L = self.__dict__.get("ledger") or {}
+        t = now()
+        if not L or t - getattr(self, "_ledger_t", 0.0) < self.LEDGER_EVERY_S or not self.keep_going():
+            return
+        self._ledger_t = t
+        if self.planning is not None or self.pending_replan is not None or self.deferred or not self.names:
+            return
+        op = self.ledger_open()
+        # 1. a point that is in nobody's list any more: said once, with its reason (N4: never lost without a line)
+        for lab, where in op.items():
+            ent = L[lab]
+            if where != "gone":
+                ent["seen_gone"] = 0
+                continue
+            ent["seen_gone"] += 1
+            if ent["seen_gone"] < 2 or ent.get("gone_said") == ent["tries"]:
+                continue                       # (two checks in a row: a list being rewritten is not a loss)
+            ent["gone_said"] = ent["tries"]
+            why, kind = self.ledger_reason(lab)
+            if why is None:
+                why, kind = (ent.get("why") or "a new plan left it out as its robot arrived (no stop, refusal or "
+                             "skip was written)"), ("absent" if ent.get("absent") else "dropped")
+            ent["why"], ent["kind"] = why, kind
+            rec = dict(point=lab, list_of=ent["owner"], why=why, kind=kind, tried_again=ent["tries"],
+                       t_run=round(t - self.t_run, 2))
+            self.__dict__.setdefault("dropped", []).append(rec)
+            self.log("point_dropped", **rec)
+            self.say("POINT %s (%s's list): not done and in no robot's list: %s. %s" % (
+                self._plabel(lab), ent["owner"], why,
+                "It is tried once more at the end of the list." if POINT_RETRY and ent["tries"] < self.POINT_RETRIES
+                else "It was tried again already: it is reported as missed."))
+        if not POINT_RETRY and not HELD_POINTS_WAIT:
+            return
+        # 2. robots at the end of their lists take the missed points (once), then a still-held robot's points
+        enders = [n for n in self.names if n in self.plan["robots"] and self.ledger_at_end(n)]
+        if not enders:
+            return
+        gave = {}
+        if POINT_RETRY:
+            for lab in self.ledger_order:
+                ent = L[lab]
+                if op.get(lab) != "gone" or ent["tries"] >= self.POINT_RETRIES or ent["seen_gone"] < 2:
+                    continue
+                owner_live = ent["owner"] in self.names
+                if owner_live and ent["owner"] not in enders:
+                    continue                       # its own robot is still on its list: it takes it at its end
+                xy = ent["items"][0]["goto"]
+                cands = [ent["owner"]] if owner_live else enders
+                n = min(cands, key=lambda r: math.hypot((self.bots[r].pose or xy)[0] - xy[0],
+                                                        (self.bots[r].pose or xy)[1] - xy[1]))
+                gave.setdefault(n, []).append(lab)
+        for n, labs in gave.items():
+            for lab in labs:
+                ent = L[lab]
+                ent["tries"] += 1
+                ent["retry_by"] = n
+                ent["seen_gone"] = 0
+                # its earlier skip no longer hides it from the plan's own bookkeeping (kept apart for the record)
+                old = [q for q in self.__dict__.get("skipped", []) if q.get("point") == lab]
+                if old:
+                    self.__dict__.setdefault("skipped_retried", []).extend(old)
+                    self.skipped = [q for q in self.skipped if q.get("point") != lab]
+                self.insert_visits(n, ent["items"])
+                self.__dict__.setdefault("retried", []).append(dict(point=lab, by=n, list_of=ent["owner"],
+                                                                      t_run=round(t - self.t_run, 2)))
+            self.log("points_retried", robot=n, points=labs)
+            self.say("%s is at the end of its list: the missed point%s %s %s tried once more" % (
+                n, "" if len(labs) == 1 else "s", ", ".join(self._plabel(x) for x in labs),
+                "is" if len(labs) == 1 else "are"))
+        if gave:
+            self.request_replan("missed points tried once more at the end of the list")
+            return
+        if HELD_POINTS_WAIT and self.per_robot_lists():
+            for b in self.bots.values():
+                if b.out and self.rejoinable(b) and not getattr(b, "handed_over", False) and \
+                        self.remaining_points(b.out_entry, b.out_stat):
+                    self.say("%s has finished its own list and %s is still held: %s's points go to it now" % (
+                        ", ".join(enders), b.name, b.name))
+                    self.reassign_points(b, "still held when %s finished" % ", ".join(enders))
+                    self.request_replan("a held robot's points taken up at the end of the list")
+                    return
+
+    NEXT_WORDS = {
+        "not_reached": "Run this point again. If the same robot stops short again there, redo that robot's "
+                       "calibration (Calibrate) before the next run.",
+        "no_room": "Run it again: there was no room while another robot stood held nearby. If it repeats with the "
+                   "table clear, the sticker is too close to an edge or a plate for a robot to turn on.",
+        "unreachable": "No path keeps the edge and plate room to this sticker: move it further in, or take it off the list.",
+        "skipped": "Run it again; if it is skipped again, look at the reason above.",
+        "absent": "Wake or switch on that robot (or give its points to a robot that is there) and run again.",
+        "held": "Its robot was still held when the run ended: free it (see NEEDS A HAND above) and run these points again.",
+        "stopped": "The run was stopped before the robot got there: Run again finishes the list.",
+        "time": "The run's time limit ended it first: Run again finishes the list.",
+        "battery": "Charge that robot, then run these points again.",
+        "dropped": "A program fault (the line point_dropped in coordinator.jsonl says when): run it again and tell Nick.",
+        "crashed": "The program stopped on an error before it got there: run again and send Nick the run folder.",
+    }
+
+    def ledger_summary(self, result=None):
+        """(D4) How the run went, point by point: {"headline", "asked", "reached", "robots": {list owner: {"asked",
+        "reached", "reached_points", "missed": [{"point", "why", "next", "tried_again"}]}}}."""
+        L = self.__dict__.get("ledger") or {}
+        if not L:
+            return None
+        asked, reached = self.ledger_counts()
+        op = {}
+        try:
+            op = self.ledger_open()
+        except Exception:  # noqa: BLE001  (a summary is always made)
+            op = {lab: "gone" for lab, e in L.items() if e["reached"] < e["asked"]}
+        res = str(result or self.__dict__.get("abort") or "done")
+        robots = {}
+        for lab in self.ledger_order:
+            ent = L[lab]
+            o = robots.setdefault(ent["owner"], dict(asked=0, reached=0, reached_points=[], missed=[]))
+            o["asked"] += ent["asked"]
+            o["reached"] += ent["reached"]
+            if ent["reached"]:
+                o["reached_points"].append(self._plabel(lab))
+            if ent["reached"] >= ent["asked"]:
+                continue
+            why, kind = self.ledger_reason(lab)
+            where = op.get(lab, "gone")
+            ownb = self.bots.get(ent["owner"])
+            if where != "gone":
+                # still in a list when the run ended: the reason is how the run ended
+                if res.startswith("interrupted"):
+                    why, kind = "the run was stopped before a robot got to it", "stopped"
+                elif res.startswith("timeout"):
+                    why, kind = "the run's time limit ended it before a robot got to it", "time"
+                elif res.startswith("crashed"):
+                    why, kind = "the program stopped on an error before a robot got to it", "crashed"
+                elif where == "held" or (ownb is not None and ownb.out):
+                    why, kind = "its robot %s was held (%s) and no other robot could take it" % (
+                        ent["owner"], str(getattr(ownb, "out", "") or "held").split(";")[0]), "held"
+                else:
+                    why, kind = "the run ended before a robot got to it (%s)" % res, "stopped"
+            elif why is None:
+                if getattr(ownb, "battery_home", False):
+                    why, kind = "its robot %s went home on a low battery and no other robot could take it" % ent["owner"], "battery"
+                else:
+                    why, kind = (ent.get("why") or "a new plan left it out (no stop, refusal or skip was written)",
+                                 ent.get("kind") or ("absent" if ent.get("absent") else "dropped"))
+            o["missed"].append(dict(point=self._plabel(lab), why=why, kind=kind, next=self.NEXT_WORDS.get(kind, ""),
+                                    tried_again=bool(ent["tries"]), times=ent["asked"] - ent["reached"]))
+        head = ("Done: all %d points reached" % asked) if reached >= asked and res == "done" else \
+            "Ended: %d of %d points reached" % (reached, asked)
+        return {"headline": head, "asked": asked, "reached": reached, "result": res, "robots": robots,
+                "retried": list(self.__dict__.get("retried", [])), "dropped": list(self.__dict__.get("dropped", []))}
+
+    def battery_home(self, b, floor):
+        """(e24, Nick's default Q-b) A robot under the battery floor finishes the point it is on, then drives to its
+        home spot; the points it had left go to the other robots (after their own). False (nothing changed: it
+        finishes the run as before e24) when it is the only robot running or has no points left."""
+        n = b.name
+        entry = self.plan["robots"].get(n)
+        live = [x for x in self.names if x != n and x in self.plan["robots"]]
+        if entry is None or not live or b.out or getattr(b, "battery_home", False):
+            return False
+        k, _item = self.current_task(n)
+        vo = entry.get("visit_order") or []
+        off = 0
+        # the items after the point it is on (its goto and its dwell stay): everything that is a point goes
+        cur_lab = self.point_of(_item.get("label")) if isinstance(_item, dict) else None
+        keep_to = (k if k is not None else -1)
+        if cur_lab is not None:
+            while keep_to + 1 < len(vo) and isinstance(vo[keep_to + 1], dict) and \
+                    self.point_of(vo[keep_to + 1].get("label")) == cur_lab:
+                keep_to += 1
+        tail = [v for v in vo[keep_to + 1:] if isinstance(v, dict)] + [v for v in entry.get("later") or []
+                                                                         if isinstance(v, dict)]
+        groups = []
+        for j, v in enumerate(tail):
+            lab = str(v.get("label") or "")
+            if lab.startswith("point ") and "goto" in v:
+                nxt = tail[j + 1] if j + 1 < len(tail) and str(tail[j + 1].get("label") or "") == "at " + lab else None
+                groups.append([v, nxt])
+        if not groups:
+            return False
+        b.battery_home = True
+        b.low_said = True
+        gone = {id(x) for g in groups for x in g if x is not None}
+        entry["visit_order"] = [v for v in vo if id(v) not in gone]
+        if entry.get("later"):
+            entry["later"] = [v for v in entry["later"] if id(v) not in gone]
+        got = {}
+        for g in groups:
+            xy = g[0]["goto"]
+            to = min(live, key=lambda r: math.hypot((self.bots[r].pose or xy)[0] - xy[0],
+                                                    (self.bots[r].pose or xy)[1] - xy[1]))
+            got.setdefault(to, []).append(g)
+        recs = self.__dict__.setdefault("reassigned", [])
+        for to, gs in got.items():
+            self.insert_visits(to, [x for g in gs for x in g if x is not None])
+            for g in gs:
+                recs.append(dict(point=g[0]["label"], items=[x for x in g if x is not None], frm=n, to=to,
+                                 t_run=round(now() - self.t_run, 2)))
+        words = "; ".join("%s to %s" % (", ".join(self._plabel(g[0]["label"]) for g in gs), to) for to, gs in got.items())
+        self.log("battery_home", robot=n, battery=b.battery, floor=floor,
+                 to={to: [g[0]["label"] for g in gs] for to, gs in got.items()}, keeps=cur_lab)
+        self.warnings = getattr(self, "warnings", []) + ["%s: battery %d %%, under the floor: it went home; its "
+                                                         "points left went to the others" % (n, b.battery)]
+        self.say("%s's battery is at %d %%, under the %s floor: it %s, then drives to its home spot; its points left "
+                 "go to the other robot (%s). Charge it before the next run."
+                 % (n, b.battery, floor_words(self.args),
+                    "finishes %s" % self._plabel(cur_lab) if cur_lab else "does no further point", words))
+        self.request_replan("a robot under the battery floor goes home")
+        return True
+
     def handed_points_waiting(self):
         """(e23) Robots still running that hold points not done in their pending work (handed over after they had
         finished, insert_visits): {robot: [labels]}."""
@@ -5450,6 +5826,8 @@ class Coordinator:
             if any(getattr(self.bots[n], "retry_n", 0) == 0 for n in undone):
                 self.others_done_t = None       # (a robot trying to rejoin does not restart the wait)
             return False
+        if self.ledger_pending():
+            return False                # (e24) missed points still to be tried once more, or a held robot's to hand over
         if (self.pending_replan is not None or self.deferred) and self.handed_points_waiting():
             # (e23) points handed to a robot that had finished wait for a re-plan that is due (past the re-plan cap
             # it is spaced REPLAN_SPACING_S apart): the run is not over. Simulator, 19 Nov, late pictures: Bravo was
@@ -5480,6 +5858,7 @@ class Coordinator:
         self.say("plan %s started: %d robots, %d steps, planned %.1f s"
                  % (self.plan.get("plan_id"), len(self.names), sum(len(self.steps(n)) for n in self.names),
                     self.plan["summary"]["makespan_s"]))
+        self.ledger_init()
         self.note_skips(self.plan)           # points the first plan could not reach (keep going plans them skipped)
         for n, why in list((getattr(self, "start_aside", None) or {}).items()):
             # held at the start (the self-correcting start, 30 Oct): a fixed obstacle where it stands; checked again
@@ -5531,6 +5910,7 @@ class Coordinator:
             self.trust_checkpoint()       # (e18, 6) the odometry records written out every minute
             self.rejoin_watch()
             self.feed_watch()             # (e23) the next points of a long fixed-order list come into the plan
+            self.ledger_watch()           # (e24) no point is lost without a line; missed points tried once more
             if self.abort:
                 break
             self.disk_watch()
@@ -5661,6 +6041,8 @@ class Coordinator:
                 "turn_pause": {"on": bool(getattr(self.args, "turn_pause", False)) and self.source.live,
                                "robots": self.turn_pause_summary()},
                 "turn_heading": self.turn_heading_summary(),
+                "visit_result": self.ledger_summary(),
+                "blind": {"standing_stays": self.__dict__.get("blind_stays", 0), "slowed": self.__dict__.get("blind_slows", 0)},
                 "mirror": self.mirror_summary()}
 
 
@@ -7291,6 +7673,12 @@ def main(argv=None):
                          "everyone (camera and pose disagree for long, out of re-plans, no plan, a robot lost) is said "
                          "once, logged and worked round; only a full card, Stop / Ctrl+C and every robot out end the "
                          "run (and the time limit, stretched to the newest plan's end; the default since e08). stop: as before e08 (a switch)")
+    ap.add_argument("--visit-lists", choices=("per_robot", "shared", ""), default="",
+                    help="(e24) per_robot: Visit points with a list per robot (a held robot's points wait for it; "
+                         "MIRLT_HELD_POINTS=reassign: handed over at once, as before)")
+    ap.add_argument("--visit-missing", default="", metavar="NAME:P01,P02;NAME:...",
+                    help="(e24) lists of robots named in the visit order that were not found at the start: a robot "
+                         "that finishes its own list takes them")
     ap.add_argument("--lost-robot-points", choices=("reassign", "skip"), default="reassign",
                     help="with --on-problem keep_going: a robot that is out hands its production points not done to "
                          "the robots still running (reassign, default), or they are listed as not done (skip)")
@@ -7545,6 +7933,19 @@ def print_summary(s):
             print("NOT VISITED: %s" % s["boards_not_visited"])
         print("Camera fixes sent %s; used/ignored on the robots %s; held (the robot had no pose yet) %s"
               % (s["fixes_sent"], s["fixes_used_rejected"], s.get("fixes_held_no_pose")))
+    vr = s.get("visit_result")
+    if vr:
+        # (e24, Nick 24 Nov D4) how the run went, in plain words: the count, then every missed point with its reason
+        # and what to do next
+        print("\n%s" % vr["headline"])
+        for n, o in sorted(vr["robots"].items()):
+            print("  %s's list: reached %d of %d%s" % (n, o["reached"], o["asked"],
+                                                      (": " + ", ".join(o["reached_points"])) if o["reached_points"] else ""))
+            for q in o["missed"]:
+                print("    MISSED %s%s: %s" % (q["point"], " (tried again at the end of the list)" if q["tried_again"]
+                                               else "", q["why"]))
+                if q.get("next"):
+                    print("      What to do next: %s" % q["next"])
     if s.get("warnings"):
         print("WARNINGS (%d; each was handled without stopping the run):" % len(s["warnings"]))
         for w in s["warnings"]:

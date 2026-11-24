@@ -252,6 +252,9 @@ ROAM_S_PER_POINT = 14.0   # ... and about this long a leg at production speed (c
                           # the e06 rehearsals' legs (8-20 s); the run's time limit ends it anyway
 
 
+VISIT_MISSING = {}      # (e24) lists of robots named in the visit order and not found: {name: [labels]} (parse_visit_order)
+
+
 def parse_visit_order(spec, robots):
     """(e11, Nick 9 Nov) 'P01,P05,P11,P05' (every robot shares the list: one robot takes it all; more robots take it in
     turn, in order, a run of points each) or 'Alpha:P01,P05;Bravo:P11' (each robot its own list). Labels are made
@@ -286,9 +289,13 @@ def parse_visit_order(spec, robots):
         if missing and not out:
             raise ValueError("no robot %s in this run (robots: %s)" % (", ".join(m[0] for m in missing),
                                                                        ", ".join(robots)))
+        VISIT_MISSING.clear()
+        VISIT_MISSING.update({n: list(labs_) for n, labs_ in missing})
         for n, labs_ in missing:
-            say("VISIT ORDER: %s was not found in this run (robots: %s): its points %s are not visited" % (
-                n, ", ".join(robots), ", ".join(labs_) or "(none)"))
+            say("VISIT ORDER: %s was not found in this run (robots: %s): its points %s %s" % (
+                n, ", ".join(robots), ", ".join(labs_) or "(none)",
+                "are taken by a robot that finishes its own list (MIRLT_POINT_RETRY=off: not visited)"
+                if SG_().value("MIRLT_POINT_RETRY") != "off" else "are not visited"))
         return out
     labs = [x for x in (lab(t) for t in spec.replace(" ", ",").split(",")) if x]
     if len(robots) <= 1:
@@ -342,6 +349,7 @@ def visit_orders(args, robots, out):
     if out:
         with open(os.path.join(out, "visit_order.json"), "w") as f:
             json.dump({"asked": args.visit_order, "lists": lists, "orders": final, "flagged": flagged,
+                       "missing": dict(VISIT_MISSING), "per_robot": ":" in str(args.visit_order),
                        "kept_unreadable": keep, "warning": warning, "cameras": run_camera_words(args)}, f, indent=1)
     if not any(final.values()):
         raise SystemExit("NOT STARTED: every point in the order is outside the area the camera reads (%s). Nothing "
@@ -1648,6 +1656,11 @@ def run(args):
         rp += ["--turn-pause"]         # after each turn, stand until the cameras agree (2026-10-29)
     # the keep-going policy (2026-11-03): the site's on_problem (e08: keep_going at home too)
     rp += ["--on-problem", args.on_problem_, "--lost-robot-points", args.lost_robot_points_]
+    if getattr(args, "visit_order", ""):
+        # (e24) a list per robot: a held robot's points wait for it; the lists of robots not found go to run_plan too
+        rp += ["--visit-lists", "per_robot" if ":" in str(args.visit_order) else "shared"]
+        if VISIT_MISSING and SG_().value("MIRLT_POINT_RETRY") != "off":
+            rp += ["--visit-missing", ";".join("%s:%s" % (n, ",".join(v)) for n, v in sorted(VISIT_MISSING.items()))]
     rp += ["--edge-tracking", args.tracking_ if args.tracking_ in ("lights", "tags", "none") else "lights"]   # (e08)
     if os.environ.get("MIRLT_ATTENDED") == "1":
         rp += ["--attended"]                 # (e08, A2) Mission Control's Start screen: a person is there
@@ -2222,6 +2235,57 @@ def point_truth(points, truth_csv, sess):
         q["within"] = q["truth_err_cm"] <= (q.get("plus_minus_cm") or 0)
 
 
+def visit_result_from_logs(out, sess, result=None):
+    """(e24) The end card's numbers when run_plan wrote no summary (it was killed, or crashed before its end): asked =
+    visit_order.json's lists, reached = the stops the run's log credited (point_confidence). Reasons are not known
+    here: every missed point says the run ended before it. None when this was not a Visit points run."""
+    try:
+        with open(os.path.join(out, "visit_order.json")) as f:
+            vo = json.load(f)
+    except (OSError, ValueError):
+        return None
+    lists = dict(vo.get("orders") or {})
+    for n, labs in (vo.get("missing") or {}).items():
+        lists.setdefault(n, list(labs))
+    got = {}
+    try:
+        with open(os.path.join(sess, "coordinator.jsonl")) as f:
+            for ln in f:
+                if '"point_confidence"' not in ln:
+                    continue
+                try:
+                    e = json.loads(ln)
+                except ValueError:
+                    continue
+                p_ = str(e.get("point", "")).replace("point ", "")
+                got[p_] = got.get(p_, 0) + 1
+    except OSError:
+        pass
+    res = str(result or "no result: the run program ended without its summary")
+    why = "the run was stopped before a robot got to it" if res.startswith("interrupted") else \
+        "the run ended before a robot got to it (%s)" % res
+    robots, asked, reached = {}, 0, 0
+    for n, labs in lists.items():
+        o = robots.setdefault(n, dict(asked=0, reached=0, reached_points=[], missed=[]))
+        for l in labs:
+            o["asked"] += 1
+            asked += 1
+            if got.get(l, 0) > 0:
+                got[l] -= 1
+                o["reached"] += 1
+                reached += 1
+                if l not in o["reached_points"]:
+                    o["reached_points"].append(l)
+            else:
+                o["missed"].append(dict(point=l, why=why, kind="stopped", tried_again=False, times=1,
+                                        next="Run again finishes the list."))
+    if not asked:
+        return None
+    return {"headline": ("Done: all %d points reached" % asked) if reached >= asked and res == "done" else
+            "Ended: %d of %d points reached" % (reached, asked), "asked": asked, "reached": reached, "result": res,
+            "robots": robots, "from": "the run's log (run_plan left no summary)"}
+
+
 def summarise(out, sess, frames, cond):
     """mission_summary.json: what the run did against the plan, the simulator's truth (dry), the line check."""
     s = {"folder": out, "conditions": cond}
@@ -2241,6 +2305,19 @@ def summarise(out, sess, frames, cond):
         s["points_not_reached"] = rs["points_not_reached"]      # (e23) stops the robot was not at
     if rs.get("plan_ahead"):
         s["plan_ahead"] = rs["plan_ahead"]
+    # (e24, Nick 24 Nov D4) how the run went, point by point: run_plan's ledger; when run_plan left no summary (killed),
+    # the same count made from the run's own log, so the end card always has it
+    vr = rs.get("visit_result") or visit_result_from_logs(out, sess, rs.get("result"))
+    if vr:
+        s["visit_result"] = vr
+        say(vr["headline"])
+        for n_, o_ in sorted((vr.get("robots") or {}).items()):
+            for q_ in o_.get("missed") or []:
+                say("  MISSED %s (%s's list): %s%s" % (q_["point"], n_, q_["why"],
+                                                      (" What to do next: " + q_["next"]) if q_.get("next") else ""))
+    for k_ in ("turn_heading", "blind"):
+        if rs.get(k_):
+            s[k_] = rs[k_]
     # keep going and confidence at every point (2026-11-03)
     s.update(on_problem=rs.get("on_problem"), kept_going=rs.get("kept_going") or [], points=rs.get("points") or [],
              points_skipped=rs.get("points_skipped") or [], points_reassigned=rs.get("points_reassigned") or [])
