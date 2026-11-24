@@ -51,9 +51,15 @@ for jp in sorted(glob.glob(os.path.join(ACC, "[AB]-*-s*.json"))):
         yaw_jumps=len(th.get("yaw_jumps") or []), standing_stays=bl.get("standing_stays"),
         slowed=bl.get("slowed")))
 os.makedirs(OUT, exist_ok=True)
+doe = [dict(r, ahead=r["case"][3:]) for r in rows if r["case"].startswith("doe")]     # the plan-ahead experiment's runs
+rows = [r for r in rows if not r["case"].startswith("doe")]
 with open(os.path.join(OUT, "runs.jsonl"), "w") as f:
     for r in rows:
         f.write(json.dumps(r) + "\n")
+if doe:
+    with open(os.path.join(OUT, "doe_runs.jsonl"), "w") as f:
+        for r in doe:
+            f.write(json.dumps(r) + "\n")
 
 
 def rng(vals, fmt="%.0f"):
@@ -79,3 +85,19 @@ for c in ORDER:
             rng([r["closest_keepout_cm"] for r in g], "%.1f"), rng([r["closest_edge_cm"] for r in g], "%.1f")))
 open(os.path.join(OUT, "table.md"), "w").write("\n".join(L) + "\n")
 print("\n".join(L))
+
+if doe:
+    D = ["| Points planned ahead per robot | Runs | Runs with every point reached | Points reached of %s | Run time (s): lowest, middle, highest | Time spent planning (s): middle | Re-plans: middle |" % doe[0]["asked"],
+         "|---|---|---|---|---|---|---|"]
+    med = lambda v: sorted(v)[len(v) // 2] if v else float("nan")
+    for a in ("1", "2", "3", "all"):
+        g = [r for r in doe if r["ahead"] == a]
+        if not g:
+            continue
+        du = [r["duration_s"] or 0 for r in g]
+        D.append("| %s | %d | %d | %s | %.0f, %.0f, %.0f | %.1f | %.0f |" % (
+            "whole list" if a == "all" else a, len(g), sum(1 for r in g if r["reached"] == r["asked"] and r["result"] == "done"),
+            rng([r["reached"] for r in g]), min(du), med(du), max(du), med([r["replan_cpu_s"] or 0 for r in g]),
+            med([r["replans"] or 0 for r in g])))
+    open(os.path.join(OUT, "doe_table.md"), "w").write("\n".join(D) + "\n")
+    print("\n".join(D))
