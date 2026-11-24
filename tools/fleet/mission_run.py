@@ -206,6 +206,9 @@ def observed_split(args, robots, out):
 import safety_group as SG   # noqa: E402  (e18: the safety switches' automatic defaults in one place)
 EMPTY_TO_READABLE = SG.flag("MIRLT_EMPTY_TO_READABLE")   # (e17, Nick 12 Nov answer 4)
 LOST_PRIORITY = SG.flag("MIRLT_LOST_PRIORITY")           # (e18, Nick 12 Nov decision 4) it goes first
+WRAP_GUARD = SG.flag("MIRLT_WRAPUP_GUARD")               # (e24, N6) a second Ctrl+C never breaks the run's saving
+WRAP_GIVE_UP_N = 3   # [chosen] the Ctrl+C presses after the first that abandon the saving (a person who really wants out).
+#                      DOE: no (a way out, not a tuning)
 RESCUED = []             # (e18) robots this split sent to a readable point (the plan gives them the right of way)
 
 
@@ -1992,9 +1995,30 @@ def run(args):
     if args.tracking_ == "tags":
         threading.Thread(target=bridge_watch, args=(os.path.join(out, "bridge", "events.jsonl"), disk_stop,
                                                     moved_said), daemon=True).start()
+    wrap = {"n": 0}
+
+    def _wrap_guard(*_):
+        # (e24, school 23 Nov N6: a second Ctrl+C during the wrap-up lost stops.csv, camera_track.csv and
+        # mission_summary.json of runs 9-11) from the first Ctrl+C on, another one never breaks the saving: it is passed
+        # on to the run program while that still lives (a "STOP again") and said; the fourth abandons the saving
+        wrap["n"] += 1
+        try:
+            if child.poll() is None:
+                child.send_signal(signal.SIGINT)
+        except OSError:
+            pass
+        if wrap["n"] >= WRAP_GIVE_UP_N:
+            raise KeyboardInterrupt
+        say("Ctrl+C again: the robots are already told to stop; the run's records are being saved (stops, camera "
+            "track, summary). Wait for \"Saved\"; %d more Ctrl+C abandon the saving." % (WRAP_GIVE_UP_N - wrap["n"]))
     try:
         code = child.wait()
     except KeyboardInterrupt:
+        if WRAP_GUARD:
+            try:
+                signal.signal(signal.SIGINT, _wrap_guard)
+            except (ValueError, OSError):
+                pass
         say("stopping every robot")
         child.send_signal(signal.SIGINT)
         try:
@@ -2002,6 +2026,11 @@ def run(args):
         except subprocess.TimeoutExpired:
             child.kill()
     finally:
+        if WRAP_GUARD:
+            try:
+                signal.signal(signal.SIGINT, _wrap_guard)
+            except (ValueError, OSError):
+                pass
         disk_stop.set()
         for p, f in ((br, brf),) if br is not None else ():
             try:
@@ -2022,6 +2051,15 @@ def run(args):
                 pass
     sync_mark(out, "end", args)
     summ = summarise(out, sess, frames, cond)
+    if WRAP_GUARD:
+        # (e24, N6) the summary is on the card BEFORE the exports and charts are made (they add to it and it is
+        # written again below): whatever ends the wrap-up early, the run's result is not lost
+        try:
+            with open(os.path.join(out, "mission_summary.json"), "w") as f:
+                json.dump(dict(summ, wrap_up="not finished: the exports had not been made when this was written"),
+                          f, indent=1, default=str)
+        except (OSError, TypeError, ValueError):
+            pass
     try:
         # the experiment (2026-11-03): id, orders, swap, seed, pinned speeds; the sync wiggle's times per robot
         import experiments as EX
@@ -2441,6 +2479,11 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
     with IA.track("mission", dry=IA.is_dry(sys.argv[1:]) or "--plan-only" in sys.argv[1:]):
         _rc = main()

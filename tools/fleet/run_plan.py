@@ -66,6 +66,9 @@ OLD_FIX_MOTION_ONLY = SG.value("MIRLT_OLD_FIX_JUMPS") != "count"   # (e23c) ... 
 REACH_TOL_BOUNDED = SG.value("MIRLT_REACH_TOL") != "e23"      # (e23c) the stop tolerance from reached stops only, bounded
 EDGE_SLOW_END = SG.flag("MIRLT_EDGE_SLOW_END")                 # the last part of a leg ending in the edge rule's room
 VEER_AT_POINT_STAND = SG.value("MIRLT_VEER_AT_POINT") != "recover"   # (e23) no early turn-back for a robot standing in its dwell
+VEER_REACH = SG.value("MIRLT_VEER_RULE") != "ahead"            # (e24, Nick D1) a driving robot turns back only when its doubt could reach the edge; slow till then
+BLIND_STANDING_STAY = SG.value("MIRLT_BLIND_STANDING") != "act"   # (e24, Nick D2) a standing robot stays put on a picture stall, anywhere
+TURN_HEADING_CHECK = SG.value("MIRLT_TURN_HEADING") != "off"     # (e24, N1) the camera's heading against its own after each turn
 PLAN_AHEAD_NEAR = SG.value("MIRLT_PLAN_AHEAD") != "all"        # fixed-order lists planned a few points ahead
 CREEP_MAX_CM = 8.0       # (e18) as freeroam_core.CREEP_MAX_CM (CHOSEN there; DOE noted there)
 CREEP_MIN_CM = 2.0
@@ -581,6 +584,7 @@ class Coordinator:
                                                                                           None) or None))
             gz = row.get("gz")
             ax = row.get("ax")
+            self.yaw_jump_watch(b, t, row.get("yaw_deg"), gz)
             fp.raw(t, v, w, float(gz) if gz not in (None, "") else None, still,
                    float(ax) if ax not in (None, "") else None, None, tuple(ln) if len(ln) == 3 else None)
             if BLIND_ALLOW:
@@ -1143,6 +1147,8 @@ class Coordinator:
                     break
                 if not self.turn_pause_open(b, i, t):
                     break                                  # standing after a turn until the cameras agree
+                if not self.turn_heading_open(b, i, t):
+                    break                                  # (e24) its heading after the turn is checked by the camera
                 m_ok, m_v = self.mirror_gate(b, i, t)
                 if not m_ok:
                     break                                  # the leader waits for its mirror partner (mirroring)
@@ -1247,7 +1253,8 @@ class Coordinator:
                 src = str(ev.get("src") or "both").split(":")[-1]
                 self.note_fix(b, ev, src)
                 h = b.__dict__.setdefault("cam_hist", [])
-                h.append((float(ev.get("t", now())), now(), float(ev["x"]), float(ev["y"]), src))
+                h.append((float(ev.get("t", now())), now(), float(ev["x"]), float(ev["y"]), src,
+                          None if ev.get("th") is None else float(ev["th"])))     # (e24) + the camera's heading
                 if len(h) > 40:
                     del h[:-30]
                 if getattr(b, "late_checks", None):
@@ -4030,6 +4037,266 @@ class Coordinator:
         b.tpause = None
         return True
 
+    # -- (e24, school 23 Nov N1; Nick's default Q-a) the heading check after a turn ---------------------------------------
+    # Run 2: Alpha's gyro yaw jumped 26 deg in one sample as its first turn began; its own heading was 27 deg off for 49 s
+    # and the next 108 cm leg took it onto the zone 1 outlet plate. After EVERY turn the camera's heading is compared
+    # with the robot's own. The robot WAITS for a fresh camera heading only when the next leg, driven on a heading as
+    # wrong as a jump can make it, could bring its body to an edge or a keep-out (risk-based); otherwise it drives and
+    # the comparison is made on the first picture taken after the turn. When they disagree the camera wins: its pose is
+    # set from the camera, the turn is driven again from the corrected heading and checked again.
+    # MIRLT_TURN_HEADING=off: as before e24 (position only).
+    YAW_JUMP_MIN_DEG = 15.0      # MEASURED separation (school 23 Nov, yawjump.py): the four jumps were 19-26 deg, every
+    #                              other one-sample step unexplained by the gyro's own rate 5-8 deg. No DOE: a gap
+    YAW_JUMP_POSSIBLE_DEG = 30.0  # [chosen] the heading error a turn may hide while no picture has checked it: the
+    #                              largest measured jump (25.8 deg) + 15 %. DOE: no; re-measure when more school runs
+    #                              exist (4 jumps in 13 runs so far)
+    TURN_HEAD_SAMPLE_DEG = 5.0   # the risk check tries the leg turned by every multiple of this up to the possible
+    #                              error. No DOE: a sampling step (at 150 cm it moves the leg's end 13 cm; the body's
+    #                              circle is 13.4 cm across)
+    TURN_HEAD_SIGMAS = 3.0       # disagreement = over 3 sigma of the camera's heading (the mean of up to 3 pictures
+    #                              against its own heading at each picture's time). No DOE: the usual 3 sigma
+    TURN_HEAD_SIGMA_DEG = 1.5    # the camera heading's sigma when the fix gives none (the bridge's sigma_th default)
+    TURN_HEAD_OWN_DEG = 3.0      # safety_rules.NOPIC_HEAD_UNC_DEG: its own heading's doubt after a turn (not chosen here)
+    TURN_HEAD_RETURNS = 2        # [chosen] the turn is driven again at most this often from a corrected heading, then
+    #                              the leg is re-planned from where it stands. DOE: no (a guard; one re-turn is enough
+    #                              when the camera's heading is right)
+
+    def yaw_jump_watch(self, b, t, yaw, gz):
+        """A step of the raw gyro yaw the gyro's own turn rate does not explain = a yaw jump (logged; the next heading
+        check then waits for the camera whatever the leg)."""
+        if not TURN_HEADING_CHECK or yaw in (None, ""):
+            return
+        try:
+            yaw = float(yaw)
+            gz = float(gz) if gz not in (None, "") else None
+        except (TypeError, ValueError):
+            return
+        pv = getattr(b, "yaw_prev", None)
+        b.yaw_prev = (t, yaw, gz)
+        if pv is None or not 0.0 < t - pv[0] < 0.25 or gz is None:
+            return
+        d = (yaw - pv[1] + 180.0) % 360.0 - 180.0
+        rate = max(abs(gz), abs(pv[2] if pv[2] is not None else gz))
+        extra = abs(d) - rate * (t - pv[0])
+        if extra >= self.YAW_JUMP_MIN_DEG:
+            b.yaw_jump = dict(t=t, deg=round(d, 1))
+            self.log("yaw_jump_seen", robot=b.name, deg=round(d, 1), dt_s=round(t - pv[0], 3), gz=round(gz, 1),
+                     t_run=round(t - self.t_run, 2) if self.t_run_started() else None)
+            self.say("%s: its gyro's heading jumped %.0f deg in one reading (%.0f deg more than its turn rate "
+                     "explains): its heading is checked against the camera before it drives on" % (b.name, d, extra))
+            self.__dict__.setdefault("yaw_jumps", []).append(dict(robot=b.name, deg=round(d, 1),
+                                                                  t_run=round(t - self.t_run, 2)
+                                                                  if self.t_run_started() else None))
+
+    def turn_step_before(self, n, i):
+        """The turn step (any size) that step i of robot n drives after, only waits between; or None."""
+        steps = self.steps(n)
+        if steps[i]["type"] not in ("drive", "arc", "approach"):
+            return None
+        j = i - 1
+        while j >= 0 and steps[j]["type"] == "wait":
+            j -= 1
+        return j if j >= 0 and steps[j]["type"] == "turn" else None
+
+    def _room_at(self, x, y):
+        """Room (cm) from a robot's middle at (x, y) to the nearest open edge or keep-out outline (negative inside)."""
+        f = self.m["floor"]
+        r = min(x - f["x_min"], f["x_max"] - x, y - f["y_min"], f["y_max"] - y)
+        for o in self.m.get("obstacles", []) or []:
+            try:
+                if o.get("shape") == "circle" or (o.get("center") is not None and o.get("radius") is not None):
+                    r = min(r, math.hypot(x - o["center"][0], y - o["center"][1]) - float(o["radius"]))
+                    continue
+                pts = o.get("points") or []
+                if len(pts) < 2:
+                    continue
+                inside, best = False, float("inf")
+                for k in range(len(pts)):
+                    (ax, ay), (bx, by) = pts[k][:2], pts[(k + 1) % len(pts)][:2]
+                    if (ay > y) != (by > y) and x < (bx - ax) * (y - ay) / ((by - ay) or 1e-9) + ax:
+                        inside = not inside
+                    L2 = (bx - ax) ** 2 + (by - ay) ** 2
+                    u = 0.0 if L2 < 1e-9 else max(0.0, min(1.0, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2))
+                    best = min(best, math.hypot(x - ax - u * (bx - ax), y - ay - u * (by - ay)))
+                r = min(r, -best if inside else best)
+            except (TypeError, ValueError, KeyError, IndexError):
+                continue
+        return r
+
+    def leg_heading_risk(self, n, stp, err_deg):
+        """Could the leg `stp`, driven on a heading up to err_deg wrong, bring the robot's body (its half diagonal +
+        its stopping distance) to an open edge or a keep-out? Returns (risky, worst room cm, at which error deg).
+        Where it stands now is not counted (it is there already): only room the wrong heading would lose."""
+        import safety_rules as SRh_
+        if stp.get("type") != "drive" or stp.get("from") is None or stp.get("to") is None:
+            return True, 0.0, 0.0                 # arcs and approaches: always checked first
+        x0, y0 = stp["from"][0], stp["from"][1]
+        dx, dy = stp["to"][0] - x0, stp["to"][1] - y0
+        L = math.hypot(dx, dy)
+        if L < 1e-6:
+            return False, float("inf"), 0.0
+        stop = SRh_.stop_cm(stp.get("speed"))
+        need = SRh_.HALF_DIAG_CM + stop
+        L += stop
+        th0 = math.atan2(dy, dx)
+        room0 = self._room_at(x0, y0)
+        worst, at = float("inf"), 0.0
+        k_max = int(math.ceil(err_deg / self.TURN_HEAD_SAMPLE_DEG))
+        for k in range(-k_max, k_max + 1):
+            e = max(-err_deg, min(err_deg, k * self.TURN_HEAD_SAMPLE_DEG))
+            c, s_ = math.cos(th0 + math.radians(e)), math.sin(th0 + math.radians(e))
+            d = 2.0
+            while d <= L + 1e-6:
+                room = self._room_at(x0 + c * d, y0 + s_ * d)
+                if room < worst and room < room0 - 0.5:
+                    worst, at = room, e
+                d += 2.0
+        return worst < need, worst, at
+
+    def turn_heading_open(self, b, i, t):
+        """(e24) May step i (a leg after a turn) be sent? See the block comment above."""
+        if not TURN_HEADING_CHECK or not self.source.live or b.out or b.pose is None:
+            return True
+        j = self.turn_step_before(b.name, i)
+        if j is None:
+            return True
+        tj = b.stat[j]
+        if tj["status"] != "done":
+            return False
+        t_done = tj.get("t_done") or t
+        key = (self.plan_no, i)
+        hz = getattr(b, "thead", None)
+        if hz is None or hz["key"] != key or hz.get("t_done") != t_done:
+            n_ret = hz["returns"] if hz is not None and hz["key"] == key else 0
+            hz = b.thead = dict(key=key, t_done=t_done, t_block=t, returns=n_ret, said=0.0, risk=None)
+        if hz.get("passed"):
+            return True
+        stp = self.steps(b.name)[i]
+        yj = getattr(b, "yaw_jump", None)
+        jumped = yj is not None and yj["t"] >= (tj.get("t_sent") or t_done) - 1.0 and not yj.get("checked")
+        if hz["risk"] is None:
+            hz["risk"] = self.leg_heading_risk(b.name, stp, self.YAW_JUMP_POSSIBLE_DEG)
+        risky, room, at = hz["risk"]
+        # pictures TAKEN after the turn ended that carry a heading, against its own heading at each picture's time
+        use = [f for f in getattr(b, "cam_hist", []) if len(f) > 5 and f[5] is not None and f[0] >= t_done][-3:]
+        if not use:
+            if not (risky or jumped):
+                # nothing at risk on this leg: it drives, and the first picture after the turn is compared on the way
+                b.thead_late = dict(key=key, t_done=t_done, j=j, i=i)
+                hz["passed"] = True
+                self.log("turn_heading", robot=b.name, i=i, plan=self.plan_no, result="drives, checked on the way",
+                         room_cm=None if room == float("inf") else round(room, 1))
+                return True
+            if t - hz["said"] >= 5.0:
+                hz["said"] = t
+                self.log("turn_heading_wait", robot=b.name, i=i, plan=self.plan_no, waited_s=round(t - hz["t_block"], 2),
+                         room_cm=None if room == float("inf") else round(room, 1), at_deg=at, jumped=bool(jumped))
+                if t - hz["t_block"] >= 5.0:
+                    self.say("%s: standing after its turn until a camera shows its heading (%s): %.0f s so far"
+                             % (b.name, "its gyro jumped" if jumped else "a heading %.0f deg wrong would leave only "
+                                "%.0f cm on its next leg" % (abs(at) or self.YAW_JUMP_POSSIBLE_DEG, room),
+                                t - hz["t_block"]))
+            return False
+        d = self._heading_diff(b, use)
+        sig = self.TURN_HEAD_SIGMAS * math.hypot(self.TURN_HEAD_SIGMA_DEG / math.sqrt(len(use)), self.TURN_HEAD_OWN_DEG / 3.0)
+        rec = dict(robot=b.name, i=i, plan=self.plan_no, dth_deg=round(d, 1), tol_deg=round(sig, 1), fixes=len(use),
+                   waited_s=round(t - hz["t_block"], 2), risky=bool(risky), jumped=bool(jumped),
+                   t_run=round(t - self.t_run, 2) if self.t_run_started() else None)
+        self.__dict__.setdefault("turn_heads", []).append(rec)
+        if yj is not None:
+            yj["checked"] = True
+        if abs(d) <= sig:
+            hz["passed"] = True
+            self.log("turn_heading", result="agreed", **rec)
+            return True
+        return self.turn_heading_correct(b, j, i, use, d, rec, hz)
+
+    def _heading_diff(self, b, use):
+        """Camera heading minus own heading (deg, -180..180): the mean over the given pictures, each against the
+        robot's own heading at the picture's time."""
+        sx = sy = 0.0
+        for f in use:
+            own = self.pose_at(b, f[0])
+            oth = own[3] if own is not None else b.pose[2]
+            a = math.radians(f[5] - oth)
+            sx, sy = sx + math.cos(a), sy + math.sin(a)
+        return math.degrees(math.atan2(sy, sx))
+
+    def turn_heading_correct(self, b, j, i, use, d, rec, hz=None):
+        """The camera's heading wins: its pose is set from the camera (position: the pictures' mean; heading: its own
+        plus the difference), and the turn is driven again from the corrected heading. Returns False (the leg waits)."""
+        t = now()
+        cx, cy = sum(f[2] for f in use) / len(use), sum(f[3] for f in use) / len(use)
+        th = ((b.pose[2] + d + 180.0) % 360.0) - 180.0
+        own = list(b.pose)
+        self.send(b.name, "fpose %.2f %.2f %.2f 1.0 3.0" % (cx, cy, th))
+        b.pose, b.pose_t = (cx, cy, th), t
+        b.acc_t, b.acc_odo = t, getattr(b, "odo", 0.0)
+        b.guard_since = None
+        self.log("turn_heading", result="corrected", own=own, cam=[round(cx, 2), round(cy, 2), round(th, 1)], **rec)
+        self.warnings = getattr(self, "warnings", []) + ["%s: after a turn its own heading was %.0f deg from the "
+                                                         "camera's: heading set from the camera" % (b.name, abs(d))]
+        self.say("WARNING: %s: after its turn the camera sees it heading %.0f deg from where it believes (%.0f deg "
+                 "allowed): its heading is set from the camera and the turn is driven again before the next leg"
+                 % (b.name, abs(d), rec["tol_deg"]))
+        self.__dict__.setdefault("turn_head_fixes", []).append(dict(rec, result="corrected"))
+        if hz is not None and hz["returns"] < self.TURN_HEAD_RETURNS and b.stat[j]["status"] == "done" and \
+                all(st["status"] not in ACTIVE for st in b.stat):
+            hz["returns"] += 1
+            b.stat[j].update(status="unsent", t_done=None, t_sent=0.0)     # the turn again, from the corrected heading
+            hz["risk"] = None
+            return False
+        # mid-leg (or the re-turns are used up): that robot alone halts and the plan is made again from where it stands
+        if any(st["status"] in ACTIVE for st in b.stat):
+            self.control(b, "halt")
+        self.pending_replan = (b.name, now() + 0.5)
+        if hz is not None:
+            hz["passed"] = True
+        return False
+
+    def turn_heading_watch(self):
+        """A leg that was let go without waiting (nothing at risk): the first pictures taken after its turn are compared
+        with its own heading while it drives; a disagreement halts that robot and corrects it."""
+        if not TURN_HEADING_CHECK or not self.source.live:
+            return
+        for b in self.bots.values():
+            lt = getattr(b, "thead_late", None)
+            if lt is None:
+                continue
+            if b.out or lt["key"][0] != self.plan_no or b.pose is None:
+                b.thead_late = None
+                continue
+            use = [f for f in getattr(b, "cam_hist", []) if len(f) > 5 and f[5] is not None and f[0] >= lt["t_done"]][-3:]
+            if not use:
+                if all(st["status"] == "done" for st in b.stat[:lt["i"] + 2]) and len(b.stat) > lt["i"] + 1:
+                    b.thead_late = None        # the leg and the step after it are over: the next turn's check takes over
+                continue
+            # the robot may have turned again since (short legs): only pictures before its next turn started count
+            nxt = next((st.get("t_sent") for k, st in enumerate(b.stat) if k > lt["i"] and
+                        self.steps(b.name)[k]["type"] == "turn" and st.get("t_sent")), None)
+            use = [f for f in use if nxt is None or f[0] < nxt]
+            b.thead_late = None
+            if not use:
+                continue
+            d = self._heading_diff(b, use)
+            sig = self.TURN_HEAD_SIGMAS * math.hypot(self.TURN_HEAD_SIGMA_DEG / math.sqrt(len(use)),
+                                                     self.TURN_HEAD_OWN_DEG / 3.0)
+            rec = dict(robot=b.name, i=lt["i"], plan=self.plan_no, dth_deg=round(d, 1), tol_deg=round(sig, 1),
+                       fixes=len(use), waited_s=0.0, risky=False, jumped=False,
+                       t_run=round(now() - self.t_run, 2) if self.t_run_started() else None)
+            self.__dict__.setdefault("turn_heads", []).append(rec)
+            if abs(d) <= sig:
+                self.log("turn_heading", result="agreed on the way", **rec)
+            else:
+                self.turn_heading_correct(b, lt["j"], lt["i"], use, d, rec, None)
+
+    def turn_heading_summary(self):
+        th = getattr(self, "turn_heads", [])
+        return {"on": bool(TURN_HEADING_CHECK and self.source.live), "checks": len(th),
+                "waited": sum(1 for r in th if r.get("waited_s", 0) > 0.3),
+                "longest_wait_s": max([r.get("waited_s", 0.0) for r in th] or [0.0]),
+                "corrected": getattr(self, "turn_head_fixes", []), "yaw_jumps": getattr(self, "yaw_jumps", [])}
+
     def turn_pause_summary(self):
         out = {}
         for r in getattr(self, "turn_pauses", []):
@@ -4611,6 +4878,56 @@ class Coordinator:
             return False
         return bl is None or bl.get("dist", 0.0) <= self.DWELL_STILL_CM
 
+    # -- (e24, Nick 24 Nov D1 / D2) picture stalls: a driving robot slows, a standing robot stays ----------------------
+    BLIND_BACK_PCT = 0.9      # the share of this run's own camera losses that were over by the time used below (the
+    #                           90th percentile of the measured loss lengths, as safety_rules.FIX_GAP_PCT). Not chosen here
+    BLIND_BACK_PRIOR_S = 1.97  # MEASURED (school 23 Nov, 956 losses: 90 % were under 1.97 s), used until this run has
+    #                            measured BLIND_BACK_MIN_N losses of its own. No DOE: a measurement
+    BLIND_BACK_MIN_N = 8      # [chosen] losses before the run's own percentile replaces the school's. DOE: no (the two
+    #                           agree within the stall's own scatter after a few; it only picks which measurement)
+
+    def blind_back_s(self):
+        """How long until pictures are usually back: the 90th percentile of this run's own loss lengths (blinds), the
+        school's measured value until there are enough."""
+        v = sorted(r.get("blind_s", 0.0) for r in self.__dict__.get("blinds", []) if r.get("blind_s"))
+        if len(v) < self.BLIND_BACK_MIN_N:
+            return self.BLIND_BACK_PRIOR_S
+        return v[min(len(v) - 1, int(self.BLIND_BACK_PCT * len(v)))]
+
+    def standing_blind(self, b, bl, step_, t):
+        """Has the robot stood still since the camera lost it? Its own pose within DWELL_STILL_CM of where the camera
+        last read it, not moving now, and no drive of its own under way."""
+        if bl.get("dist", 0.0) > self.DWELL_STILL_CM or step_ >= 0.3:
+            return False
+        if b.name in ((getattr(self, "plan", None) or {}).get("robots") or {}):
+            steps = self.steps(b.name)
+            for k, st in enumerate(getattr(b, "stat", None) or []):
+                if st["status"] == "started" and k < len(steps) and steps[k].get("type") in ("drive", "arc", "approach"):
+                    return False          # a leg has begun (it is about to move): the driving rules
+        return True
+
+    def blind_slow(self, b, bl, room, v_s):
+        """A driving robot the camera has lost, whose doubt cannot reach the edge yet: slowed (fspd, the running drive's
+        speed) when the room left is less than it would cover before pictures usually return, so it keeps going toward
+        its point instead of turning back. Speed back to planned when it is seen again (blind_end)."""
+        import safety_rules as SRv_
+        if v_s <= SRv_.NOPIC_STILL_CMS or bl.get("slowed"):
+            return
+        reach = v_s * self.blind_back_s()
+        if room >= reach:
+            return
+        # the slowest speed its stopping distance was measured at (5 cm/s), never faster than it was going
+        scale = max(0.1, min(1.0, SRv_.slow_end_cms() / max(v_s, 0.1)))
+        if scale >= 0.95:
+            return
+        bl["slowed"] = now()
+        self.send(b.name, "fspd %.2f" % scale)
+        self.log("blind_slow", robot=b.name, room_cm=round(room, 1), reach_cm=round(reach, 1), v_cms=round(v_s, 1),
+                 scale=round(scale, 2), back_s=round(self.blind_back_s(), 2), own=list(b.pose))
+        self.__dict__["blind_slows"] = self.__dict__.get("blind_slows", 0) + 1
+        self.say("%s: no camera sees it and %.0f cm of room is left for its doubt: it keeps going slowly (%.0f %% "
+                 "speed) until pictures return" % (b.name, room, 100 * scale))
+
     def blind_watch(self):
         """A robot no camera sees drives on on its own wheels and gyro (the firmware does). Capped: BLIND_MAX_CM driven
         blind, or its body nearer an edge than BLIND_EDGE_CM allowing for the blind error, stops everyone. Seen again:
@@ -4652,6 +4969,17 @@ class Coordinator:
                 bl["said"] = True
                 self.say("%s: no camera sees it: driving on its own wheels and gyro (at most %.0f cm)"
                          % (b.name, self.BLIND_MAX_CM))
+            if BLIND_STANDING_STAY and self.standing_blind(b, bl, step_, t):
+                # (e24, Nick 24 Nov D2; school 23 Nov: 13 of the 16 turn-backs that drove back were robots standing
+                # somewhere: waiting for a re-plan, turning, just rejoined) a robot that has not moved since the camera
+                # lost it stays where it is: nothing about where it could be has changed, and "where the camera last
+                # read it" is where it stands. No turn-back, no hold. The moment it drives unseen the rules below
+                # apply again. MIRLT_BLIND_STANDING=act: e23 (only a robot in its dwell at a point stays)
+                if not bl.get("stand_said"):
+                    bl["stand_said"] = True
+                    self.log("blind_standing", robot=b.name, own=list(b.pose), t_run=round(t - self.t_run, 2))
+                    self.__dict__["blind_stays"] = self.__dict__.get("blind_stays", 0) + 1
+                continue
             body_edge = min(b.pose[0] - rect[0], rect[2] - b.pose[0], b.pose[1] - rect[1], rect[3] - b.pose[1]) - 4.75
             err = self.blind_err(b, bl)
             why = None
@@ -4675,7 +5003,12 @@ class Coordinator:
                 room = ES_.rect_margin(rect, b.pose[0], b.pose[1], *sh.ellipse()) - SRs_.HALF_DIAG_CM - \
                     SRs_.stop_cm(v_s if v_s > 0.3 else None)
                 bl["room"] = room
-                if room >= 0 and SG.value("MIRLT_STAGES") == "four" and not bl.get("veered"):
+                if room >= 0 and VEER_REACH and SG.value("MIRLT_STAGES") == "four":
+                    # (e24, Nick 24 Nov D1) no early turn-back while its doubt cannot reach the edge: it keeps going,
+                    # slowed when the room left is less than it would drive before pictures usually return
+                    # (blind_slow); the turn-back is the stop below, when its doubt at its speed could reach the edge
+                    self.blind_slow(b, bl, room, v_s)
+                elif room >= 0 and SG.value("MIRLT_STAGES") == "four" and not bl.get("veered"):
                     f2, k2, c2 = sh.axes_at(sh.s + 27.5, sh.head_doubt_rad())     # freeroam_core.VEER_AHEAD_CM
                     if room - max(0.0, sh.iso() + max(f2, k2, c2) - sh.extent()) < 0:
                         if VEER_AT_POINT_STAND and self.standing_at_point(b, bl):
@@ -5046,10 +5379,13 @@ class Coordinator:
 
     def blind_end(self, b, bl):
         """Seen again after driving blind: how far its own pose was off, and the reset when needed."""
+        if bl.get("slowed"):
+            self.send(b.name, "fspd 1.0")          # (e24, D1) pictures are back: its planned speed again
+            self.log("blind_slow_end", robot=b.name, slowed_s=round(now() - bl["slowed"], 2))
         h = getattr(b, "cam_hist", None) or []
         if not h:
             return
-        tf, _, cx, cy, src = h[-1]
+        tf, _, cx, cy, src = h[-1][:5]
         own = self.pose_at(b, tf)
         if own is None:
             return
@@ -5167,6 +5503,7 @@ class Coordinator:
             self.cam_guard()
             if self.abort:
                 break
+            self.turn_heading_watch()      # (e24) legs let go without a wait: heading compared on the way
             self.blind_watch()
             self.backoff_watch()
             self.readmap_watch()
@@ -5311,6 +5648,7 @@ class Coordinator:
                                       for q in self.__dict__.get("reassigned", [])],
                 "turn_pause": {"on": bool(getattr(self.args, "turn_pause", False)) and self.source.live,
                                "robots": self.turn_pause_summary()},
+                "turn_heading": self.turn_heading_summary(),
                 "mirror": self.mirror_summary()}
 
 
@@ -7110,6 +7448,23 @@ def main(argv=None):
     finally:
         # sends stop to every robot (ends the follow runs) and closes the files; a finished run leaves the robots that
         # are dancing until switched off (Monday's end) dancing
+        if SG.flag("MIRLT_WRAPUP_GUARD"):
+            # (e24, school 23 Nov N6) a second Ctrl+C (or Mission Control's "STOP again", which signals the whole
+            # group) no longer breaks the saving below: it is counted and said; the stop to every robot is sent just
+            # below either way, and a "STOP again" also goes to the robots straight from Mission Control
+            try:
+                import signal as _sgw
+                _wn = {"n": 0}
+
+                def _wrap(*_):
+                    _wn["n"] += 1
+                    if _wn["n"] >= 3:
+                        raise KeyboardInterrupt
+                    print("(Ctrl+C again: every robot is being told to stop and the run's records are being saved; "
+                          "%d more abandon the saving)" % (3 - _wn["n"]), flush=True)
+                _sgw.signal(_sgw.SIGINT, _wrap)
+            except (ValueError, OSError):
+                pass
         dancing = [n for n, b in coord.bots.items() if getattr(b, "dancing", False) and not b.out] \
             if coord.__dict__.get("abort") is None and hasattr(coord, "bots") else []
         if dancing and not args.dry_run:
@@ -7216,4 +7571,9 @@ def print_summary(s):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     sys.exit(main())

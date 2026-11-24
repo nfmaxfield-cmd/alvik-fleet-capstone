@@ -963,6 +963,11 @@ def run_farm(args, br, rx, t0, rect, starts):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     _code = main()
     import orderly_exit as OX      # (e12) no thread torn down inside OpenCV / apriltag at exit
     OX.finish(_code)

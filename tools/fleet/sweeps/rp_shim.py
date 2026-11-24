@@ -47,4 +47,9 @@ def main():
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     sys.exit(main())

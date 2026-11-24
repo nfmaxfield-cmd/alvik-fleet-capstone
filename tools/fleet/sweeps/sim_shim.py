@@ -21,6 +21,8 @@
   robot_out       {"name", "t", "mode"}: at t s after the plan starts the robot is out. "dead": stops where it is and
                   is never heard again (battery or WiFi gone); "lifted": picked up off the table (the firmware's
                   safe_lift ends its run; the camera no longer sees it)
+  yaw_jump        (e24) [{"name", "t", "deg"}]: the robot's gyro yaw jumps deg (default 25) at the start of its first turn
+                  of 20 deg or more at or after t s into the plan, while the robot has not turned (school 23 Nov, N1)
 
 The wheel scale needs no code here: fleet_sim --config with robot.radius_scale_err_pct_by_robot.
 """
@@ -239,6 +241,25 @@ def install(sim, cond, seed):
                                boot_s=rs.get("boot_s", 3.0)))
             orig_adv_r(dt_ms, busy)
         rbr.advance = advance_r
+    # ---- (e24, school 23 Nov, N1) a gyro yaw jump at the start of a turn: the IMU's fused yaw steps DEG in one sample
+    # while the robot has not turned; its own heading is then DEG off and the turn ends DEG short on the table
+    # (run 2: +25.7 deg at 0.3 s, the robot drove onto the zone 1 outlet plate). "yaw_jump": [{"name": "Alpha",
+    # "t": 10, "deg": 25}]: at the first turn that starts at or after t s into the plan. Logged (yaw_jump).
+    for yj in cond.get("yaw_jump") or []:
+        rby = sim.robots[yj["name"]]
+
+        def imu_turn_to(target, rby=rby, yj=yj, sty={"done": False}, orig=rby.imu_turn_to):
+            if not sty["done"] and sim.t_plan0 is not None and time.time() - sim.t_plan0 >= float(yj.get("t", 0)) \
+                    and abs(((target - rby.heading() + 180.0) % 360.0) - 180.0) >= float(yj.get("min_turn_deg", 20.0)):
+                sty["done"] = True
+                j = float(yj.get("deg", 25.0))
+                sg = (rby.fw_yaw_sign or rby.imu_m.yaw_sign) or 1
+                rby.yaw_raw += sg * j
+                rby.yaw_corr = ((rby.yaw_corr + j + 180.0) % 360.0) - 180.0
+                sim.event(dict(kind="yaw_jump", robot=rby.name, t=round(time.time() - sim.t_plan0, 2), deg=j,
+                               target=round(target, 1)))
+            return orig(target)
+        rby.imu_turn_to = imu_turn_to
     # ---- one robot out
     out = cond.get("robot_out")
     if out:
@@ -395,4 +416,9 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     sys.exit(main())

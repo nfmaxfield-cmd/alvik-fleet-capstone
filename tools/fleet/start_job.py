@@ -249,8 +249,9 @@ class ProcJob:
         os.makedirs(folder, exist_ok=True)
         self.out_path = os.path.join(folder, "stdout.txt")
         self.out = open(self.out_path, "w")
+        import sigint_default as SDF       # (e24, audit B1) the job takes Ctrl+C whatever shell started Mission Control
         self.p = subprocess.Popen(cmd, stdout=self.out, stderr=subprocess.STDOUT, cwd=REPO, start_new_session=True,
-                                  env=dict(os.environ, **(env or {})))
+                                  env=dict(os.environ, **(env or {})), preexec_fn=SDF.preexec())
         self.t0 = time.time()
 
     def running(self):

@@ -386,6 +386,30 @@ SWITCHES = [
     ("MIRLT_VISIT_UNSEEN", "warn", "quiet", "M",
      "Visit points: a listed point outside every camera the run uses is warned about loudly at the start (Mission "
      "Control and the run log). quiet: a NOTE line only", "e23"),
+    ("MIRLT_TURN_HEADING", "check", "off", "M",
+     "After every turn the camera's heading is compared with the robot's own. It waits for a fresh camera heading "
+     "only when its next leg, driven on a heading as wrong as a gyro jump can make it (30 deg), could bring its "
+     "body to an edge or a keep-out; otherwise it drives and the first picture after the turn is compared on the "
+     "way. When they disagree the camera wins: heading set from the camera, the turn driven again (school 23 Nov: "
+     "a 26 deg gyro jump put a robot on an outlet plate). off: position only, as before e24", "e24"),
+    ("MIRLT_SIGINT_RESTORE", "1", "0", "F M C",
+     "Every run program takes Ctrl+C even when it was started from a shell that ignores it (a script's &, nohup, "
+     "an AI agent's background shell): Mission Control's STOP then stops the run in about a second instead of 52 s "
+     "(the 24 Nov audit, B1). 0: SIGINT left as inherited, as before e24", "e24"),
+    ("MIRLT_WRAPUP_GUARD", "1", "0", "M",
+     "After the first Ctrl+C or STOP (the robots are told to stop at once), a second one no longer breaks the "
+     "saving of the run's records (stops.csv, the camera track, the summary: lost in three school runs on 23 Nov); "
+     "it is passed on as another stop and said. Three more abandon the saving. 0: any further Ctrl+C ends the "
+     "program where it is, as before e24", "e24"),
+    ("MIRLT_VEER_RULE", "reach", "ahead", "M",
+     "A DRIVING robot the camera has lost turns back only when its position doubt, at its speed, could reach an "
+     "edge; until then it keeps going, slowed to the slowest measured speed when the room left is less than it "
+     "would drive before pictures usually return (Nick 24 Nov; school 23 Nov: 3 of 223 losses of a moving robot "
+     "needed a turn-back). ahead: e21's early turn-back when its doubt would reach an edge within the next 27.5 cm", "e24"),
+    ("MIRLT_BLIND_STANDING", "stay", "act", "M",
+     "A STANDING robot (anywhere: waiting for a plan, after a turn, just rejoined, in its dwell) stays put when "
+     "the camera loses it: no turn-back and no hold while it has not moved (Nick 24 Nov; 13 of the 16 real turn- "
+     "backs on 23 Nov were standing robots). act: e23, only a robot in its dwell at a point stays", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

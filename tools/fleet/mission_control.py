@@ -125,8 +125,9 @@ class Run:
         self.kind, self.folder, self.cmd = kind, folder, cmd
         os.makedirs(folder, exist_ok=True)
         self.out = open(os.path.join(folder, "run_plan_stdout.txt"), "w")
+        import sigint_default as SDF       # (e24, audit B1) the run takes Ctrl+C whatever shell started Mission Control
         self.p = subprocess.Popen(cmd, stdout=self.out, stderr=subprocess.STDOUT, cwd=REPO,
-                                  start_new_session=True, env=env)
+                                  start_new_session=True, env=env, preexec_fn=SDF.preexec())
         self.t0 = time.time()
         self.paused = False
 
@@ -1905,4 +1906,9 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     main()

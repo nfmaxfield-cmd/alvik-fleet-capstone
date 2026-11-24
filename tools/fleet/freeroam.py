@@ -1905,6 +1905,11 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    try:                                   # (e24, audit B1) Ctrl+C reaches this program even when its parent ignores it
+        import sigint_default as _SD
+        _SD.restore()
+    except ImportError:
+        pass
     import idle_after_run as IA     # (e13) robots asleep 10 min after the run ends if no new run starts
     with (IA.track("freeroam") if sys.argv[1:2] == ["run"] else IA.contextlib.nullcontext()):
         _code = main()
