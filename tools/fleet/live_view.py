@@ -21,6 +21,8 @@ Changelog
   2026-11-13e22b (Nick 13 Nov 08:28) a free roam started from the terminal (tmux session freeroam) is shown read-only
                  (terminal_freeroam_folder: the newest logs/*-freeroam folder whose files changed in the last 15 s);
                  robots being woken at a start say so (wake.json).
+  2026-11-24e24  held_why per robot, "visit" (asked / reached / which points) and "alerts" (no pictures from a camera,
+                 every robot held) from the run's live.json, for the page's end card, filled stickers and red alert slot.
   2026-11-13e22  (Nick 13 Nov) the shape every second: shape_live.json (freeroam.py) gives each robot's shape to draw
                  (shape_draw: its pose, disc, ellipse, seen segment), its stage and whether it is rescuing itself.
 """
@@ -32,7 +34,7 @@ import math
 import os
 import time
 
-VERSION = "live-view-2026-11-13e22"   # e22: the error shape every second (shape_live.json: its pose, disc, ellipse, seen segment) for the map. Before: "live-view-2026-11-12e21"   # e21: the one error shape and Nick's stage. Before: "live-view-2026-11-12a"
+VERSION = "live-view-2026-11-24e24"   # e24: each held robot's reason (held_why), the run's points reached so far (visit) and its alerts (no pictures, every robot held) passed on from live.json. Before: "live-view-2026-11-13e22"   # e22: the error shape every second (shape_live.json: its pose, disc, ellipse, seen segment) for the map. Before: "live-view-2026-11-12e21"   # e21: the one error shape and Nick's stage. Before: "live-view-2026-11-12a"
 SHAPE_FRESH_S = 5.0   # (e22, 7) shape_live.json older than this (written every second): the run is not writing it; the
                       # once-a-minute state.json is used. Not a tuning number (display only)
 FRESH_S = 1.0         # the robots take camera fixes up to 1 s old (params.h fix_max_age_ms): a fix older than this is
@@ -86,6 +88,7 @@ def from_live(live, names_colours, refs, needs=()):
                         source="its own wheels and gyro (no camera)" if blind else src,
                         since_fix_s=_f(conf.get("since_fix_s")), battery=r.get("battery"), doing=r.get("doing") or "",
                         held=bool(r.get("held")), out=r.get("out") or "", edge_cm=r.get("edge_cm"),
+                        held_why=str(r.get("out") or "").split(";")[0] if r.get("held") or r.get("out") else "",
                         needs_hand=any(n in w for w in needs)))
     return out
 
@@ -292,9 +295,11 @@ def snapshot(starter):
     except Exception:  # noqa: BLE001
         st_needs = []
     robots, folder, src = [], None, ""
+    visit, alerts = None, []
     if kind and S.run is not None and starter.tags() and kind in ("visit", "experiment", "freeroam"):
         stt = S.run.status()
         robots = from_live(stt.get("live"), colours, refs, st_needs)
+        visit, alerts = (stt.get("live") or {}).get("visit"), (stt.get("live") or {}).get("alerts") or []
         # binding: each nickname's WiFi name (a tag site's robots are named by their wiggle)
         try:
             for p in (os.path.join(S.run.session, "bind", "binding.json"),
@@ -339,4 +344,5 @@ def snapshot(starter):
         tr = {}
     return {"t": time.time(), "running": running, "kind": kind, "table": table_of(S, folder), "points": pts,
             "robots": robots, "tracks": tr, "tracks_words": "the last minute" if running else "the whole run",
-            "source": src, "terminal": bool(terminal), "terminal_folder": terminal, "version": VERSION}
+            "source": src, "terminal": bool(terminal), "terminal_folder": terminal, "version": VERSION,
+            "visit": visit, "alerts": alerts if running else []}       # (e24) points reached so far; what needs a person now

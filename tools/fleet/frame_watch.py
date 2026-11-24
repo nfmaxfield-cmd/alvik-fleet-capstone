@@ -109,7 +109,7 @@ class FrameWatch:
             self._tell(c, "no_pictures", "CAMERA %s: NO NEW PICTURE FOR %.1f S%s (its normal gaps call for one within "
                                          "%.1f s). Each robot is slowed or held by its own risk (speed, heading, room to "
                                          "the edge); they carry on when pictures come back. Check the camera's cable and "
-                                         "the recorder (./run-fleet-pi.sh status)" % (
+                                         "the recorder (on the Pi: ./run-fleet-pi.sh rec starts it again; its picture is at http://<the Pi's address>:8000)" % (
                                              c.upper(), age, "" if first else " (STILL NONE)", lim),
                        age_s=round(age, 1), first=first, limit_s=round(lim, 2))
         return [c for c, _a, _f in tell]

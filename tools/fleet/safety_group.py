@@ -435,6 +435,10 @@ SWITCHES = [
      "A robot whose battery falls under the floor finishes the point it is on, then drives to its home spot; the "
      "points it had left go to the other robots. With one robot running, or finish: it finishes the run (as before "
      "e24) and says charge it", "e24"),
+    ("MIRLT_VISIT_TIME_LIMIT", "plan", "fixed", "M",
+     "A Visit points run's time limit follows its own plan: 4 times the first plan's length (the school's finished "
+     "runs took 1.2 to 3.3 times theirs), and past that it ends only once no new point has been reached for 4 "
+     "times the plan's time per point. fixed: the typed limit (900 s from Mission Control), as before e24", "e24"),
 ]
 
 DEFAULT = {s[0]: s[1] for s in SWITCHES}

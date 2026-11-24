@@ -36,7 +36,7 @@ Position source (--fixes): where camera poses come from (data-formats.md,
 runs against it with --fixes udp; at the end it prints the simulator's ground
 truth: docking errors, closest robots, contact.
 """
-VERSION = "2026-11-19e23c"   # e23c (audit of e23): an old picture is carried forward by what the robot DROVE only, the corrections since removed (motion_since; MIRLT_OLD_FIX_JUMPS=count: as e23); the stop tolerance is learned from reached stops only, the stop's own +- counts against it, bounded (reach_tols; MIRLT_REACH_TOL=e23); [chosen] marks on LATE_MOVED_SHARE, LATE_CHECK_KEEP_S, POSE_HOLE_S, PLAN_COST_KEEP_N, PLAN_FIT_MIN_N, PLAN_FIT_MIN_SPREAD, REACH_TOL_CAP. Before: "2026-11-19e23"   # e23 (school 16 / 18 Nov, Jay-Sun's Visit points runs): (19 Nov, finishing) a re-plan's cost is FIXED + PER POINT fitted to the run's own re-plans (plan_cost; a machine whose fixed part is over the budget plans the whole list, as before e23), and the run is not "done" while points handed to a finished robot wait for a re-plan that is due (handed_points_waiting); a stop is judged against the point's own place (point_xy), not the pause step's. A robot standing in its dwell at a point is not sent on the veer stage's early turn-back when the camera loses it (MIRLT_VEER_AT_POINT; standing_at_point), and a point is not moved to the end of the list while the robot dwells at it (defer_current_point). finish_replan no longer crashes when a robot rejoined while a plan made without it was worked out (it plans again with it); any exception in the run is "crashed: <why>", never "done"; the move check (fast_done) judges a step from where it STARTED, takes a step whose own pose ended at its target as moved, and counts the camera only when its picture is newer than the step's end (late_move_check logs what the camera says afterwards); fixed-order lists are planned a few points ahead (MIRLT_PLAN_AHEAD) and the improvement try is skipped when the first plan was over budget; a point is credited only when the robot's best position is within its tolerance (else "not reached", MIRLT_POINT_CREDIT); a fix the robot would refuse as too old is carried forward by its own motion since the picture (MIRLT_OLD_FIX); the last part of a leg that ends inside the edge rule's room is driven slowly (MIRLT_EDGE_SLOW_END). Before: "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
+VERSION = "2026-11-24e24"   # e24 (school 23 Nov, Nick's decisions of 24 Nov, the usability audit): the heading check after every turn (turn_heading_open / turn_heading_watch, a gyro yaw jump seen in the raw rows: yaw_jump_watch; MIRLT_TURN_HEADING); picture stalls: a driving robot is slowed and turns back only when its doubt could reach the edge (blind_slow; MIRLT_VEER_RULE), a standing robot stays put (standing_blind; MIRLT_BLIND_STANDING); the points ledger: no point leaves every list without a line, a missed point is tried once more at the end of the list, "Ended: N of M points reached" with each miss's reason and what to do next (ledger_*; MIRLT_POINT_RETRY), with a list per robot a held robot's points wait for it (MIRLT_HELD_POINTS), a robot under the battery floor finishes its point and goes home (battery_home; MIRLT_BATTERY_LOW), no cap on rejoins (MIRLT_REJOIN_CAP), a rejoined robot with no route waits (MIRLT_REJOIN_STRANDED), the time limit of a Visit points run follows its plan (visit_limit_s; MIRLT_VISIT_TIME_LIMIT); a heading disagreement is said in degrees; the wrap-up survives a second Ctrl+C (MIRLT_WRAPUP_GUARD); live.json carries the points reached and the alerts; the simulator lives as long as its run. Before: "2026-11-19e23c"   # e23c (audit of e23): an old picture is carried forward by what the robot DROVE only, the corrections since removed (motion_since; MIRLT_OLD_FIX_JUMPS=count: as e23); the stop tolerance is learned from reached stops only, the stop's own +- counts against it, bounded (reach_tols; MIRLT_REACH_TOL=e23); [chosen] marks on LATE_MOVED_SHARE, LATE_CHECK_KEEP_S, POSE_HOLE_S, PLAN_COST_KEEP_N, PLAN_FIT_MIN_N, PLAN_FIT_MIN_SPREAD, REACH_TOL_CAP. Before: "2026-11-19e23"   # e23 (school 16 / 18 Nov, Jay-Sun's Visit points runs): (19 Nov, finishing) a re-plan's cost is FIXED + PER POINT fitted to the run's own re-plans (plan_cost; a machine whose fixed part is over the budget plans the whole list, as before e23), and the run is not "done" while points handed to a finished robot wait for a re-plan that is due (handed_points_waiting); a stop is judged against the point's own place (point_xy), not the pause step's. A robot standing in its dwell at a point is not sent on the veer stage's early turn-back when the camera loses it (MIRLT_VEER_AT_POINT; standing_at_point), and a point is not moved to the end of the list while the robot dwells at it (defer_current_point). finish_replan no longer crashes when a robot rejoined while a plan made without it was worked out (it plans again with it); any exception in the run is "crashed: <why>", never "done"; the move check (fast_done) judges a step from where it STARTED, takes a step whose own pose ended at its target as moved, and counts the camera only when its picture is newer than the step's end (late_move_check logs what the camera says afterwards); fixed-order lists are planned a few points ahead (MIRLT_PLAN_AHEAD) and the improvement try is skipped when the first plan was over budget; a point is credited only when the robot's best position is within its tolerance (else "not reached", MIRLT_POINT_CREDIT); a fix the robot would refuse as too old is carried forward by its own motion since the picture (MIRLT_OLD_FIX); the last part of a leg that ends inside the edge rule's room is driven slowly (MIRLT_EDGE_SLOW_END). Before: "2026-11-13e22"   # e22: a start wakes sleeping robots (find_robots: wake_robots.Waker through one check-in; MIRLT_WAKE_AT_START=0: e21's wait). (Nick 13 Nov: "missions' veer: yes, turn back early toward where the camera last saw it, and may leave the lane only if its shape stays clear of the edge and others' shapes"): the early turn-back's line is checked with the robot's error SHAPE grown along it (never worse toward an edge) and kept clear of every other robot's own shape (a blind one's grown shape; one the camera has: its 95 % noise), recover_shape_ok; the circle check stays for MIRLT_ERROR_SHAPE=circle. Before: "2026-11-12e21"   # e21 (Nick 12 Nov, decisions 1 and 2): a blind mission robot's possible error is the ONE error shape (error_shape.Shape: the cone along its own track, one-sided, plus the disc) instead of a circle, for its stop (MIRLT_ERROR_SHAPE); and missions get the VEER stage where the lane allows (MIRLT_STAGES): when its shape would reach an edge within its next moves, it does not wait for the limit but turns back early along the recovery line to where the camera last read it (more room, and ground the camera reads), the lane's own check of the others kept. Before: "2026-11-12e19"   # e19 (the Fable audit, 12 Nov): SIGTERM ends a mission the Ctrl+C way (stop to every robot first, then the saves; install_signals). Before: "2026-11-12e18"   # e18 (Nick 12 Nov decisions 2, 4, 5, 6): never still in missions too: a held robot that still hears creeps (2-8 cm, scaled by its doubt, at most every derived pause) toward being found (where the camera last read it) and safety (the board's middle), inside its own held outline grown by the creep's reach so the others' plans stay valid (held_creep_watch; MIRLT_NEVER_STILL=0 the e16 hold). A lost robot first: a robot standing in its recovery's straight path steps aside (MIRLT_LOST_PRIORITY). Each robot's odometry trust (odo_trust) gives its blind error instead of the fixed 2 + 0.07 cm per cm, is checked when it is seen again, and lets a point the camera does not read stay on the list when an out-and-back from readable ground is allowed (MIRLT_BLIND_ALLOW). The trust records saved at any end (MIRLT_SAVE_CAL_AT_END). Before: "2026-11-11e16"   # e16 (6a, Claude's suggestion, Nick not asked yet; school 18:26 ended "every robot is out (none heard again within 90 s)", 18:54 by the keep-going cap): 6b: every robot whose roof-tag turn is not verified is crawled at the start, even one that needs no straightening (MIRLT_CRAWL_UNKNOWN=need: e15's way). 6a: every robot held never ends the run by itself: it holds them safely, says so every minute (NEEDS A HAND) and goes on as soon as one rejoins; the cap (--all-held-max 3 / --all-held-max-s 180) and the 90 s wait are the switch MIRLT_HELD_NEVER_END=0. (item 7, home 11 Nov 08:45): a tilt or drop trip backs out along the robot's own recorded track as far as the derived edge rule needs (observe.track_back_target: clearance with its uncertainty and own-vs-camera doubt, the stop where it ends), checked against the other robots, instead of a fixed 10 cm; the fixed back-off where the track is unknown or blocked (MIRLT_EDGE_BACKOUT=0: always the fixed 10 cm). Before: "2026-11-11e15"   # e15 (school 10 Nov 18:54): every facing check and re-check reads the tag CORRECTED by the turn this run knows (facing.corrected_tags: the tags file plus yaw_fix); a robot whose tag turn is unverified (not measured this run, nothing remembered; or remembered and a big turn would follow) is measured by the start's watched crawl before any straightening, and the crawl's measurement sets its yaw_fix; what is re-learned or crawled is remembered (--tag-heading-store, tag_heading_store). Before: "2026-11-10e14c"   # e14c (school 17:46): how old a fix may be and still count as seen comes from each robot's measured fix interval (blind_after; a slow detector treated like a slow camera; MIRLT_FIX_GAP_RULE=fixed the 0.6 s). e14b: a dark picture pauses every robot until the camera has adjusted (dark_watch). e14: a visit point whose tag was lost on the way is moved to the end of the robot's list once, then skipped (defer_current_point; MIRLT_RETRY_LOST=again the old way); the spot where it was lost kept as evidence. 2026-11-10e13 (e13): never give up blind (no BLIND_MAX_CM cap: it stops only when blind error + body + stop could reach an edge; MIRLT_BLIND_RULE=cap the old caps); no pictures: each blind robot's risk-based limit (safety_rules.no_picture_limit; MIRLT_NOPIC_RULE=off: e12's rules alone).
 VERSION_MONITOR = "2026-11-12mc"   # (Mission Control build, 12 Nov) write_live ticks the Pi efficiency monitor's feed (monitor_feed.json: the loop period; read-only)
 VERSION_B = "2026-11-10b"   # 2026-11-10b (e12 item 9): a lock-only fix never resets a pose (MIRLT_LOCK_GUARD=0: as before); a dwell broken by a halt where the robot did not move keeps its start (MIRLT_DWELL_KEEP=0). 2026-11-10a (e12): the bridge's "camera" messages (no pictures / pictures again) said and logged. No version before
 LOCK_GUARD = __import__("os").environ.get("MIRLT_LOCK_GUARD", "1") != "0"
@@ -1001,28 +1001,31 @@ class Coordinator:
                 # camera (the heading its own gyro has); a third time within a minute it is held and checked again
                 hist = [x for x in getattr(b, "guard_resets", []) if t - x < 60.0] + [t]
                 b.guard_resets = hist
-                self.log("cam_guard_reset", robot=b.name, d_cm=round(d, 2), cam=cam, own=list(b.pose), n=len(hist))
+                self.log("cam_guard_reset", robot=b.name, d_cm=round(d, 2), dth_deg=round(dth, 1), cam=cam,
+                         own=list(b.pose), n=len(hist))
                 b.guard_since = None
                 if len(hist) >= 3:
                     self.warnings = getattr(self, "warnings", []) + ["%s: camera and own pose disagreed 3 times in a "
                                                                      "minute" % b.name]
-                    self.say("WARNING: %s: camera and its own pose disagree again (%.1f cm, 3 times in a minute): "
-                             "held and checked again; the others carry on" % (b.name, d))
+                    self.say("WARNING: %s: camera and its own pose disagree again (%s, 3 times in a minute): "
+                             "held and checked again; the others carry on" % (b.name, self.disagree_words(d, dth, lim)))
                     self.retire(b, "camera and its own pose disagreed 3 times in a minute", kind="restarted")
                     continue
                 th = cam[2] if cam[2] is not None else b.pose[2]
                 if self.keep_going():
-                    self.carry_on("cam_guard", b.name, "%s: the camera and its own pose disagreed by %.1f cm for %.1f s: "
+                    self.carry_on("cam_guard", b.name, "%s: the camera and its own pose disagreed by %s for %.1f s: "
                                   "its pose was set to the camera's (the camera is trusted), the run goes on"
-                                  % (b.name, d, self.CAM_GUARD_S), d_cm=round(d, 2), cam=cam, own=list(b.pose))
+                                  % (b.name, self.disagree_words(d, dth, lim), self.CAM_GUARD_S), d_cm=round(d, 2),
+                                  dth_deg=round(dth, 1), cam=cam, own=list(b.pose))
                 self.control(b, "halt")
                 self.send(b.name, "fpose %.2f %.2f %.2f 1.0 3.0" % (cam[0], cam[1], th))
                 b.pose, b.pose_t = (cam[0], cam[1], th), t
                 b.acc_t, b.acc_odo = t, getattr(b, "odo", 0.0)     # its pose is the camera's again (confidence)
-                self.warnings = getattr(self, "warnings", []) + ["%s: camera and own pose disagreed %.1f cm: pose "
-                                                                 "reset from the camera" % (b.name, d)]
-                self.say("WARNING: %s: camera and its own pose disagree by %.1f cm: halted, its pose set from the "
-                         "camera, and the others re-plan round it" % (b.name, d))
+                self.warnings = getattr(self, "warnings", []) + ["%s: camera and own pose disagreed %s: pose "
+                                                                 "reset from the camera" % (
+                                                                     b.name, self.disagree_words(d, dth, lim))]
+                self.say("WARNING: %s: camera and its own pose disagree by %s: halted, its pose set from the "
+                         "camera, and the others re-plan round it" % (b.name, self.disagree_words(d, dth, lim)))
                 self.pending_replan = (b.name, now() + 0.5)
                 continue
             elif t - b.guard_since >= self.CAM_GUARD_S:
@@ -1033,6 +1036,16 @@ class Coordinator:
                 self.say(self.abort)
                 self.halt_all()
                 return
+
+    def disagree_words(self, d, dth, lim):
+        """(e24, school 23 Nov N5 / the audit's B5: a hold on HEADING read "disagree by 0.0 cm") What disagreed, in its
+        own unit: the position (cm) when that is over its limit, the heading (deg) when that is, both when both are."""
+        pos, head = d > lim, dth > self.HEAD_GUARD_DEG
+        if head and not pos:
+            return "%.0f deg in heading (position within %.1f cm)" % (dth, d)
+        if head:
+            return "%.1f cm and %.0f deg in heading" % (d, dth)
+        return "%.1f cm" % d
 
     def echo_pose(self, b, t, ms, x, y, th, state):
         """--poses-to HOST:PORT: the robot's own pose (wheels + gyro + the fixes it took), as JSON lines, for the
@@ -1220,6 +1233,8 @@ class Coordinator:
                 # (e12) the bridge's frame watch: no new picture from a camera (or pictures again). Said loudly and
                 # logged; the robots it no longer sees are held by the lost-robot rules as they are
                 self.say(str(ev.get("words") or "CAMERA %s: %s" % (ev.get("cam"), ev.get("state"))))
+                # (e24, the audit's finding 4) each camera's state kept for the page's red alert slot (write_live)
+                self.__dict__.setdefault("cam_state", {})[str(ev.get("cam") or "camera")] = (str(ev.get("state")), now())
                 self.log("camera_" + str(ev.get("state")), cam=ev.get("cam"), age_s=ev.get("age_s"),
                          gap_s=ev.get("gap_s"))
                 # (e13) from here each robot's own risk-based limit (blind_watch: safety_rules.no_picture_limit)
@@ -2504,8 +2519,8 @@ class Coordinator:
                 self.log("all_held_wait", robots=held, since_s=round(t - min(getattr(b, "out_t", t) for b in
                                                                               self.bots.values() if b.out), 1))
                 self.say("NEEDS A HAND: every robot is held (%s), still and safe; the run waits for them and goes on as "
-                         "soon as one is heard and checked again (it never ends by itself: Ctrl+C or Stop ends it; "
-                         "MIRLT_HELD_NEVER_END=0 gives the old 90 s end)" % ", ".join(held))
+                         "soon as one is heard and checked again (being held never ends it: Stop or Ctrl+C does, "
+                         "or the run's time limit; MIRLT_HELD_NEVER_END=0 gives the old 90 s end)" % ", ".join(held))
         elif not self.names and not any(b.out and self.rejoinable(b) and t - getattr(b, "out_t", 0.0) <
                                          self.REJOIN_WAIT_S for b in self.bots.values()):
             self.abort = "every robot is out (none heard again within %.0f s)" % self.REJOIN_WAIT_S
@@ -3142,6 +3157,10 @@ class Coordinator:
                 "kept_going": [q["words"] for q in self.__dict__.get("kept_going", [])][-12:],
                 "skipped": self.__dict__.get("skipped", []),
                 "reassigned": [{k: q[k] for k in ("point", "frm", "to")} for q in self.__dict__.get("reassigned", [])]}
+        try:
+            live["visit"], live["alerts"] = self.live_visit(), self.live_alerts(t)
+        except Exception:  # noqa: BLE001  (the page's extras never stop the live file)
+            pass
         mp = getattr(self, "mirror_points", None)
         if self.mirror_cfg():
             live["mirror"] = {"robots": self.mirror_cfg()["robots"], "n": len(mp or []),
@@ -3155,6 +3174,44 @@ class Coordinator:
             os.replace(tmp, os.path.join(self.outdir, "live.json"))
         except OSError:
             pass
+
+    def live_visit(self):
+        """(e24, D4) For the page while the run goes: points asked and reached so far, which ones, and the ones missed."""
+        L = self.__dict__.get("ledger") or {}
+        if not L:
+            return None
+        asked, reached = self.ledger_counts()
+        return {"asked": asked, "reached": reached,
+                "reached_points": [self._plabel(l) for l in self.ledger_order if L[l]["reached"]],
+                "missed_points": [self._plabel(q["point"]) for q in self.__dict__.get("dropped", [])
+                                  if L.get(q["point"], {}).get("reached", 0) < L.get(q["point"], {}).get("asked", 0)],
+                "lists": {n: [self._plabel(l) for l in self.ledger_order if L[l]["owner"] == n]
+                          for n in sorted({e["owner"] for e in L.values()})}}
+
+    def live_alerts(self, t):
+        """(e24, the audit's finding 4: two dead cameras with every robot held read "is running") What a person must
+        know NOW, for the page's red alert slot: a camera sending no pictures, every robot held (each with its reason)."""
+        out = []
+        for cam, (state, t0) in sorted((self.__dict__.get("cam_state") or {}).items()):
+            if state == "no_pictures":
+                out.append({"kind": "no_pictures", "cam": cam, "since_s": round(t - t0, 0),
+                            "title": "No pictures from %s" % ("camera %s" % cam if not str(cam).startswith("camera")
+                                                              else cam),
+                            "words": "No new picture from the %s camera for %.0f s. Robots it was tracking stay where "
+                                     "they are (or creep to safety) until pictures return. Check the camera's USB plug; "
+                                     "on the Pi, ./run-fleet-pi.sh rec starts the recorder again" % (cam, t - t0)})
+            elif state == "dark":
+                out.append({"kind": "dark", "cam": cam, "since_s": round(t - t0, 0), "title": "The picture went dark",
+                            "words": "The %s camera's picture went dark %.0f s ago: every robot stands still until the "
+                                     "camera has adjusted; the run carries on by itself." % (cam, t - t0)})
+        held = [b for b in self.bots.values() if b.out and self.rejoinable(b)]
+        if held and not self.names and self.t_run_started():
+            out.append({"kind": "all_held", "since_s": round(t - min(getattr(b, "out_t", t) for b in held), 0),
+                        "title": "Every robot is held",
+                        "words": "; ".join("%s: %s" % (b.name, str(b.out).split(";")[0]) for b in held) +
+                                 ". They are safe where they stand and the run goes on by itself as soon as a camera "
+                                 "sees one again. To help: move a robot a hand's width further onto the table."})
+        return out
 
     def silence_watch(self):
         lim = getattr(self.args, "silent_s", EC.SILENT_S)
@@ -3235,7 +3292,39 @@ class Coordinator:
             self.say("KEEP GOING: " + words)
             self.warnings = getattr(self, "warnings", []) + [words]
 
+    VISIT_LIMIT_X = 4.0     # [chosen] a Visit points run may take this many times its first plan's length before its
+    #                         time limit applies. From the school's own runs: the eight that finished by themselves on
+    #                         23 Nov took 1.2 to 3.3 times their plan (run 7: 1327 s for 404 s planned); the next whole
+    #                         number above the largest. DOE: no; re-measure as runs come in
+
+    def visit_limit_s(self):
+        """(e24, Nick's default Q-d) The time limit of a Visit points run, derived from the plan's own length: (limit s,
+        the no-progress time s after it). None: not such a run, or MIRLT_VISIT_TIME_LIMIT=fixed."""
+        L = self.__dict__.get("ledger") or {}
+        if not L or SG.value("MIRLT_VISIT_TIME_LIMIT") == "fixed":
+            return None
+        first = float(getattr(self, "first_makespan", 0.0) or self.plan.get("summary", {}).get("makespan_s") or 0.0)
+        asked = max(1, sum(e["asked"] for e in L.values()))
+        if first <= 0:
+            return None
+        return self.VISIT_LIMIT_X * first, self.VISIT_LIMIT_X * first / asked
+
     def deadline(self, timeout_s):
+        vl = self.visit_limit_s()
+        if vl is not None:
+            # the limit follows the plan (4 x its length, not a typed 900 s), and while points are still being reached
+            # it does not end the run: past the limit the run ends only after as long without a newly reached point as
+            # 4 x the plan's own time per point
+            lim, quiet = vl
+            last_pt = max([float(r.get("t_abs") or 0.0) for r in self.__dict__.get("points", [])] + [self.t_run])
+            d = max(self.t_run + lim, last_pt + quiet)
+            if not getattr(self, "_vlimit_said", False):
+                self._vlimit_said = True
+                self.log("visit_time_limit", limit_s=round(lim, 1), quiet_s=round(quiet, 1), asked_timeout_s=timeout_s)
+                self.say("time limit for this run: %.0f s (%.0f times the plan's %.0f s); after that it ends once no "
+                         "new point has been reached for %.0f s" % (lim, self.VISIT_LIMIT_X, lim / self.VISIT_LIMIT_X,
+                                                                     quiet))
+            return d
         if not self.keep_going():
             return self.t_run + timeout_s
         end = (self.plan_start or self.t_run) + float(self.plan.get("summary", {}).get("makespan_s") or 0.0)
@@ -4099,6 +4188,13 @@ class Coordinator:
     #                              against its own heading at each picture's time). No DOE: the usual 3 sigma
     TURN_HEAD_SIGMA_DEG = 1.5    # the camera heading's sigma when the fix gives none (the bridge's sigma_th default)
     TURN_HEAD_OWN_DEG = 3.0      # safety_rules.NOPIC_HEAD_UNC_DEG: its own heading's doubt after a turn (not chosen here)
+    TURN_HEAD_LAG_S = 0.45       # MEASURED (school 23 Nov: a picture is 0.42-0.43 s old when it is read, median). A picture
+    #                              counts as taken after the turn only when it ARRIVED this long after the turn ended (the
+    #                              Pi's own clock for both: a camera clock that is off cannot fool it). No DOE: a
+    #                              measurement; and the pair rule below catches the slower pictures
+    TURN_HEAD_STABLE_DEG = 4.2   # two pictures in a row must show the same heading within this (2 sigma of the difference
+    #                              of two camera headings, 1.5 deg each): a robot still turning in the picture is not read.
+    #                              No DOE: derived from the camera heading's own sigma
     TURN_HEAD_RETURNS = 2        # [chosen] the turn is driven again at most this often from a corrected heading, then
     #                              the leg is re-planned from where it stands. DOE: no (a guard; one re-turn is enough
     #                              when the camera's heading is right)
@@ -4219,8 +4315,8 @@ class Coordinator:
         if hz["risk"] is None:
             hz["risk"] = self.leg_heading_risk(b.name, stp, self.YAW_JUMP_POSSIBLE_DEG)
         risky, room, at = hz["risk"]
-        # pictures TAKEN after the turn ended that carry a heading, against its own heading at each picture's time
-        use = [f for f in getattr(b, "cam_hist", []) if len(f) > 5 and f[5] is not None and f[0] >= t_done][-3:]
+        # pictures TAKEN after the turn ended that carry a heading (fresh_headings), against its own heading
+        use = self.fresh_headings(b, t_done)
         if not use:
             if not (risky or jumped):
                 # nothing at risk on this leg: it drives, and the first picture after the turn is compared on the way
@@ -4253,12 +4349,26 @@ class Coordinator:
             return True
         return self.turn_heading_correct(b, j, i, use, d, rec, hz)
 
+    def fresh_headings(self, b, t_done, until=None):
+        """The newest two pictures in a row that carry a heading, ARRIVED at least TURN_HEAD_LAG_S after the turn ended
+        (and before `until`) and agree with each other within TURN_HEAD_STABLE_DEG: the robot stood still in both.
+        Judged on the Pi's clock alone (the practice room's cameras run 0.7 s ahead on purpose: pictures stamped
+        "after the turn" were taken during it, and the first version of this check corrected headings that were right).
+        [] while there is no such pair."""
+        c = [f for f in getattr(b, "cam_hist", []) if len(f) > 5 and f[5] is not None and
+             f[1] >= t_done + self.TURN_HEAD_LAG_S and (until is None or f[1] < until)]
+        if len(c) < 2:
+            return []
+        if abs((c[-1][5] - c[-2][5] + 180.0) % 360.0 - 180.0) > self.TURN_HEAD_STABLE_DEG:
+            return []
+        return c[-2:]
+
     def _heading_diff(self, b, use):
         """Camera heading minus own heading (deg, -180..180): the mean over the given pictures, each against the
-        robot's own heading at the picture's time."""
+        robot's own heading when the picture arrived (the Pi's clock; the robot stands or drives straight then)."""
         sx = sy = 0.0
         for f in use:
-            own = self.pose_at(b, f[0])
+            own = self.pose_at(b, f[1])
             oth = own[3] if own is not None else b.pose[2]
             a = math.radians(f[5] - oth)
             sx, sy = sx + math.cos(a), sy + math.sin(a)
@@ -4308,18 +4418,16 @@ class Coordinator:
             if b.out or lt["key"][0] != self.plan_no or b.pose is None:
                 b.thead_late = None
                 continue
-            use = [f for f in getattr(b, "cam_hist", []) if len(f) > 5 and f[5] is not None and f[0] >= lt["t_done"]][-3:]
-            if not use:
-                if all(st["status"] == "done" for st in b.stat[:lt["i"] + 2]) and len(b.stat) > lt["i"] + 1:
-                    b.thead_late = None        # the leg and the step after it are over: the next turn's check takes over
-                continue
             # the robot may have turned again since (short legs): only pictures before its next turn started count
             nxt = next((st.get("t_sent") for k, st in enumerate(b.stat) if k > lt["i"] and
                         self.steps(b.name)[k]["type"] == "turn" and st.get("t_sent")), None)
-            use = [f for f in use if nxt is None or f[0] < nxt]
-            b.thead_late = None
+            use = self.fresh_headings(b, lt["t_done"], until=nxt)
             if not use:
+                if nxt is not None or (all(st["status"] == "done" for st in b.stat[:lt["i"] + 2]) and
+                                       len(b.stat) > lt["i"] + 1):
+                    b.thead_late = None        # its next turn has begun: that turn's own check takes over
                 continue
+            b.thead_late = None
             d = self._heading_diff(b, use)
             sig = self.TURN_HEAD_SIGMAS * math.hypot(self.TURN_HEAD_SIGMA_DEG / math.sqrt(len(use)),
                                                      self.TURN_HEAD_OWN_DEG / 3.0)
@@ -7786,6 +7894,10 @@ def main(argv=None):
             cmd += ["--brick", args.brick]
         for w in args.wifi_drop:
             cmd += ["--wifi-drop", w]
+        if not any(str(x).startswith("--max-s") for x in args.sim_arg):
+            # (e24, the audit's B3: a practice run over 10 min lost its simulator and waited for ever) the simulator
+            # lives as long as its run: it is ended with the run below; its own 600 s life applied only when asked for
+            cmd += ["--max-s=86400"]
         cmd += args.sim_arg
         if getattr(args, "straighten", False) and "--persist" not in cmd:
             cmd += ["--persist"]

@@ -8,7 +8,18 @@
      option 1), laptop first. The live table is the page: plan on it before a run, watch it during, see where the robots
      went after. The old page stays at /classic (the engineer view: setup, Measure, every typed value), and opens at /
      again with Settings > "Open the old page by default" (keep features, switch them off).
-     Changelog: 2026-11-19e23: the loud warning about listed points no camera of the run can see is shown on this page too (before: on the old page only). 2026-11-12a first version (Mission Control build). 2026-11-16ko: the site's keep-outs (outlet plates, the middle box) drawn on the map as measured, grey. 2026-11-16vp (Nick 16 Nov): the run bar and the Settings drawer are redrawn after a click (before: not until the focus left them, so a clicked run type looked unchosen); only typing in a box holds them. Visit points can take a list per robot ("A list per robot" in the run bar: pick a robot, click its stickers; each robot's points and route in its own colour), sent as 'Alpha:P01,P05;Bravo:P11', the form mission_run already took; "One list, shared out" stays the default and works as before (keep features, switch them off). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
+     Changelog: 2026-11-24e24 (the 24 Nov usability audit, Nick's "perfect and user friendly"): every message is a toast
+     above the bottom bar (the old line stays under Details); a red band when Mission Control has not answered two polls;
+     the run's alerts (no pictures from a camera, every robot held) in the red slot and the status band, each held
+     robot's reason on its card; a plain phase line and "5 of 6 points" in the bar, the Log box scrolls the whole run;
+     the end card ("Ended: 5 of 6 points reached", each missed point with its reason and what to do next), reached
+     stickers filled; Run again names and runs the last order, the lists survive a reload and New run keeps them; the
+     plan view has the camera's picture with Jay-Sun's overhead / side switch, a typed order (Alpha:P01;Bravo:P35),
+     presets that hold a list per robot, unreadable rings, click a chip to remove it; one in-page start panel (asked
+     once per Mission Control session); the Safety box lists hand-set switches first with "All back to automatic";
+     a phone layout (one-row bar, lists in a pull-up sheet, alerts and robots above the map, 24 px tap rings).
+     Old ways kept: Settings > "Ask with pop-ups before a start", MIRLT_MC_RUN_AGAIN=empty, the old page at /classic.
+     2026-11-19e23: the loud warning about listed points no camera of the run can see is shown on this page too (before: on the old page only). 2026-11-12a first version (Mission Control build). 2026-11-16ko: the site's keep-outs (outlet plates, the middle box) drawn on the map as measured, grey. 2026-11-16vp (Nick 16 Nov): the run bar and the Settings drawer are redrawn after a click (before: not until the focus left them, so a clicked run type looked unchosen); only typing in a box holds them. Visit points can take a list per robot ("A list per robot" in the run bar: pick a robot, click its stickers; each robot's points and route in its own colour), sent as 'Alpha:P01,P05;Bravo:P11', the form mission_run already took; "One list, shared out" stays the default and works as before (keep features, switch them off). 2026-11-13e22: each robot's error shape drawn live on the map (an ellipse along its own track, every second from shape_live.json) and "rescuing itself" in its line; the live data asked every second. 2026-11-13e22b (Nick 08:28): a status line at the top, always (what runs, since when, each robot found / asleep / not heard, what it waits for), Restart Mission Control always there, a free roam started from the terminal shown read-only, a robot being woken says so, and needs-a-hand requests of an earlier run cleared.
      2026-11-12e20 the Camera trust card (/api/camera_trust): per camera, what it is trusted for and where, on how much
      evidence, in plain words. -->
 <style>
@@ -33,7 +44,7 @@ button:disabled{opacity:.5;cursor:default}
 .top{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
 .top .brand{font-weight:700;font-size:16px;margin-right:4px}
 .grow{flex:1}
-.wrap{max-width:1480px;margin:0 auto;padding:16px 20px 130px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
+.wrap{max-width:1480px;margin:0 auto;padding:16px 20px calc(var(--barh,110px) + 24px);display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
 .rail{display:flex;flex-direction:column;gap:12px;min-width:0}
 svg.map{width:100%;height:auto;display:block;max-height:calc(100vh - 260px)}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:6px}
@@ -42,6 +53,7 @@ svg.map{width:100%;height:auto;display:block;max-height:calc(100vh - 260px)}
 .source{font-size:11.5px;color:var(--muted);margin-top:2px}
 .runbar{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--panel);border-top:1px solid var(--line);padding:10px 20px;box-shadow:0 -2px 8px rgba(16,24,40,.06)}
 .runbar .in{max-width:1480px;margin:0 auto;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap}
+.runbar .in>b{white-space:nowrap}.runbar .stop{white-space:nowrap}
 .kinds{display:inline-flex;gap:6px;flex-wrap:wrap}
 .kinds button{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 13px}
 .kinds button.on{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--panel)}
@@ -73,8 +85,36 @@ details>summary{cursor:pointer}
 .hidden{display:none!important}
 .err{color:var(--red);font-size:13px;min-height:18px}
 @keyframes pulse{50%{opacity:.3}}.handring{animation:pulse 1.2s ease-in-out infinite}
-@media (max-width:980px){.wrap{grid-template-columns:1fr;padding-bottom:190px}}
-@media (max-width:600px){.top{padding:8px 12px}.wrap{padding:12px 12px 220px}.runbar{padding:8px 12px}.top .hide-s{display:none}}
+/* (e24) toasts: every message where it is seen, above the bottom bar */
+#toasts{position:fixed;left:0;right:0;bottom:var(--barh,84px);z-index:12;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 12px 10px;pointer-events:none}
+.toast{pointer-events:auto;max-width:min(760px,100%);background:var(--green-bg);color:#0B5A40;border:1.5px solid var(--green);border-radius:10px;padding:9px 14px;font-size:14px;box-shadow:0 4px 14px rgba(16,24,40,.18);cursor:pointer;overflow-wrap:anywhere}
+.toast.bad{background:var(--red-bg);color:var(--red);border-color:var(--red);font-weight:600}
+#deadband{display:none;background:var(--red);color:#fff;padding:10px 20px;font-weight:600;font-size:14.5px}
+#deadband.on{display:block}
+.statusline.alarm{background:var(--red-bg);color:var(--red);font-weight:600}
+.endcard{border:2px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--panel);box-shadow:var(--shadow)}
+.endcard.ok{border-color:var(--green)}.endcard.part{border-color:var(--amber)}.endcard.bad{border-color:var(--red)}
+.endcard h3{margin:0 0 2px;font-size:17px}
+.endcard .miss{border-top:1px solid var(--line);padding:6px 0 2px;font-size:13px}
+.chip{cursor:default}.chip.rm{cursor:pointer}.chip.rm:hover{text-decoration:line-through;border-color:var(--red)}
+.planrow{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.planrow>div{flex:1 1 380px;min-width:0}
+.modal{position:fixed;inset:0;background:rgba(16,24,40,.45);z-index:20;display:flex;align-items:center;justify-content:center;padding:14px}
+.modal .box{background:var(--panel);border-radius:14px;padding:18px 20px;max-width:560px;width:100%;box-shadow:0 12px 40px rgba(16,24,40,.3);max-height:92vh;overflow:auto}
+.modal label.tick{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:14.5px}
+.modal label.tick input{width:20px;height:20px;margin-top:1px;flex:none}
+.sheetbtn{display:none}
+.phase{font-weight:600}
+@media (max-width:980px){.wrap{grid-template-columns:1fr}}
+@media (max-width:600px){.top{padding:8px 12px}.wrap{padding:12px 12px calc(var(--barh,64px) + 20px);display:flex;flex-direction:column}.runbar{padding:8px 12px}.top .hide-s{display:none}
+  /* (e24, finding 6) phone: alerts and the robots above the map; a one-row bar; the lists in a pull-up sheet */
+  .wrap>aside.rail{order:-1}.wrap>aside.rail #health,.wrap>aside.rail #camtrust{display:none}
+  body.more .wrap>aside.rail #health,body.more .wrap>aside.rail #camtrust{display:block}
+  .runbar .in{flex-wrap:nowrap;gap:8px}.runbar .kinds{display:none}.runbar select.kindsel{display:inline-block!important;max-width:42vw}
+  .runbar .planlists{display:none}.runbar.sheet .planlists{display:block;position:fixed;left:0;right:0;bottom:var(--barh,64px);background:var(--panel);border-top:1px solid var(--line);padding:12px;max-height:60vh;overflow:auto;box-shadow:0 -6px 18px rgba(16,24,40,.16)}
+  .sheetbtn{display:inline-block}.runbar .hide-s,.runbar .upl{display:none}
+  .runbar #start{padding:10px 14px!important;font-size:15px!important;white-space:nowrap}
+  svg.map{max-height:none}.planrow>div{flex-basis:100%}}
 </style>
 </head>
 <body>
@@ -97,12 +137,14 @@ details>summary{cursor:pointer}
   <button class="ghost" id="gear">Settings</button>
   <button class="stop" id="stoptop" title="Stops every robot at once">STOP</button>
 </header>
+<div id="deadband" role="alert"></div>
 <div id="statusline" class="statusline" role="status" aria-live="polite"></div>
 <main class="wrap">
   <section class="card" style="padding:14px;min-width:0">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px" id="maptitle">The table now</h2><span class="small muted" id="mapnote"></span></div>
     <div id="codebanner"></div>
-    <div id="map" style="margin-top:8px"></div>
+    <div id="planextra"></div>
+    <div class="planrow" style="margin-top:8px"><div id="map"></div><div id="planpic" class="hidden"></div></div>
     <div class="legend"><span><span class="sw" style="background:var(--table)"></span>the table</span><span><span class="sw" style="background:#98A2B3"></span>a keep-out (outlet plate, box): the robots keep clear of it</span><span>shape = where the robot may really be: its body plus its 95 % error shape, live every second (dashed: no camera has it now)</span><span><span class="sw" style="background:var(--red-bg);border-color:var(--red)"></span>needs a hand</span><span id="stickerlegend">o sticker (click to add it to the order)</span></div>
     <p class="caption" id="mapcap"></p>
     <div class="source" id="mapsrc"></div>
@@ -113,10 +155,13 @@ details>summary{cursor:pointer}
     <div class="card health hidden" id="logcard" style="padding:10px 12px"></div>
     <div class="card health" id="health"></div>
     <div class="card health" id="camtrust"></div>
-    <div class="err" id="err"></div>
+    <details class="small muted" id="msgbox"><summary>Details: this page's messages</summary><div class="err" id="err"></div><div class="tiny" id="msglog"></div></details>
+    <button class="ghost small" id="morebtn" style="display:none">Show Pi health and camera trust</button>
   </aside>
 </main>
-<div class="runbar"><div class="in" id="runbar"></div></div>
+<div id="toasts" aria-live="assertive"></div>
+<div id="modalslot"></div>
+<div class="runbar" id="runbarbox"><div class="in" id="runbar"></div></div>
 <div class="drawer" id="drawer" aria-label="Settings"></div>
 
 <script>
@@ -131,6 +176,29 @@ function vpWho() { const ns = vpNames(); if (!ns.includes(who)) who = ns[0]; ret
 function vpSpec() { return vpNames().filter(n => (lists[n] || []).length).map(n => n + ":" + lists[n].join(",")).join(";"); }
 function vpCount() { return vpNames().reduce((a, n) => a + (lists[n] || []).length, 0); }
 let logOpen = false, soundOn = false, audio = null, lastBeep = 0, drawerOpen = false, safetyOpen = false;
+// (e24) the plan view: the camera's picture (Jay-Sun's overhead | side switch), a typed order, presets, unreadable rings
+let VP = null, vpCam = "overhead", vpLoading = false, vpStamp = Date.now(), LOG = null, logFollow = true, stopPressed = 0, sheetOpen = false;
+// (e24, finding 2) the lists live through a reload (this browser's storage), and "New run" keeps them for editing
+function saveLists() { store("mc_vp_lists", JSON.stringify({lists, order, who})); }
+function loadLists() { try { const d = JSON.parse(store("mc_vp_lists") || "{}"); lists = d.lists || {}; order = d.order || []; who = d.who || null; } catch (e) { lists = {}; order = []; } }
+function vpNorm(t) { t = String(t || "").trim().toUpperCase(); const m = t.match(/^P?(\d+)$/); return m ? "P" + String(+m[1]).padStart(2, "0") : t; }
+// a typed order: "P01,P05,P11" (one list) or "Alpha:P01,P02;Bravo:P35" (a list per robot). Returns words on a mistake.
+function vpTyped(text) {
+  text = String(text || "").trim(); if (!text) return "";
+  const pts = (LIVE && LIVE.points) || (VP && VP.points) || {}, bad = [];
+  const labs = t => t.split(/[ ,]+/).map(vpNorm).filter(Boolean).filter(l => { if (pts[l] || !Object.keys(pts).length) return true; bad.push(l); return false; });
+  if (text.includes(":")) {
+    const names = vpNames(), low = {}; names.forEach(n => low[n.toLowerCase()] = n);
+    const nl = {}; const unknown = [];
+    for (const part of text.split(";")) { if (!part.trim()) continue; const i = part.indexOf(":"); if (i < 0) { return `"${part.trim()}" has no robot name: write Alpha:P01,P02;Bravo:P35`; }
+      const raw = part.slice(0, i).trim(), n = low[raw.toLowerCase()]; if (!n) { unknown.push(raw); continue; } nl[n] = labs(part.slice(i + 1)); }
+    if (unknown.length) return `No robot named ${unknown.join(", ")} here (robots: ${names.join(", ")}).`;
+    if (bad.length) return `No such sticker here: ${bad.join(", ")}.`;
+    lists = nl; vpEach = true; store("mc_vp_each", "on");
+  } else { const l = labs(text); if (bad.length) return `No such sticker here: ${bad.join(", ")}.`;
+    if (vpEach) lists[vpWho()] = l; else order = l; }
+  saveLists(); return "";
+}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const fmt = t => { t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
@@ -138,7 +206,27 @@ async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
 }
-function flash(t, bad) { $("err").textContent = t; $("err").style.color = bad ? "var(--red)" : "var(--green)"; }
+// (e24, finding 1: every message was written under the Pi health card, below the screen) a toast above the bottom
+// bar, where it is seen at any scroll position on a laptop and a phone; an error stays 12 s, anything else 6 s; a
+// click puts it away. The old line (#err) is still written, under "Details: this page's messages", with the last 30.
+let msgs = [];
+function flash(t, bad) {
+  $("err").textContent = t; $("err").style.color = bad ? "var(--red)" : "var(--green)";
+  msgs.push(new Date().toLocaleTimeString() + (bad ? " PROBLEM: " : " ") + t); msgs = msgs.slice(-30);
+  $("msglog").innerHTML = msgs.slice().reverse().map(m => `<div>${esc(m)}</div>`).join("");
+  const d = document.createElement("div"); d.className = "toast" + (bad ? " bad" : ""); d.setAttribute("role", bad ? "alert" : "status"); d.textContent = t;
+  d.onclick = () => d.remove(); $("toasts").appendChild(d);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+  setTimeout(() => d.remove(), bad ? 12000 : 6000);
+}
+// (e24, finding 1) Mission Control not answering: after 2 missed polls of /api/start (4 s: the page asks every 2 s) a
+// red band says so, since when, and that what is shown is old. No DOE: two is the fewest that is not one lost request
+let missed = 0, lastOk = Date.now(), POLL_MISS_N = 2;
+function deadCheck() {
+  const dead = missed >= POLL_MISS_N, b = $("deadband");
+  b.className = dead ? "on" : "";
+  if (dead) b.textContent = `Mission Control is not answering since ${new Date(lastOk).toLocaleTimeString()}: what you see below is old. STOP from this page may not have reached the robots. On the Pi, type: ./run-fleet-pi.sh stopall   (then ./run-fleet-pi.sh mc to start Mission Control again).`;
+}
 const isTags = () => !!(S && S.site && S.site.tracking === "tags");
 let dismissed = null;      // "New run" after a run: its card is put away on this page (the server keeps it)
 const st = () => { const s = (T && T.status) || {}; return (s.kind && !s.running && !s.stopping && dismissed && s.folder === dismissed) ? {} : s; };
@@ -170,7 +258,7 @@ function mapSVG() {
   const k = W / (f.x_max - f.x_min + 2 * pad), H = (f.y_max - f.y_min + 2 * pad) * k + 16;
   const k_ = k;
   const X = x => ((x - f.x_min + pad) * k).toFixed(1), Y = y => ((f.y_max + pad - y) * k).toFixed(1);
-  const pick = !going() && kind === "visit" && isTags();
+  const pick = !going() && !st().kind && kind === "visit" && isTags();     // (e24) only while planning: after a run the map shows what was reached
   let o = `<svg class="map" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="The table from above with the robots">`;
   o += `<rect x="${X(f.x_min)}" y="${Y(f.y_max)}" width="${((f.x_max - f.x_min) * k).toFixed(1)}" height="${((f.y_max - f.y_min) * k).toFixed(1)}" fill="var(--table)" stroke="var(--table-edge)" stroke-width="1.5" rx="4"/>`;
   const pts = L.points || {};
@@ -179,11 +267,19 @@ function mapSVG() {
     const u = k.centre_in ? 2.54 : 1, c = k.centre_in || k.centre_cm, z = k.size_in || k.size_cm; if (!c || !z) continue;
     o += `<rect x="${X(c[0] * u - z[0] * u / 2)}" y="${Y(c[1] * u + z[1] * u / 2)}" width="${(z[0] * u * k_).toFixed(1)}" height="${(z[1] * u * k_).toFixed(1)}" fill="#98A2B3" fill-opacity=".55" stroke="#475467" stroke-width="1"><title>${esc(k.name || "keep-out")}: the robots keep clear of it</title></rect>`; }
   const each = pick && vpEach;
+  // (e24) points reached so far (while a run goes and after it) are filled green with a tick; missed ones ringed red
+  const vis = (st().kind === "visit" && ((going() && LIVE && LIVE.visit) || (st().end && st().end.visit && endVisit(st().end.visit)))) || null;
+  const reachedSet = new Set((vis && vis.reached_points) || []), missedSet = new Set((vis && vis.missed_points) || []);
+  const unread = (pick && VP && VP.unreadable) || {};
+  // (e24, finding 6) every sticker's tap area is at least 24 px across on any screen (a phone drew them 6 x 11 px)
+  const pxPer = Math.max(0.05, (($("map") && $("map").clientWidth) || W) / W), hitR = Math.max(pick ? 9 : 5, 12 / pxPer);
   if (!each && order.length > 1) o += `<polyline points="${order.filter(p => pts[p]).map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".7"/>`;
   if (each) for (const rn of vpNames()) { const l = (lists[rn] || []).filter(p => pts[p]); if (l.length > 1) o += `<polyline points="${l.map(p => X(pts[p][0]) + "," + Y(pts[p][1])).join(" ")}" fill="none" stroke="${vpColour(rn)}" stroke-width="1.8" stroke-dasharray="5 4" opacity=".8"/>`; }
   for (const [lab, p] of Object.entries(pts)) { let n = order.reduce((a, q, i) => q === lab ? a.concat(i + 1) : a, []), fillC = "var(--accent)";
     if (each) { n = []; fillC = null; for (const rn of vpNames()) (lists[rn] || []).forEach((q, i) => { if (q === lab) { n.push((vpNames().length > 1 ? rn[0] : "") + (i + 1)); fillC = fillC || vpColour(rn); } }); }
-    o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : 5}" fill="${n.length ? fillC : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
+    const got = reachedSet.has(lab), lost = missedSet.has(lab) && !got;
+    if (got) { n = ["\u2713"]; fillC = "var(--green)"; }
+    o += `<g class="stk" data-p="${esc(lab)}" style="cursor:${pick ? "pointer" : "default"}">${pick ? `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${hitR.toFixed(1)}" fill="#000" fill-opacity="0"/>` : ""}${unread[lab] ? `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 13 : 9}" fill="none" stroke="var(--red)" stroke-width="2"><title>${esc(lab)}: ${esc(unread[lab])}</title></circle>` : ""}${lost ? `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="10" fill="none" stroke="var(--red)" stroke-width="2.5" stroke-dasharray="4 3"><title>${esc(lab)}: missed</title></circle>` : ""}<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${pick ? 9 : got ? 7 : 5}" fill="${n.length ? fillC : "var(--panel)"}" stroke="var(--sticker)" stroke-width="1.2"/>${n.length ? `<text x="${X(p[0])}" y="${(+Y(p[1]) + 4).toFixed(1)}" font-size="${n.length > 1 ? 8 : 11}" font-weight="700" fill="#fff" text-anchor="middle">${n.join(",")}</text>` : ""}<text x="${X(p[0])}" y="${(+Y(p[1]) + (pick ? 22 : 16)).toFixed(1)}" font-size="11" fill="var(--sticker)" text-anchor="middle">${esc(String(lab).replace(/^P/, ""))}</text></g>`; }
   for (const [n, pts_] of Object.entries(((st().kind || L.terminal) && L.tracks) || {})) { const c = ((L.robots || []).find(r => r.name === n) || {}).colour || "#5B6474";
     if (pts_.length > 1) o += `<polyline points="${pts_.map(p => X(p[0]) + "," + Y(p[1])).join(" ")}" fill="none" stroke="${c}" stroke-width="${going() ? 1.5 : 2}" stroke-opacity="${going() ? .35 : .7}" stroke-linejoin="round"/>`; }
   for (const r of (L.robots || [])) {
@@ -218,7 +314,60 @@ function drawMap() {
     : "Each square is a robot, named by its nickname; the wider its ring, the less sure the run is of where it is. " + (phase === "after" ? "Lines: where each robot drove (the camera's fixes)." : "Faint lines: where each drove in the last minute.");
   $("mapsrc").textContent = "Measured: each robot's position and its 95 % error" + (LIVE && LIVE.source ? ", from " + LIVE.source : "") + ". Stickers: the site's sticker sheet.";
   $("stickerlegend").classList.toggle("hidden", !isTags());
-  document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; if (vpEach) { const w = vpWho(); (lists[w] = lists[w] || []).push(g.dataset.p); } else order.push(g.dataset.p); render(); });
+  document.querySelectorAll(".stk").forEach(g => g.onclick = () => { if (going() || kind !== "visit" || !isTags()) return; vpAdd(g.dataset.p); });
+  drawPlan(phase === "before" && kind === "visit" && isTags());
+}
+function vpAdd(lab) { if (vpEach) { const w = vpWho(); (lists[w] = lists[w] || []).push(lab); } else order.push(lab); saveLists(); render(); }
+function endVisit(v) { const missed = []; for (const o of Object.values(v.robots || {})) for (const q of (o.missed || [])) missed.push(q.point);
+  const reached = []; for (const o of Object.values(v.robots || {})) reached.push(...(o.reached_points || [])); return {reached_points: reached, missed_points: missed}; }
+// (e24, finding 5; Jay-Sun's 18 Nov switch, brought to this page) the plan view: beside the map, the camera's own picture
+// with every sticker marked through the camera's model (click one to add it: the nearest sticker is taken), a switch
+// between the overhead and the side camera, red rings where a roof tag cannot be read, a typed order and the presets
+async function vpLoad() { if (vpLoading) return; vpLoading = true;
+  try { VP = await api(`/api/visit/points?cam=${vpCam}`);
+    // (B11) a camera with no model answers without sticker places: fall back to the overhead camera and say so
+    if (vpCam !== "overhead" && !Object.keys(VP.px || {}).length) { flash(`The ${vpCam} camera has no model here yet (${(VP.words || []).join(" ") || "Setup, Measure"}): showing the overhead camera.`, true); vpCam = "overhead"; VP = await api(`/api/visit/points?cam=overhead`); }
+  } catch (e) { VP = {points: {}, px: {}, unreadable: {}, presets: {}, presets_each: {}, words: [e.message], failed: true}; if (vpCam !== "overhead") { flash("Camera " + vpCam + ": " + e.message + ": showing the overhead camera.", true); vpCam = "overhead"; } }
+  vpLoading = false; render(); }
+function drawPlan(on) {
+  const pic = $("planpic"), ex = $("planextra");
+  if (!on) { pic.classList.add("hidden"); if (ex.dataset.h) { ex.innerHTML = ""; ex.dataset.h = ""; } return; }
+  if (!VP) { vpLoad(); return; }
+  const sz = VP.size, px = VP.px || {};
+  const hasPic = !!(sz && Object.keys(px).length);
+  pic.classList.toggle("hidden", !hasPic);
+  if (hasPic) {
+    const sel = new Set(vpEach ? Object.values(lists).flat() : order);
+    const marks = Object.entries(px).map(([l, q]) => `<g><circle cx="${q[0]}" cy="${q[1]}" r="${sz[0] / 90}" fill="${sel.has(l) ? "var(--accent)" : "none"}" fill-opacity=".55" stroke="${(VP.unreadable || {})[l] ? "#E5484D" : "#fff"}" stroke-width="${sz[0] / 400}"/><text x="${q[0]}" y="${q[1] - sz[0] / 70}" font-size="${sz[0] / 55}" fill="#fff" stroke="#000" stroke-width="${sz[0] / 500}" paint-order="stroke" text-anchor="middle">${esc(l)}</text></g>`).join("");
+    const h = `<div style="position:relative;line-height:0"><img id="vpimg" src="/api/frame?cam=${esc(vpCam)}&t=${vpStamp}" alt="The ${esc(vpCam)} camera's picture: click a sticker to add it" style="width:100%;border-radius:8px;cursor:crosshair;display:block" draggable="false"><svg viewBox="0 0 ${sz[0]} ${sz[1]}" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none">${marks}</svg></div>
+      <p class="caption">The ${vpCam === "side" ? "side camera (camera 2)" : "overhead camera"}'s picture${VP.practice ? " (practice: the simulator's)" : ""} with each sticker marked where the camera's model puts it; click one to add it (the nearest sticker is taken). Red rings: a roof tag cannot be read there.</p>
+      <div class="source">Show camera: ${["overhead", "side"].map(c => `<a href="#" data-vpcam="${c}" style="${vpCam === c ? "font-weight:700;text-decoration:none;color:var(--ink)" : ""}">${c === "side" ? "side (camera 2)" : "overhead"}</a>`).join(" | ")} &middot; <a href="#" id="vprefresh">New picture</a>. Source: the camera's live picture and its model from the setup (${esc((VP.model || "").split("/").slice(-2).join("/") || "none")}).</div>`;
+    if (pic.dataset.h !== h) { pic.innerHTML = h; pic.dataset.h = h;
+      const img = $("vpimg");
+      img.onerror = () => { img.style.display = "none"; };
+      img.onclick = ev => { const b = img.getBoundingClientRect(), u = (ev.clientX - b.left) / b.width * sz[0], v = (ev.clientY - b.top) / b.height * sz[1];
+        let best = null, bd = 1e9; for (const [l, q] of Object.entries(px)) { const d = Math.hypot(q[0] - u, q[1] - v); if (d < bd) { bd = d; best = l; } }
+        if (best && bd <= sz[0] / 12) vpAdd(best); else flash("That click is too far from any sticker in the picture: click nearer one, or use the map.", true); };
+      pic.querySelectorAll("[data-vpcam]").forEach(a => a.onclick = e => { e.preventDefault(); vpCam = a.dataset.vpcam; vpStamp = Date.now(); VP = null; pic.dataset.h = ""; render(); });
+      $("vprefresh").onclick = e => { e.preventDefault(); vpStamp = Date.now(); VP = null; pic.dataset.h = ""; render(); };
+    }
+  }
+  const un = Object.keys(VP.unreadable || {}), cur = vpEach ? vpSpec() : order.join(",");
+  const pe = VP.presets_each || {}, ps = VP.presets || {};
+  const eh = `<div class="card" style="padding:8px 10px;margin-top:8px;box-shadow:none"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <label class="small" for="vptype"><b>Type the order</b></label><input id="vptype" placeholder="P01,P05,P11   or   Alpha:P01,P02;Bravo:P35" style="flex:1 1 300px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit" value="">
+      <button class="ghost" id="vptypego">Use it</button>
+      <select id="vppreset" style="padding:7px;border-radius:8px;border:1px solid var(--line);max-width:230px"><option value="">Presets...</option>${Object.keys(ps).map(k => `<option value="s:${esc(k)}">${esc(k)} (${ps[k].length}, one list)</option>`).join("")}${Object.keys(pe).map(k => `<option value="e:${esc(k)}">${esc(k)} (a list per robot)</option>`).join("")}</select>
+      <button class="ghost" id="vpsave" ${cur ? "" : "disabled"} title="Keep the lists on screen under a name">Save as a preset</button></div>
+    <div class="tiny muted" style="margin-top:4px">Now: ${cur ? esc(cur) : "nothing chosen (Start shares the points out)"}. ${un.length ? `<span style="color:var(--red)">${un.length} sticker${un.length === 1 ? "" : "s"} ringed red: a roof tag cannot be read there (${esc(un.slice(0, 8).join(", "))}${un.length > 8 ? ", ..." : ""}).</span> ` : ""}${hasPic ? "" : esc((VP.words || []).join(" "))}</div></div>`;
+  if (ex.dataset.h !== eh && !typingIn("#planextra")) { ex.innerHTML = eh; ex.dataset.h = eh;
+    const go = () => { const w = vpTyped($("vptype").value); if (w) flash(w, true); else { flash("Order set: " + (vpEach ? vpSpec() : order.join(","))); ex.dataset.h = ""; render(); } };
+    $("vptypego").onclick = go; $("vptype").onkeydown = e => { if (e.key === "Enter") go(); };
+    $("vppreset").onchange = () => { const v = $("vppreset").value; if (!v) return; const w = v[0] === "e" ? vpTyped(pe[v.slice(2)]) : (vpEach ? (lists[vpWho()] = (ps[v.slice(2)] || []).slice(), saveLists(), "") : (order = (ps[v.slice(2)] || []).slice(), saveLists(), ""));
+      if (w) flash(w, true); ex.dataset.h = ""; render(); };
+    $("vpsave").onclick = async () => { const n = prompt(vpEach ? "A name for these lists (one per robot):" : "A name for this order:"); if (!n) return;
+      try { const r = await api("/api/visit/preset", {name: n, order: vpEach ? vpSpec() : order.join(",")}); VP.presets = r.presets || VP.presets; if (r.presets_each) VP.presets_each = r.presets_each; flash("Saved as a preset: " + n); ex.dataset.h = ""; render(); } catch (e) { flash(e.message, true); } };
+  }
 }
 
 // ------------------------------------------------------------------ the rail: needs a hand, robots, Pi health
@@ -228,16 +377,33 @@ function questionsHTML() {   // a run that may ask (someone stays with the robot
     + ((st().edge_parked || []).length ? `<div class="alert"><h3>A robot was left at the table's edge</h3>${st().edge_parked.map(w => `<div class="small">${esc(w)}</div>`).join("")}<div class="small" style="margin-top:4px">Someone must move it before the next run.</div></div>` : "")
     + (T && T.corners_needed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg)"><h3 style="color:var(--amber)">One thing to do first: the table's corners</h3><div class="small">${esc(T.corners_needed)} It takes a minute and is only needed once here.</div><a class="ghost" href="/classic" style="display:inline-block;margin-top:8px;text-decoration:none">Open the setup (old page)</a></div>` : "");
 }
+// (e24, finding 4) what needs a person NOW, from the run itself: a camera sending no pictures, every robot held (with
+// each one's reason), a robot named in the order that was not found. Red, at the top of the rail and in the status band.
+function runAlerts() { const s = st(); if (!s.running) return [];
+  const a = ((LIVE && LIVE.alerts) || s.alerts || []).slice();
+  const vo = s.visit_missing || {}; const names = Object.keys(vo);
+  if (names.length) a.push({kind: "missing", title: `${names.join(", ")} ${names.length === 1 ? "was" : "were"} not found`, words: names.map(n => `${n} was named in the order and did not answer at the start: its points (${(vo[n] || []).join(", ")}) are taken by a robot that finishes its own list.`).join(" ")});
+  return a; }
+function alertsHTML() { return runAlerts().map(a => `<div class="alert" data-alert="${esc(a.kind)}"><h3>${esc(a.title)}</h3><div class="small">${esc(a.words)}</div></div>`).join(""); }
+// (e24, Nick 24 Nov D4; finding 3) the end card: how the run went, from its own summary
+function endHTML() { const s = st(), e = s.end; if (!e || s.running || s.stopping) return "";
+  const v = e.visit, all = v && v.reached >= v.asked && e.result === "done", cls = !v ? (e.result === "done" ? "ok" : "part") : all ? "ok" : (v.reached ? "part" : "bad");
+  let o = `<div class="endcard ${cls}" id="endcard"><h3>${esc(e.headline || s.words || "The run ended")}</h3><div class="small muted">${esc(s.title || "")}${s.practice ? " (practice)" : ""} ${esc(e.how || "")}${e.duration_s ? ` after ${fmt(e.duration_s)}` : ""}${e.planned_s ? ` (planned ${fmt(e.planned_s)})` : ""}.</div>`;
+  if (v) for (const [n, r] of Object.entries(v.robots || {})) {
+    o += `<div class="small" style="margin-top:8px"><span class="dot" style="background:${vpColour(n)}"></span><b>${esc(n)}'s list: reached ${r.reached} of ${r.asked}</b>${(r.reached_points || []).length ? `: ${esc(r.reached_points.join(", "))}` : ""}${(e.robots_not_found || []).includes(n) ? ` <span style="color:var(--red)">(${esc(n)} was not found at the start)</span>` : ""}</div>`;
+    for (const q of (r.missed || [])) o += `<div class="miss"><b style="color:var(--red)">Missed ${esc(q.point)}</b>${q.tried_again ? " (tried again at the end of the list)" : ""}: ${esc(q.why)}.${q.next ? `<div class="muted">What to do next: ${esc(q.next)}</div>` : ""}</div>`; }
+  if (e.next) o += `<div class="small" style="margin-top:8px"><b>What to do now:</b> ${esc(e.next)}</div>`;
+  return o + `<div class="tiny muted" style="margin-top:6px">From the run's own summary (mission_summary.json). Folder: ${esc(e.folder || "")}</div></div>`; }
 function handHTML() {
   const rq = (PLACE && PLACE.requests) || [], words = st().needs_hand || [];
-  if (!rq.length && !words.length) return questionsHTML();
+  if (!rq.length && !words.length) return alertsHTML() + endHTML() + questionsHTML();
   const cams = Object.entries((PLACE && PLACE.cams) || {});
   let o = rq.map(q => `<div class="alert" data-robot="${esc(q.robot)}"><h3>NEEDS A HAND · ${esc(q.robot)} <span class="tiny muted">${esc(nickRef(q.robot))}</span></h3>
     <div class="small">${q.stage === "heading" ? `It drove ${esc(q.drive_cm)} cm straight. <b>Click it again</b>: the line between your clicks is its heading.` : `${esc(q.why || "Its possible error could reach an edge")}. <b>Click the middle of its roof in the picture.</b>`}</div>
     ${q.suggest ? `<div class="small" style="margin-top:6px">${esc(q.suggest.src)} saw it at ${q.suggest.x}, ${q.suggest.y} cm. <button class="ghost small pacc">Yes, that is it</button></div>` : ""}
     ${cams.map(([c, m]) => `<div style="position:relative;margin-top:8px;line-height:0"><img class="pimg" data-cam="${esc(c)}" data-w="${m.size[0]}" data-h="${m.size[1]}" src="/api/frame?cam=${esc(c)}&t=${Date.now()}" alt="${esc(c)} live picture: click ${esc(q.robot)}" style="width:100%;border-radius:8px;cursor:crosshair"></div><div class="tiny muted" style="margin-top:2px">${esc(c)} camera, live</div>`).join("") || `<p class="small">No camera model here: put it on a sticker and pick that point below.</p>`}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="small muted">No camera shows it?</span><select class="ppoint"><option value="">point...</option>${Object.keys((PLACE && PLACE.points) || {}).map(k => `<option>${esc(k)}</option>`).join("")}</select><button class="ghost small pgo">It is on that point</button></div></div>`).join("");
-  o = questionsHTML() + o;
+  o = alertsHTML() + questionsHTML() + o;
   if (!rq.length) o += `<div class="alert"><h3>A robot needs a hand</h3>${words.map(w => `<div class="small">${esc(w)}</div>`).join("")}<div class="small" style="margin-top:4px">Move it a hand's width onto the table; it rejoins by itself.</div></div>`;
   return o;
 }
@@ -255,6 +421,7 @@ function cardsHTML() {
   if (!rs.length) { const names = (T && T.robots && T.robots.names) || (S && S.site && S.site.robots) || [];
     return `<div class="card robot"><b>Robots</b><div class="small" style="margin-top:4px">${esc((T && T.robots && T.robots.words) || "")}</div>${names.length ? `<div class="small muted" style="margin-top:4px">${names.map(n => `<span class="dot" style="background:${(S.site && S.site.colours || {})[n] || "#98A2B3"}"></span>${esc(n)}`).join(" &nbsp; ")}</div>` : ""}</div>`; }
   return rs.map(r => `<div class="card robot ${r.needs_hand ? "hand" : ""}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span><span class="dot" style="background:${r.colour}"></span><span class="nick">${esc(r.name)}</span><span class="ref" title="Its WiFi name or address">${esc(r.ref || "")}</span></span><span class="small" style="${r.needs_hand ? "color:var(--red);font-weight:700" : "color:var(--muted)"}">${r.needs_hand ? "NEEDS A HAND" : r.waking ? esc(r.waking) : r.held ? "held" : esc(r.doing || (going() ? "" : "stopped"))}</span></div>
+    ${(r.held || r.out) && r.held_why && going() ? `<div class="small" style="margin-top:3px;color:var(--amber)"><b>${r.held ? "Held" : "Out"} because:</b> ${esc(r.held_why)}.${r.held ? " It rejoins by itself when a camera sees it again." : ""}</div>` : ""}
     <div class="small" style="margin-top:4px">${r.x != null ? `Where: ${Math.round(r.x)}, ${Math.round(r.y)} cm` : "Where: not known yet"}${r.pm_cm != null ? ` <b>± ${r.pm_cm.toFixed(1)} cm</b>` : ""}${r.battery != null ? ` · battery ${esc(r.battery)} %` : ""}</div>
     ${r.shape ? `<div class="small" title="Its one error shape (e21): where it may really be, a cone along its own track. It grows as it drives without a camera fix and shrinks only when a fix is accepted.">Error shape: ${r.shape.forward.toFixed(0)} cm ahead, ${r.shape.back.toFixed(0)} back along its track, ${r.shape.across.toFixed(0)} sideways, plus ${r.shape.iso.toFixed(0)} all round${r.stage ? ` · stage: <b>${esc(r.stage)}</b>` : ""}${r.rescue ? " · rescuing itself (no action needed)" : ""}</div>` : ""}
     <div class="tiny muted">${going() ? (r.seen ? "Seen by " : "") : "When the run ended: "}${esc(r.source)}</div></div>`).join("");
@@ -318,44 +485,94 @@ function camTrustHTML() {
 // ------------------------------------------------------------------ the run bar
 function runbarHTML() {
   const s = st(), b = (T && T.buttons) || [];
-  if (s.stopping) return `<b style="color:var(--amber)">Stopping…</b><span class="small">${(s.stop.robots || []).map(r => `<span class="pill ${r.state === "confirmed" ? "ok" : "warn"}">${esc(r.name)}: ${esc(r.state)}</span>`).join(" ")}</span><span class="small muted">${esc(s.stop.words)}</span><span class="grow"></span>${s.stop.can_go_on ? `<button class="ghost" id="goon" title="Only if the robots that have not answered are switched off, asleep or away">Carry on without them</button>` : ""}<button class="stop" id="stopbar">STOP again</button>`;
-  if (s.running) { const pts = s.points != null ? ` · ${s.points} points` : "";
-    return `<b>${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span>${uploadPill(s.upload)}<span class="small muted" style="max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((s.lines || []).slice(-1)[0] || "")}</span><span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP every robot</button>`; }
-  if (s.kind) return `<b>${esc(s.words || s.title)}</b>${uploadPill(s.upload)}${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun">New run</button><button class="primary" id="again">Run again</button>`;
+  if (s.stopping) return `<b style="color:var(--amber)">Stopping…</b><span class="small">${(s.stop.robots || []).map(r => `<span class="pill ${r.state === "confirmed" ? "ok" : "warn"}">${esc(r.name)}: ${esc(r.state)}</span>`).join(" ")}</span><span class="small muted">${esc(s.stop.words)}</span>${(s.stop.robots || []).filter(r => r.state !== "confirmed" && r.words).length ? `<span class="small" style="color:var(--amber);flex-basis:100%">${(s.stop.robots || []).filter(r => r.state !== "confirmed" && r.words).map(r => `${esc(r.name)}: ${esc(r.words)}`).join(" · ")}</span>` : ""}<span class="grow"></span>${s.stop.can_go_on ? `<button class="ghost" id="goon" title="Only if the robots that have not answered are switched off, asleep or away">Carry on without them</button>` : ""}<button class="stop" id="stopbar">STOP again</button>`;
+  if (s.running && stopPressed && Date.now() - stopPressed < 10000) return `<b style="color:var(--amber)">Stopping…</b><span class="small muted">STOP sent to every robot: waiting for each to confirm.</span><span class="grow"></span><button class="stop" id="stopbar">STOP again</button>`;   // (e24, finding 12) no flip back to the running view while the stop is being confirmed
+  if (s.running) { const pg = s.progress || (LIVE && LIVE.visit), pts = pg && pg.asked ? ` · <b>${pg.reached} of ${pg.asked} points</b>` : (s.points != null && s.kind !== "visit" ? ` · ${s.points} points` : "");
+    // (e24, finding 8) a plain phase line; only a warning interrupts it (the raw program output stays in the Log)
+    return `<b>${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span><span class="upl">${uploadPill(s.upload)}</span><span class="small phase" id="phase" style="white-space:nowrap">${esc(String(s.phase || "Starting").replace(/^Driving: \d+ of \d+ points reached/, "Driving"))}</span><span class="small hide-s" style="color:var(--amber);flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.warning_line || "")}">${esc(s.warning_line || "")}</span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP every robot</button>`; }
+  if (s.kind) { const lo = T && T.last_order, again = s.kind === "visit" && lo ? `Run again: ${lo.words}` : "Run again";
+    return `<b>${esc(s.words || s.title)}</b><span class="upl">${uploadPill(s.upload)}</span>${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted hide-s">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun" title="Back to the plan: your lists are kept for editing">New run</button><button class="primary" id="again" title="${esc(again)}" style="max-width:min(560px,60vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(again)}</button>`; }
   const visit = kind === "visit" && isTags();
+  const nPts = vpEach ? vpCount() : order.length;
   return `<span class="kinds">${b.map(x => `<button data-k="${x.kind}" class="${kind === x.kind ? "on" : ""}" ${x.ok ? "" : "disabled"} title="${esc(x.ok ? x.sub : x.why)}">${esc(x.title)}</button>`).join("")}</span>
-    ${visit ? `<div><div class="tiny" style="margin-bottom:3px"><label><input type="radio" name="vpmode" id="vpshared" ${vpEach ? "" : "checked"}> One list, shared out</label> &nbsp;<label><input type="radio" name="vpmode" id="vpeach" ${vpEach ? "checked" : ""}> A list per robot</label></div>${vpEach ? vpEachHTML() : `<div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map(p => `<span class="chip">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div>`}</div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
-    ${uploadPill(T && T.upload)}<span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"}>Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</button>`;
+    <select class="kindsel" id="kindsel" style="display:none;padding:9px;border-radius:10px;border:1px solid var(--line);font:inherit" aria-label="Which run">${b.map(x => `<option value="${x.kind}" ${kind === x.kind ? "selected" : ""} ${x.ok ? "" : "disabled"}>${esc(x.title)}</option>`).join("")}</select>
+    ${visit ? `<button class="ghost sheetbtn" id="sheetbtn">${sheetOpen ? "Close" : `Lists (${nPts})`}</button>` : ""}
+    ${visit ? `<div class="planlists"><div class="tiny" style="margin-bottom:3px"><label><input type="radio" name="vpmode" id="vpshared" ${vpEach ? "" : "checked"}> One list, shared out</label> &nbsp;<label><input type="radio" name="vpmode" id="vpeach" ${vpEach ? "checked" : ""}> A list per robot</label></div>${vpEach ? vpEachHTML() : `<div class="tiny muted">Order (click stickers on the map${order.length ? `; ${order.length} stops` : ""})</div><div class="chips">${order.map((p, i) => `<span class="chip rm" data-rm="${i}" title="Click to take ${esc(p)} out">${esc(p)}</span>`).join("") || `<span class="tiny muted">empty: the points shared out</span>`}${order.length ? ` <button class="ghost tiny" id="undo" style="padding:1px 8px">Undo</button><button class="ghost tiny" id="clear" style="padding:1px 8px">Clear</button>` : ""}</div>`}</div>` : `<span class="small muted" style="max-width:420px">${esc(((b.find(x => x.kind === kind) || {}).sub) || "Choose a run.")}</span>`}
+    <span class="upl">${uploadPill(T && T.upload)}</span><span class="grow"></span><button class="primary" id="start" style="padding:12px 24px;font-size:16px" ${kind ? "" : "disabled"}>Start ${esc(((b.find(x => x.kind === kind) || {}).title) || "")}</button>`;
 }
 function vpEachHTML() {   // (2026-11-16) a row per robot: choose whose list the map's clicks join; its chips, Undo, Clear
   const w = vpWho();
   return vpNames().map(n => { const l = lists[n] || [];
-    return `<div class="chips" style="align-items:center;margin-top:2px"><button class="ghost tiny" data-who="${esc(n)}" style="padding:1px 8px;${n === w ? `border:2px solid ${vpColour(n)};font-weight:700` : ""}" title="Clicks on the map add to this robot's list"><span class="dot" style="background:${vpColour(n)}"></span>${esc(n)}${n === w ? " (adding)" : ""}</button>${l.map(p => `<span class="chip" style="border-color:${vpColour(n)}">${esc(p)}</span>`).join("") || `<span class="tiny muted">no points: it stays where it is</span>`}${l.length ? ` <button class="ghost tiny" data-vpundo="${esc(n)}" style="padding:1px 8px">Undo</button><button class="ghost tiny" data-vpclear="${esc(n)}" style="padding:1px 8px">Clear</button>` : ""}</div>`; }).join("")
+    return `<div class="chips" style="align-items:center;margin-top:2px"><button class="ghost tiny" data-who="${esc(n)}" style="padding:1px 8px;${n === w ? `border:2px solid ${vpColour(n)};font-weight:700` : ""}" title="Clicks on the map add to this robot's list"><span class="dot" style="background:${vpColour(n)}"></span>${esc(n)}${n === w ? " (adding)" : ""}</button>${l.map((p, i) => `<span class="chip rm" data-rmr="${esc(n)}" data-rmi="${i}" title="Click to take ${esc(p)} out of ${esc(n)}'s list" style="border-color:${vpColour(n)}">${esc(p)}</span>`).join("") || `<span class="tiny muted">no points: it stays where it is</span>`}${l.length ? ` <button class="ghost tiny" data-vpundo="${esc(n)}" style="padding:1px 8px">Undo</button><button class="ghost tiny" data-vpclear="${esc(n)}" style="padding:1px 8px">Clear</button>` : ""}</div>`; }).join("")
     + (vpCount() ? "" : `<div class="tiny muted" style="margin-top:2px">No points chosen yet: Start shares the points out as usual.</div>`)
-    + `<div class="tiny muted" style="margin-top:2px">Names are given at the start by each robot's wiggle (a robot keeps its name at this site). A named robot not found runs nothing; the others run their lists.</div>`;
+    + `<div class="tiny muted hide-s" style="margin-top:2px" title="Names are given at the start by each robot's wiggle (a robot keeps its name at this site). If a named robot is not found, the others run their lists first and then take its points.">Click a point's chip to take it out. Hover here for how robots are named.</div>`;
 }
 function uploadPill(u) { if (!u) return ""; const c = {uploaded: "ok", failed: "bad", uploading: "warn", "will upload": "ok", off: "warn", practice: ""}[u.state] ?? "";
   return `<span class="pill ${c}" title="Settings > This run">${esc(u.words)}</span>`; }
 function wireRunbar() {
   document.querySelectorAll("[data-k]").forEach(x => x.onclick = () => { kind = x.dataset.k; store("mc_kind", kind); render(); });
-  if ($("undo")) $("undo").onclick = () => { order.pop(); render(); };
-  if ($("clear")) $("clear").onclick = () => { order = []; render(); };
+  if ($("undo")) $("undo").onclick = () => { order.pop(); saveLists(); render(); };
+  if ($("clear")) $("clear").onclick = () => { order = []; saveLists(); render(); };
+  if ($("kindsel")) $("kindsel").onchange = () => { kind = $("kindsel").value; store("mc_kind", kind); render(); };
+  if ($("sheetbtn")) $("sheetbtn").onclick = () => { sheetOpen = !sheetOpen; $("runbarbox").classList.toggle("sheet", sheetOpen); render(); };
+  document.querySelectorAll("[data-rm]").forEach(x => x.onclick = () => { order.splice(+x.dataset.rm, 1); saveLists(); render(); });      // (e24) click a chip to take it out
+  document.querySelectorAll("[data-rmr]").forEach(x => x.onclick = () => { (lists[x.dataset.rmr] || []).splice(+x.dataset.rmi, 1); saveLists(); render(); });
   if ($("vpshared")) $("vpshared").onchange = () => { vpEach = false; store("mc_vp_each", "off"); render(); };
   if ($("vpeach")) $("vpeach").onchange = () => { vpEach = true; store("mc_vp_each", "on"); render(); };
-  document.querySelectorAll("[data-who]").forEach(x => x.onclick = () => { who = x.dataset.who; render(); });
-  document.querySelectorAll("[data-vpundo]").forEach(x => x.onclick = () => { (lists[x.dataset.vpundo] || []).pop(); render(); });
-  document.querySelectorAll("[data-vpclear]").forEach(x => x.onclick = () => { lists[x.dataset.vpclear] = []; render(); });
-  if ($("start")) $("start").onclick = startRun;
-  if ($("again")) $("again").onclick = () => { kind = st().kind || kind; startRun(); };
-  if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; order = []; lists = {}; render(); };
+  document.querySelectorAll("[data-who]").forEach(x => x.onclick = () => { who = x.dataset.who; saveLists(); render(); });
+  document.querySelectorAll("[data-vpundo]").forEach(x => x.onclick = () => { (lists[x.dataset.vpundo] || []).pop(); saveLists(); render(); });
+  document.querySelectorAll("[data-vpclear]").forEach(x => x.onclick = () => { lists[x.dataset.vpclear] = []; saveLists(); render(); });
+  if ($("start")) $("start").onclick = () => startRun(false);
+  // (e24, finding 2 / B2) Run again runs the LAST order again (the server keeps it, also across a reload of this page)
+  if ($("again")) $("again").onclick = () => { kind = st().kind || kind; startRun(true); };
+  // (e24) New run goes back to the plan with the lists as they were, for editing (before: it wiped them)
+  if ($("newrun")) $("newrun").onclick = () => { dismissed = st().folder || "?"; const lo = T && T.last_order;
+    if (lo && lo.lists && !vpCount() && !order.length) { if (lo.lists[""]) { order = lo.lists[""].slice(); } else { lists = JSON.parse(JSON.stringify(lo.lists)); vpEach = true; store("mc_vp_each", "on"); } saveLists(); }
+    render(); };
   if ($("stopbar")) $("stopbar").onclick = stopAll;
   if ($("goon")) $("goon").onclick = async () => { if (!confirm("Carry on without the robots that have not answered STOP? Only if they are switched off, asleep or away from the table.")) return; try { T = await api("/api/start/stop_go_on", {}); render(); } catch (e) { flash(e.message, true); } };
-  if ($("logbtn")) $("logbtn").onclick = () => { logOpen = !logOpen; render(); };
+  if ($("logbtn")) $("logbtn").onclick = () => { logOpen = !logOpen; $("logcard").dataset.h = ""; if (logOpen) logLoad(); render(); if (logOpen) $("logcard").scrollIntoView({block: "nearest"}); };
 }
-async function startRun() {
+// (e24, finding 11; Nick's default Q-e) ONE in-page start panel instead of up to three browser pop-ups: what will start,
+// and a tick for each thing that must be true (Jay-Sun is in the room; the space round each robot is clear; someone stays).
+// A tick given once is remembered for this Mission Control session (the server keeps it until it restarts), so Run again
+// asks nothing a second time. Settings > "Ask with pop-ups before a start" brings the three pop-ups back.
+function startPanel(title, again) {
+  return new Promise(resolve => {
+    const asked = (T && T.session_asked) || {}, rows = [], lo = T && T.last_order;
+    const what = kind !== "visit" ? "" : again && lo ? lo.words : (vpEach && vpCount() ? vpSpec().replace(/;/g, " \u00b7 ").replace(/:/g, " ") : order.length ? order.join(", ") : "the points shared out between the robots");
+    if (T.attended_only) rows.push(["jay", "Jay-Sun is in the room (at school the robots drive only while he is).", true, !!asked.jay]);
+    else if (!(T.prefs && T.prefs.values.watching !== "ask")) rows.push(["stay", "I will stay with the robots (the run may then ask me here about a robot it is unsure of near an edge; untick: it decides alone).", false, !!asked.stay]);
+    if (T.clear_space && T.clear_space.words) rows.push(["clear", T.clear_space.words.replace(/\s*\(OK[^)]*\)\s*$/, ""), false, !!asked.clear]);
+    const allKnown = rows.every(r => r[3]) && Object.keys(asked).length;
+    if (allKnown && again) return resolve({jay: !!asked.jay, stay: !!asked.stay, clear: !!asked.clear, asked});
+    $("modalslot").innerHTML = `<div class="modal" id="startmodal" role="dialog" aria-modal="true" aria-label="Start ${esc(title)}"><div class="box">
+      <h2 style="margin:0 0 4px;font-size:19px">Start ${esc(title)} on every robot on the table?</h2>
+      ${what ? `<div class="small" style="margin-bottom:6px"><b>Order:</b> ${esc(what)}</div>` : ""}
+      <div class="small muted">These are the real robots. The red STOP button stops them at any moment.</div>
+      ${rows.map(r => `<label class="tick"><input type="checkbox" data-tick="${r[0]}" ${r[3] ? "checked" : ""}><span>${esc(r[1])}${r[2] ? " <b>(needed)</b>" : ""}${r[3] ? ' <span class="tiny muted">(you said so earlier in this session)</span>' : ""}</span></label>`).join("")}
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><button class="ghost" id="startno">Not now</button><button class="primary" id="startyes" style="padding:11px 22px;font-size:16px">Start</button></div>
+      <div class="tiny muted" style="margin-top:8px">Your ticks are remembered until Mission Control is restarted, so Run again does not ask twice.</div></div></div>`;
+    const need = () => { const ok = rows.filter(r => r[2]).every(r => document.querySelector(`[data-tick="${r[0]}"]`).checked); $("startyes").disabled = !ok; };
+    document.querySelectorAll("[data-tick]").forEach(t => t.onchange = need); need();
+    const close = v => { $("modalslot").innerHTML = ""; resolve(v); };
+    $("startno").onclick = () => close(null);
+    $("startmodal").onclick = e => { if (e.target.id === "startmodal") close(null); };
+    $("startyes").onclick = () => { const v = {asked: {}}; rows.forEach(r => { v[r[0]] = document.querySelector(`[data-tick="${r[0]}"]`).checked; v.asked[r[0]] = v[r[0]]; }); close(v); };
+    $("startyes").focus();
+  });
+}
+async function startRun(again) {
   if (!kind) return;
   const pr = T.practice; let attended = false;
   const title = ((T.buttons || []).find(x => x.kind === kind) || {}).title || kind;
+  let askedNow = null, clearPanel = null;
+  if (!pr && !((T.advanced || {}).start_popups)) {
+    const v = await startPanel(title, !!again); if (!v) return;
+    askedNow = v.asked;
+    attended = T.attended_only ? !!v.jay : (T.prefs && T.prefs.values.watching !== "ask") ? T.prefs.values.watching === "yes" : !!v.stay;
+    clearPanel = !!v.clear;
+  } else
   if (!pr) {
     if (!confirm(`Start ${title} on every robot on the table?`)) return;
     if (T.attended_only) { attended = confirm("At school the robots drive only while Jay-Sun is in the room. Is he here?"); if (!attended) return; }
@@ -363,14 +580,20 @@ async function startRun() {
     else attended = confirm("Will you stay with the robots? (OK: the run may ask you here about a robot it is not sure about near an edge. Cancel: it decides alone.)");
   }
   let clear_space = !!pr;
-  if (!pr && T.clear_space && T.clear_space.words) clear_space = confirm(T.clear_space.words);
+  if (clearPanel !== null) clear_space = clearPanel;
+  else if (!pr && T.clear_space && T.clear_space.words) clear_space = confirm(T.clear_space.words);
   const body = {kind, attended, clear_space};
-  if (kind === "visit" && vpEach && vpCount()) { body.order = vpSpec(); body.keep_unreadable = keepUnreadable; }   // (2026-11-16) a list per robot
+  if (askedNow) body.asked = askedNow;
+  if (again) body.again = true;        // the server runs its last order again (nothing from this page's memory needed)
+  else if (kind === "visit" && vpEach && vpCount()) { body.order = vpSpec(); body.keep_unreadable = keepUnreadable; }   // (2026-11-16) a list per robot
   else if (kind === "visit" && !vpEach && order.length) { body.order = order.join(","); body.keep_unreadable = keepUnreadable; }
-  dismissed = null;
-  try { await api("/api/start/run", body); flash(pr ? "Practice started (the simulator)" : "Started"); LIVE = null; await startLoad(); } catch (e) { flash(e.message, true); }
+  dismissed = null; stopPressed = 0; LOG = null; sheetOpen = false; $("runbarbox").classList.remove("sheet");
+  try { await api("/api/start/run", body); flash(pr ? "Practice started (the simulator)" : "Started"); LIVE = null; await startLoad(); } catch (e) { flash("Not started: " + e.message, true); }
 }
-async function stopAll() { try { const r = await api("/api/start/stop", {}); flash("STOP sent: " + r.stopped.join(", ")); await startLoad(); } catch (e) { flash(e.message, true); } }
+async function stopAll() {
+  stopPressed = Date.now(); render();
+  try { const r = await api("/api/start/stop", {}); flash("STOP sent: " + r.stopped.join(", ")); await startLoad(); }
+  catch (e) { missed = Math.max(missed, POLL_MISS_N); deadCheck(); flash("STOP did NOT reach Mission Control (" + e.message + "). On the Pi, type: ./run-fleet-pi.sh stopall", true); } }
 $("stoptop").onclick = stopAll;
 
 // ------------------------------------------------------------------ settings drawer
@@ -384,15 +607,27 @@ function drawerHTML() {
   <p class="small muted">Only what changes a run is here. Everything the system decides by itself lives under Safety and the old page, out of the way.</p>
   <div class="card" style="padding:12px;margin-top:10px"><h3>This run</h3><div class="kv">${RUN_ROWS.map(([k, t, g]) => g === "run" ? `<span>${t}</span><input type="checkbox" data-run="${k}" ${run[k] ? "checked" : ""}>`
     : g === "adv" ? `<span>${t}</span><input type="checkbox" data-advb="${k}" ${a[k] ? "checked" : ""}>` : `<span>${t}</span><input type="number" data-advn="${k}" value="${esc(a[k])}">`).join("")}
-    ${isTags() ? `<span>Visit points: try stickers the camera cannot read</span><input type="checkbox" id="keepun" ${keepUnreadable ? "checked" : ""}>` : ""}</div>
+    ${isTags() ? `<span>Visit points: try stickers the camera cannot read</span><input type="checkbox" id="keepun" ${keepUnreadable ? "checked" : ""}>` : ""}
+    <span>Practice runs save their pictures (about 130 MB a minute; off: nothing saved)</span><input type="checkbox" id="pframes" ${a.practice_frames ? "checked" : ""}>
+    <span>Ask with pop-ups before a start (the way before 24 Nov; off: one start panel)</span><input type="checkbox" id="startpop" ${a.start_popups ? "checked" : ""}></div>
     ${T && T.upload_migrated ? `<p class="tiny" style="color:var(--amber)">${esc(T.upload_migrated)}</p>` : ""}</div>
   <div class="card" style="padding:12px;margin-top:10px"><details id="safetybox" ${safetyOpen ? "open" : ""}><summary style="list-style:none"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><b>Safety</b> <span class="muted small">${info.length} switches</span></div>${byHand.length ? `<span class="pill warn">${byHand.length} set by hand</span>` : `<span class="pill ok">all decided automatically</span>`}</div>
     <div class="tiny muted" style="margin-top:3px">Nothing to set for a normal run. Each switch keeps the old way one choice away. A change here goes to every run on this Pi (safety.json) until it is back on auto.</div></summary>
+    ${byHand.length ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg);margin-top:10px"><h3 style="color:var(--amber)">Set by hand on this Pi (${byHand.length})</h3>${byHand.map(([k, v]) => { const q = info.find(i => i.env === k) || {}; return `<div class="small" style="margin-top:4px"><b class="mono">${esc(k)}</b> = ${esc(v)} <span class="muted">(automatic would be ${esc(q.default || "?")})</span><br>${esc(sfirst(q.what || ""))} <button class="ghost tiny" data-safauto="${esc(k)}" style="padding:1px 8px">Back to automatic</button></div>`; }).join("")}<button class="primary" id="safall" style="margin-top:8px">All back to automatic</button></div>` : ""}
+    <div class="tiny muted" style="margin-top:8px">A change applies from the next run (a run that is going keeps what it started with).</div>
     <input id="ssearch" placeholder="Find a switch (blind, edge, never still...)" style="width:100%;margin:10px 0 2px;padding:7px 10px;border-radius:8px;border:1px solid var(--line)">
-    ${info.map(q => `<div class="srow" data-k="${esc((q.env + " " + q.what).toLowerCase())}"><div><div class="small">${esc(q.what)}</div><div class="mono muted">${esc(q.env)}</div></div><div><select data-saf="${esc(q.env)}"><option value="auto" ${saf[q.env] === "auto" || saf[q.env] == null ? "selected" : ""}>auto (${esc(q.default)})</option><option value="${esc(q.old)}" ${saf[q.env] === q.old ? "selected" : ""}>old way (${esc(q.old)})</option>${saf[q.env] && saf[q.env] !== "auto" && saf[q.env] !== q.old ? `<option selected>${esc(saf[q.env])}</option>` : ""}</select></div></div>`).join("")}</details></div>
+    ${info.map(q => `<div class="srow" data-k="${esc((q.env + " " + q.what).toLowerCase())}"><div><div class="small">${esc(sfirst(q.what))}${srest(q.what) ? ` <details class="tiny muted" style="display:inline"><summary style="display:inline;color:var(--accent)">more</summary> ${esc(srest(q.what))}</details>` : ""}</div><div class="mono muted">${esc(q.env)}</div></div><div><select data-saf="${esc(q.env)}"><option value="auto" ${saf[q.env] === "auto" || saf[q.env] == null ? "selected" : ""}>auto (${esc(q.default)})</option><option value="${esc(q.old)}" ${saf[q.env] === q.old ? "selected" : ""}>old way (${esc(q.old)})</option>${saf[q.env] && saf[q.env] !== "auto" && saf[q.env] !== q.old ? `<option selected>${esc(saf[q.env])}</option>` : ""}</select></div></div>`).join("")}</details></div>
   <div class="card" style="padding:12px;margin-top:10px"><h3>The old page</h3><div class="small muted">Setup, Cameras &amp; table, Measure, Preferences and every typed value: the page as it was, kept.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center"><a class="ghost" href="/classic" style="text-decoration:none">Open the old page</a><label class="small"><input type="checkbox" id="classicdef" ${a.classic_page ? "checked" : ""}> Open the old page by default</label></div></div>`;
 }
+// (e24, finding 10: the open Safety box was 27,000 characters of build notes) each switch shows its first sentence;
+// the history behind it is one click away ("more")
+function sfirst(w) { w = String(w || "").replace(/^\([^)]*\)\s*/, ""); const m = w.match(/^(.{20,220}?[.;:])(\s|$)/); return m ? m[1] : w.slice(0, 220); }
+function srest(w) { w = String(w || ""); const f = sfirst(w), i = w.indexOf(f); return w.slice(i + f.length).trim(); }
+async function safSet(env, value, sentence) {
+  // a plain sentence before anything is saved (before: the old way was saved the moment it was picked)
+  if (!confirm(sentence)) { render(); return; }
+  try { S = await api("/api/settings", {safety: env === "*" ? value : {[env]: value}}); flash(env === "*" ? "Safety: every switch is back on automatic. It applies from the next run." : `Safety saved: ${env} = ${value}. It applies from the next run.`); render(); } catch (x) { flash(x.message, true); } }
 function wireDrawer() {
   $("close").onclick = () => { drawerOpen = false; $("drawer").classList.remove("open"); };
   $("stopdrawer").onclick = stopAll;
@@ -403,7 +638,13 @@ function wireDrawer() {
   $("classicdef").onchange = () => saveAdv({classic_page: $("classicdef").checked});
   const box = $("safetybox"); box.ontoggle = () => { safetyOpen = box.open; };
   $("ssearch").oninput = () => { const v = $("ssearch").value.toLowerCase(); document.querySelectorAll(".srow").forEach(r => r.classList.toggle("hidden", !!v && !r.dataset.k.includes(v))); };
-  document.querySelectorAll("[data-saf]").forEach(e => e.onchange = async () => { try { S = await api("/api/settings", {safety: {[e.dataset.saf]: e.value}}); flash("Safety saved: " + e.dataset.saf + " = " + e.value); render(); } catch (x) { flash(x.message, true); } });
+  document.querySelectorAll("[data-saf]").forEach(e => e.onchange = () => { const q = ((S && S.safety_info) || []).find(i => i.env === e.dataset.saf) || {};
+    safSet(e.dataset.saf, e.value, e.value === "auto" ? `Put ${e.dataset.saf} back on automatic (${q.default})? It applies from the next run on this Pi.`
+      : `Switch ${e.dataset.saf} to the OLD way (${e.value}) for every run on this Pi, from the next run, until you set it back to automatic?\n\nWhat it does: ${sfirst(q.what || "")}`); });
+  document.querySelectorAll("[data-safauto]").forEach(b => b.onclick = () => safSet(b.dataset.safauto, "auto", `Put ${b.dataset.safauto} back on automatic? It applies from the next run on this Pi.`));
+  if ($("safall")) $("safall").onclick = () => { const all = {}; Object.keys((S.settings && S.settings.safety) || {}).forEach(k => all[k] = "auto"); safSet("*", all, "Put EVERY Safety switch back on automatic? It applies from the next run on this Pi."); };
+  if ($("startpop")) $("startpop").onchange = () => saveAdv({start_popups: $("startpop").checked});
+  if ($("pframes")) $("pframes").onchange = () => saveAdv({practice_frames: $("pframes").checked});
 }
 async function saveAdv(d) { try { T = await api("/api/start/advanced", d); flash("Saved"); render(); } catch (e) { flash(e.message, true); } }
 function openDrawer(safety) { drawerOpen = true; if (safety) safetyOpen = true; $("drawer").innerHTML = drawerHTML(); wireDrawer(); $("drawer").classList.add("open"); }
@@ -428,8 +669,12 @@ function render() {
   const hl = (T && T.headline) || {};
   const slH = `<span class="slw">${esc(hl.words || "Asking Mission Control what is going on...")}</span><button class="ghost tiny" id="restartmc2" ${going() ? 'disabled title="A run is going: Mission Control restarts after it ends"' : 'title="Restart Mission Control (the page reloads; nothing on the robots changes)"'}>Restart Mission Control</button>`;
   if ($("statusline").dataset.h !== slH) { $("statusline").innerHTML = slH; $("statusline").dataset.h = slH;
-    $("restartmc2").onclick = async () => { try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } }; }
-  $("statusline").className = "statusline" + (hl.running || hl.terminal ? " on" : "");
+    $("restartmc2").onclick = async () => { if (!confirm("Restart Mission Control? The page reloads in a few seconds; nothing on the robots changes. (Not possible while a run is going.)")) return; try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } }; }
+  const al = runAlerts();
+  $("statusline").className = "statusline" + (al.length ? " alarm" : hl.running || hl.terminal ? " on" : "");
+  if (al.length && $("statusline").querySelector(".slw")) $("statusline").querySelector(".slw").textContent = al.map(a => a.title).join(" · ") + ". " + (hl.words || "");
+  document.documentElement.style.setProperty("--barh", ($("runbarbox").offsetHeight || 84) + "px");
+  if ($("morebtn")) { $("morebtn").style.display = window.innerWidth <= 600 ? "block" : "none"; $("morebtn").textContent = document.body.classList.contains("more") ? "Hide Pi health and camera trust" : "Show Pi health and camera trust"; $("morebtn").onclick = () => { document.body.classList.toggle("more"); render(); }; }
   $("codebanner").innerHTML = cd.changed ? `<div class="alert" style="border-color:var(--amber);background:var(--amber-bg);margin-top:8px"><b>New code on the Pi.</b> <span class="small">${esc(cd.words || "")}</span> <button class="primary" id="restartmc" ${going() || cd.running ? "disabled" : ""}>Restart Mission Control</button></div>` : "";
   if ($("restartmc")) $("restartmc").onclick = async () => { try { const r = await api("/api/restart", {}); flash(r.words || "Restarting"); setTimeout(() => location.reload(), 6000); } catch (e) { flash(e.message, true); } };
   drawMap();
@@ -438,7 +683,13 @@ function render() {
   $("health").innerHTML = healthHTML();
   $("camtrust").innerHTML = camTrustHTML();
   $("logcard").classList.toggle("hidden", !logOpen);
-  if (logOpen) $("logcard").innerHTML = `<div style="display:flex;justify-content:space-between"><b>The run's last lines</b><button class="ghost tiny" id="logclose" style="padding:1px 8px">Close</button></div><pre class="mono" style="white-space:pre-wrap;max-height:260px;overflow:auto;margin:6px 0 0">${esc((st().lines || []).join("\n"))}</pre><div class="tiny muted">Folder: ${esc(st().folder || "")}</div>`;
+  if (logOpen) {
+    // (e24, finding 8) the WHOLE run's log, scrolling, following its end until you scroll up (before: the last 8 lines)
+    const lines = (LOG && LOG.lines) || st().lines || [], h = lines.length + ":" + (LOG ? LOG.total : 0) + ":" + (st().folder || "");
+    if ($("logcard").dataset.h !== h) { const pre0 = $("logpre"), atEnd = !pre0 || pre0.scrollTop + pre0.clientHeight >= pre0.scrollHeight - 30;
+      $("logcard").innerHTML = `<div style="display:flex;justify-content:space-between"><b>The run's log${LOG ? ` (${LOG.total} lines, the whole run)` : ""}</b><button class="ghost tiny" id="logclose" style="padding:1px 8px">Close</button></div><pre class="mono" id="logpre" style="white-space:pre-wrap;max-height:50vh;overflow:auto;margin:6px 0 0">${esc(lines.join("\n"))}</pre><div class="tiny muted">Scroll up to read back; it follows the newest line while you are at the bottom. Folder: ${esc(st().folder || "")}</div>`;
+      $("logcard").dataset.h = h; if (atEnd && $("logpre")) $("logpre").scrollTop = $("logpre").scrollHeight; }
+  }
   if ($("logclose")) $("logclose").onclick = () => { logOpen = false; render(); };
   // (2026-11-16) redrawn unless someone is TYPING in it: a clicked button or tick box keeps the focus, and the old guard
   // (any focus inside) left the bar showing the previous choice until a click elsewhere (Nick 13 Nov 08:04, "I can't
@@ -447,18 +698,23 @@ function render() {
   if (drawerOpen && !typingIn("#drawer")) { $("drawer").innerHTML = drawerHTML(); wireDrawer(); }
   soundLabel(); handCheck();
 }
-async function stateLoad() { try { S = await api("/api/state"); } catch (e) { flash("Mission Control is not answering: " + e.message, true); } }
-async function startLoad() { try { T = await api("/api/start"); } catch (e) { return; } render(); }
+async function stateLoad() { try { S = await api("/api/state"); } catch (e) { /* the red band (deadCheck) says it */ } }
+async function startLoad() {
+  try { T = await api("/api/start"); missed = 0; lastOk = Date.now(); if (stopPressed && !(T.status || {}).running) stopPressed = 0; }
+  catch (e) { missed++; deadCheck(); return; }      // (e24, finding 1: the failure was swallowed and stale numbers stayed)
+  deadCheck(); render(); }
+async function logLoad() { if (!logOpen) return; try { LOG = await api("/api/start/log"); } catch (e) { return; } render(); }
 async function liveLoad() { try { LIVE = await api("/api/live"); } catch (e) { return; } render(); }
 async function healthLoad() { try { PH = await api("/api/pi_health"); } catch (e) { return; } render(); }
 async function camTrustLoad() { try { CTR = await api("/api/camera_trust"); } catch (e) { return; } render(); }
 async function placeLoad() { try { const r = await fetch("/api/place"); if (r.ok) PLACE = await r.json(); } catch (e) { return; } render(); }
 (async () => {
-  kind = store("mc_kind"); vpEach = store("mc_vp_each") === "on"; await stateLoad(); await startLoad();
+  kind = store("mc_kind"); vpEach = store("mc_vp_each") === "on"; loadLists(); await stateLoad(); await startLoad();
   if (!kind || !(T.buttons || []).some(b => b.kind === kind && b.ok)) kind = ((T.buttons || []).find(b => b.ok) || {}).kind || null;
   if (S && S.site && !S.site.colours) S.site.colours = {};
   await liveLoad(); healthLoad(); placeLoad(); camTrustLoad();
-  setInterval(camTrustLoad, 10000);
+  setInterval(camTrustLoad, 10000); setInterval(logLoad, 3000);
+  window.addEventListener("resize", () => render());
   setInterval(startLoad, 2000); setInterval(liveLoad, 1000); setInterval(healthLoad, 4000); setInterval(placeLoad, 2000); setInterval(stateLoad, 10000);
 })();
 </script>

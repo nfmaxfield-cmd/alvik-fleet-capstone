@@ -13,7 +13,7 @@ Per run type (Nick's decisions 1-3):
 Practice: with no real camera (or Mission Control --dry) every button runs the simulator instead, with the guesses
 broken on purpose (turned roof tags, a dark patch, the camera's clock off, a robot restarting), as the rehearsals do.
 """
-VERSION = "2026-11-19e23"   # e23 (school 16 / 18 Nov, cause A): a Stop before the robots are named no longer watches slot names for ever (robots_for_stop marks guesses, one watcher at a time, a new Start ends the watcher and waits for the log port), start_wait_words. Before: "2026-11-13e22"   # e22 (Nick 13 Nov): headline() (one plain status line: what runs, since when, each robot found / asleep / not heard, what it waits for), STOP also stops a free roam started from the terminal (its tmux session's Ctrl+C), needs-a-hand requests of an earlier run cleared, the start-failure words say the robots were woken first, note_sleep when robots are sent to sleep. Before: "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
+VERSION = "2026-11-24e24"   # e24 (the 24 Nov usability audit; Nick's D4): Run again runs the last order again (last_order; MIRLT_MC_RUN_AGAIN=empty: as before), a plain phase line (phase_words), the whole run's log (run_log), the end card from the run's own summary (end_card: "Ended: 5 of 6 points reached", each missed point with its reason and what to do next), the run's alerts and held reasons passed on, "last heard" read from the run's own files, the run takes Ctrl+C whatever shell started Mission Control (sigint_default). Before: "2026-11-19e23"   # e23 (school 16 / 18 Nov, cause A): a Stop before the robots are named no longer watches slot names for ever (robots_for_stop marks guesses, one watcher at a time, a new Start ends the watcher and waits for the log port), start_wait_words. Before: "2026-11-13e22"   # e22 (Nick 13 Nov): headline() (one plain status line: what runs, since when, each robot found / asleep / not heard, what it waits for), STOP also stops a free roam started from the terminal (its tmux session's Ctrl+C), needs-a-hand requests of an earlier run cleared, the start-failure words say the robots were woken first, note_sleep when robots are sent to sleep. Before: "2026-11-12mc-3"   # (Part 3) the Pi monitor beside practice and calibration runs. 1c: "2026-11-12mc-c"   # (1c) the Start screen's live table (live_view.py, /api/live). 1b: "2026-11-12mc-b"   # (Mission Control build, 12 Nov, 1b) uploads: upload_state (will upload / uploading / uploaded / failed / off / practice) on the Start screen; home free roam on the robots uploads when it ends (run-fleet-pi.sh freeroam-upload, the recorder left running). 1a: STOP: the StopWatch (stop_confirm.py): "stopping..." until every robot has confirmed, then "stopped" (never "ended"), its record in the run folder (stop.json); robot_refs (each nickname's WiFi name). Before: "2026-11-11e16"   # e16 (9a, home 11 Nov: "No camera model here: use a point below" on Right's needs-a-hand card): the click to locate a held robot uses whatever camera-to-board model the site has: the roof-tag fit where there is one, else the lights tracking's floor calibration (setup_conf: overhead_floorcal_*.json, side_floorcal_*.json) at the robot's top (e02_camera.ROBOT_TOP_CM). Before: "2026-11-10e14"   # e14: the clear-space question's words (clear_space) and the answer to every run (MIRLT_CLEAR_SPACE_OK / --clear-space); the Area line from the readability store (what is used, at what light, on how much evidence); Advanced "Battery floor"; practice runs keep their own readability store. e13: robots waiting for a hand (needs_hand) in the status. 2026-11-10a # 2026-11-10a (e12): Advanced "Curves in the calibration" (calib_curves) passed to calib_run
                            # (--arc-phase, --roam-motion); robots left at an edge in the status (edge_parked). No version
                            # string before this.
 import glob
@@ -28,6 +28,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 
+WARN_SHOW_S = 15.0     # [chosen] how long the newest warning stays beside the page's phase line (it stays in the Log).
+#                        DOE: no (reading time)
+RUN_AGAIN_KEEPS = os.environ.get("MIRLT_MC_RUN_AGAIN", "keep") != "empty"   # (e24) Run again runs the last order again; empty: as before
 KINDS = ("calibrate", "freeroam", "visit", "experiment")
 TITLES = {"calibrate": "Calibrate", "freeroam": "Free roam", "visit": "Visit points", "experiment": "Experiment routes"}
 ROAM_MIN = 10.0            # the one-button free roam at a tag site: about this many minutes. Chosen (a lesson's demo);
@@ -67,6 +70,10 @@ ADV_DEFAULTS = {
                                    # roam 10); read by every run (engine_checks.battery_floor_used), tmux ones too
     "classic_page": False,         # (Mission Control build, Nick 12 Nov) the old page at / instead of the new map-first
                                    # page (kept, off; always at /classic). MIRLT_MC_PAGE=classic does the same
+    "start_popups": False,         # (e24, the audit's finding 11) True: the three browser pop-ups before a real start, as
+                                   # before 24 Nov; False: one in-page start panel, its ticks remembered for the session
+    "practice_frames": False,      # (e24, Nick's default Q-f) practice runs save their pictures (about 130 MB a minute):
+                                   # off by default; on: as before e24
     "calib_curves": "auto",        # (e12, Nick 10 Nov) the calibration's curve phase: auto (robots on firmware 2026-11-05c+
                                    # when free roam drives curves), on, off (calib_run --arc-phase)
 }
@@ -235,6 +242,32 @@ def robot_refs(site, heard_file=None):
         ip = r.get("ip")
         out[r["name"]] = by_ip.get(ip) or r.get("wifi_name") or ip or ""
     return out
+
+
+def order_lists(order):
+    """'Alpha:P01,P02;Bravo:P35' -> {"Alpha": ["P01", "P02"], "Bravo": ["P35"]}; 'P01,P05' -> {"": ["P01", "P05"]}."""
+    order = str(order or "").strip()
+    if not order:
+        return {}
+    if ":" not in order:
+        return {"": [x.strip() for x in order.replace(" ", ",").split(",") if x.strip()]}
+    out = {}
+    for part in order.split(";"):
+        n, _, lst = part.partition(":")
+        if n.strip():
+            out[n.strip()] = [x.strip() for x in lst.split(",") if x.strip()]
+    return out
+
+
+def order_words(order, most=4):
+    """The order in a button's words: 'Alpha P01, P02, P08 · Bravo P35, P36, P34' (long lists cut with their count)."""
+    ls = order_lists(order)
+    if not ls:
+        return "the points shared out"
+
+    def cut(v):
+        return ", ".join(v) if len(v) <= most + 1 else "%s ... %s (%d points)" % (", ".join(v[:most - 1]), v[-1], len(v))
+    return " \u00b7 ".join(("%s %s" % (n, cut(v))).strip() for n, v in ls.items())
 
 
 def _alive(p):
@@ -595,7 +628,8 @@ class Starter:
         L, W = float(tb.get("length_cm") or 396.2), float(tb.get("width_cm") or 167.6)
         pr = self.practice()
         out = {"points": pts, "table": [L, W], "px": {}, "size": None, "unreadable": {}, "cam": cam,
-               "practice": pr, "words": [], "presets": self.visit_presets()}
+               "practice": pr, "words": [], "presets": self.visit_presets(),
+               "presets_each": self.visit_presets_each()}
         model = None
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(HERE), "experiment"))
@@ -650,6 +684,26 @@ class Starter:
             pass
         return out
 
+    def visit_presets_each(self):
+        """(e24, finding 5) Presets that hold a list per robot: {name: "Alpha:P01,P02;Bravo:P35"}."""
+        try:
+            with open(os.path.join(self.S.dir, "visit_presets_each.json")) as f:
+                return {str(k): str(v) for k, v in json.load(f).items()}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def save_visit_preset_each(self, name, order):
+        name = str(name or "").strip()[:60]
+        if not name:
+            raise ValueError("Give the lists a name")
+        if not order_lists(order):
+            raise ValueError("The lists are empty")
+        cur = self.visit_presets_each()
+        cur[name] = ";".join("%s:%s" % (n, ",".join(v)) for n, v in order_lists(order).items())
+        with open(os.path.join(self.S.dir, "visit_presets_each.json"), "w") as f:
+            json.dump(cur, f, indent=1)
+        return cur
+
     def save_visit_preset(self, name, order):
         name = str(name or "").strip()[:60]
         if not name:
@@ -669,9 +723,16 @@ class Starter:
             json.dump(cur, f, indent=1)
         return self.visit_presets()
 
-    def start(self, kind, attended=False, order="", keep_unreadable=False, clear_space=None):
+    def start(self, kind, attended=False, order="", keep_unreadable=False, clear_space=None, again=False):
         if kind not in KINDS:
             raise ValueError("no such run: %s" % kind)
+        if again and kind == "visit" and not str(order or "").strip() and RUN_AGAIN_KEEPS:
+            # (e24, the audit's finding 2 / B2: after a reload "Run again" ran the 40-point shared tour instead of the
+            # per-robot lists) Run again with no order of its own runs the LAST order again (kept by the server, and
+            # read back from the last run's visit_order.json after a restart). MIRLT_MC_RUN_AGAIN=empty: as before
+            lo = self.last_order()
+            if lo:
+                order, keep_unreadable = lo["order"], lo["keep"]
         with self.lock:
             if self.busy():
                 raise ValueError("A run is going: press Stop first (or wait for it to finish).")
@@ -697,6 +758,8 @@ class Starter:
             self.clear_space_ = bool(clear_space)
             self.visit_order_ = {"order": str(order or "").strip(), "keep": bool(keep_unreadable)} \
                 if kind == "visit" else None
+            if kind == "visit":
+                self.last_order_ = dict(self.visit_order_)
             if self.tags():
                 r = self.start_tags(kind, pr)
             else:
@@ -704,6 +767,181 @@ class Starter:
             self.last = None
             self.deferred_sleep = None      # (e11) a new run: the sleep held after a refused start is off
             return r
+
+    # -- (e24, the audit's findings 2, 3, 4, 8) Run again's order, the plain phase line, the end card ---------------------
+    def last_order(self):
+        """The last Visit points order this Mission Control started, or (after a restart) the newest visit run folder's
+        own record: {"order", "keep", "words"} or None. An empty order (the points shared out) is an order too."""
+        lo = getattr(self, "last_order_", None)
+        if lo is None:
+            try:
+                runs = os.path.join(self.S.dir, "runs")
+                for nm in sorted(os.listdir(runs), reverse=True):
+                    if "-visit-" not in nm:
+                        continue
+                    with open(os.path.join(runs, nm, "visit_order.json")) as f:
+                        vo = json.load(f)
+                    lo = {"order": str(vo.get("asked") or ""), "keep": bool(vo.get("kept_unreadable"))}
+                    break
+            except (OSError, ValueError, AttributeError):
+                lo = None
+        if lo is None:
+            return None
+        return dict(lo, words=order_words(lo["order"]), lists=order_lists(lo["order"]))
+
+    def mission_lines(self, folder, n=400):
+        """The end of the run's own log (mission_stdout.txt), for the phase line and the Log box."""
+        for p in (os.path.join(folder or "", "mission_stdout.txt"), os.path.join(folder or "", "stdout.txt"),
+                  os.path.join(folder or "", "run_plan_stdout.txt")):
+            try:
+                with open(p, "rb") as f:
+                    f.seek(0, os.SEEK_END)
+                    size = f.tell()
+                    f.seek(max(0, size - 60000))
+                    txt = f.read().decode("utf-8", "replace")
+                return [ln.rstrip() for ln in txt.splitlines() if ln.strip()][-n:]
+            except OSError:
+                continue
+        return []
+
+    def run_log(self, start=0, limit=4000):
+        """(e24, finding 8) The whole run's log for the Log box (not the last 8 lines): {"lines", "total", "folder"}."""
+        st = {}
+        try:
+            st = self.status()
+        except Exception:  # noqa: BLE001
+            pass
+        folder = st.get("folder") or ""
+        lines = []
+        for p in (os.path.join(folder, "mission_stdout.txt"), os.path.join(folder, "stdout.txt"),
+                  os.path.join(folder, "run_plan_stdout.txt")):
+            try:
+                with open(p, errors="replace") as f:
+                    lines = [ln.rstrip() for ln in f if ln.strip()]
+                break
+            except OSError:
+                continue
+        start = max(0, int(start or 0))
+        return {"lines": [ln[:600] for ln in lines[start:start + int(limit)]], "total": len(lines), "start": start,
+                "folder": folder}
+
+    PHASES = (      # (marker in the run's log, the plain words); the LAST marker found in the log's end wins
+        ("tag bridge starting", "Starting the cameras"),
+        ("LOOKING FOR CAMERAS", "Looking for the cameras"),
+        ("Waiting for robots", "Finding the robots (each answers over WiFi)"),
+        ("woken", "Waking sleeping robots"),
+        ("wiggle", "Naming each robot by its wiggle"),
+        ("setup:", "Measuring the table with the cameras"),
+        ("TAG TURN MEASURED", "Checking which way each robot faces"),
+        ("faces ", "Checking which way each robot faces"),
+        ("off its start spot", "Driving each robot to its start spot"),
+        ("Robots ready", "Robots ready: the plan starts"),
+        ("] plan ", "Driving"),
+        ("all robots done", "Finished driving: saving the run's records"),
+        ("stopping every robot", "Stopping every robot"),
+        ("Stopping every robot", "Stopping every robot"),
+        ("SYNC MARK end", "Saving the run's records"),
+        ("uploading:", "Uploading the run's logs"),
+    )
+
+    def phase_words(self, folder, live, running, stopping=False):
+        """(e24, finding 8: the bar showed raw program output) One plain line for what the run is doing now, and the
+        newest WARNING / NEEDS A HAND line of the last 15 s (only warnings interrupt). Returns (phase, warning)."""
+        if stopping:
+            return "Stopping every robot", ""
+        if not running:
+            return "", ""
+        lines = self.mission_lines(folder, 400)
+        phase = "Starting"
+        driving = (live or {}).get("t_run") is not None
+        for ln in lines:
+            for mark, words in self.PHASES:
+                if mark in ln:
+                    # once the plan has started, a re-check of a held robot ("faces ...", "start spot") is not a new
+                    # phase: only the plan's own lines and the end's move it on
+                    if driving and phase.startswith("Driving") and not words.startswith(
+                            ("Driving", "Finished", "Stopping", "Saving", "Uploading")):
+                        continue
+                    phase = words
+        if driving and not phase.startswith(("Driving", "Finished", "Stopping", "Saving", "Uploading")):
+            phase = "Driving"
+        vis = (live or {}).get("visit") or {}
+        if (live or {}).get("t_run") is not None and phase.startswith("Driving"):
+            if vis.get("asked"):
+                phase = "Driving: %d of %d points reached" % (vis.get("reached") or 0, vis["asked"])
+            held = [n for n, r in ((live or {}).get("robots") or {}).items() if r.get("held")]
+            if held:
+                phase += " (%s held)" % ", ".join(held)
+        warn = ""
+        for ln in reversed(lines[-40:]):
+            body = ln.split("] ", 1)[-1] if ln.startswith("[") else ln[9:] if ln[2:3] == ":" and ln[5:6] == ":" else ln
+            if body.startswith(("WARNING", "NEEDS A HAND", "CAMERA", "CRASHED")):
+                warn = body[:220]
+                break
+        # a warning interrupts the phase line for WARN_SHOW_S after it is first seen, then the line is plain again
+        # (it stays in the Log; what still needs a person is in the red alert slot, not here)
+        seen = getattr(self, "_warn_seen", None)
+        if warn and (seen is None or seen[0] != warn):
+            self._warn_seen = seen = (warn, time.time())
+        if warn and seen and time.time() - seen[1] > WARN_SHOW_S:
+            warn = ""
+        return phase, warn
+
+    def end_card(self, folder, kind, res=None):
+        """(e24, Nick 24 Nov D4; the audit's finding 3: "Visit points ended." whatever happened) How the run went,
+        from its own summary: the headline ("Done: all 6 points reached" / "Ended: 5 of 6 points reached"), per list
+        what was reached and each missed point with its reason and what to do next, robots that were asked for and
+        not found, and one line on what to do now. None while there is no summary yet."""
+        summ = None
+        for p in (os.path.join(folder or "", "mission_summary.json"),
+                  os.path.join(folder or "", "run", "run_plan_summary.json")):
+            try:
+                with open(p) as f:
+                    summ = json.load(f)
+                break
+            except (OSError, ValueError):
+                continue
+        if summ is None:
+            return None
+        vr = summ.get("visit_result")
+        if not vr and kind == "visit":
+            try:
+                import mission_run as MR_
+                vr = MR_.visit_result_from_logs(folder, os.path.join(folder, "run"), summ.get("result"))
+            except Exception:  # noqa: BLE001
+                vr = None
+        result = str(summ.get("result") or res or "")
+        card = {"result": result, "duration_s": summ.get("duration_s"), "planned_s": summ.get("planned_s"),
+                "folder": folder, "visit": vr, "warnings": []}
+        missing = {}
+        try:
+            with open(os.path.join(folder or "", "visit_order.json")) as f:
+                missing = json.load(f).get("missing") or {}
+        except (OSError, ValueError, AttributeError):
+            pass
+        card["robots_not_found"] = sorted(missing)
+        how = {"done": "finished by itself", "interrupted": "stopped by a person (STOP or Ctrl+C)",
+               "timeout": "ended by its time limit"}.get(result.split(":")[0], result or "ended")
+        if result.startswith("crashed"):
+            how = "CRASHED (a program error, not the robots)"
+        if summ.get("ended_by"):
+            how = "ended early: " + str(summ["ended_by"])
+        card["how"] = how
+        if vr:
+            card["headline"] = vr.get("headline")
+            n_miss = int(vr.get("asked") or 0) - int(vr.get("reached") or 0)
+            if n_miss <= 0 and result == "done":
+                card["next"] = "Nothing to do: every point was reached."
+            elif result.startswith("interrupted") or result.startswith("timeout"):
+                card["next"] = "Run again drives the same lists from the start; or choose New run and click only the missed points."
+            elif result.startswith("crashed"):
+                card["next"] = "Run again; if it crashes again, send Nick the run folder below."
+            else:
+                card["next"] = "Choose New run and run only the missed points (they are listed below with what to do for each)."
+        else:
+            card["headline"] = "%s %s" % (TITLES.get(kind, "The run"), how)
+            card["next"] = ""
+        return card
 
     def end_stopwatch(self):
         """(e23, school 16 / 18 Nov: a Stop pressed before the robots were named kept sending `stop` to the whole WiFi
@@ -786,6 +1024,8 @@ class Starter:
             if self.adv.get("practice_path", "real") == "real":
                 extra += ["--practice-real"]       # (e11) the school's own path, simulated robots
             extra += ["--readmap-store", os.path.join(self.S.dir, "practice-readmap")]   # (e14) practice's own store
+            if not self.adv.get("practice_frames"):
+                extra += ["--no-frames"]       # (e24, Nick's default Q-f) practice saves no pictures (130 MB a minute)
         if self.adv.get("recover_reserve", "on") == "off":
             extra += ["--rp-arg=--recover-reserve=off"]
         if self.adv.get("surface_marks", "log") != "log":
@@ -1021,6 +1261,11 @@ class Starter:
             lv = st.get("live") or {}
             pts = lv.get("points")
             out["points"] = len(pts) if isinstance(pts, list) else pts      # (e07 rehearsal: a list showed as objects)
+            out["progress"] = lv.get("visit") if st.get("running") else None     # (e24) "5 of 6 points" while it runs
+            out["alerts"] = (lv.get("alerts") or []) if st.get("running") else []
+            out["held"] = {n_: str(r_.get("out") or "").split(";")[0] for n_, r_ in (lv.get("robots") or {}).items()
+                           if r_.get("held") or r_.get("out")} if st.get("running") else {}
+            live_ = lv
             out["words"] = ("%s is running%s." % (TITLES[kind], " (practice)" if self.active_practice else "")) \
                 if st.get("running") else "%s ended." % TITLES[kind]
             out["folder"] = st.get("folder")
@@ -1043,8 +1288,22 @@ class Starter:
             w_ = self.start_failure_words(out.get("folder"))
             if w_:
                 out["words"], out["refused"] = w_, True
+        try:
+            # (e24, findings 3, 8) the plain phase line while it runs; the end card once it has ended
+            out["phase"], out["warning_line"] = self.phase_words(out.get("folder"), locals().get("live_"), running)
+            if not running and kind != "calibrate" and not out.get("refused"):
+                out["end"] = self.end_card(out.get("folder"), kind)
+                if out["end"] and out["end"].get("visit") and not out.get("crashed"):
+                    out["words"] = "%s (%s)" % (out["end"]["headline"], out["end"]["how"])
+        except Exception as e_:  # noqa: BLE001  (the page's extras never break the status)
+            out["phase_error"] = str(e_)
         if kind == "visit":
             vw = self.visit_warning(out.get("folder"))        # (e23) listed points no camera of the run can see
+            try:                                              # (e24, B9) robots named in the order and not found
+                with open(os.path.join(out.get("folder") or "", "visit_order.json")) as f_:
+                    out["visit_missing"] = json.load(f_).get("missing") or {}
+            except (OSError, ValueError, AttributeError):
+                out["visit_missing"] = {}
             if vw:
                 out["visit_warning"] = vw
         out["upload"] = self.upload_state(out.get("folder"), running, self.active_practice)   # (12 Nov, 1b)
@@ -1342,7 +1601,10 @@ class Starter:
         import wake_robots as WR
         seen = {}
         if folder:
-            for fn in ("follow.csv", "camera_track.csv"):          # its own pose / the camera, many times a second
+            # (e24, finding 8: "Alpha last heard 09:57" nine minutes into a run where Alpha was driving) a roof-tag
+            # run keeps these files in its run/ folder, not in the mission folder itself: both are read
+            for fn in ("follow.csv", "camera_track.csv", os.path.join("run", "follow.csv"),
+                       os.path.join("run", "cam_track.csv")):      # its own pose / the camera, many times a second
                 try:
                     if now - os.path.getmtime(os.path.join(folder, fn)) > 10.0:
                         continue
@@ -1384,12 +1646,16 @@ class Starter:
             lines = list(st.get("lines") or [])
             w_ = [ln for ln in lines if ln.strip().lower().startswith("waiting")]
             waiting = w_[-1].strip() if w_ else ""
+            if waiting.lower().startswith("waiting for "):
+                waiting = waiting[len("waiting for "):]       # (e24) no "Waiting: Waiting for robots"
+        if st.get("running") and st.get("phase"):
+            what = "%s%s: %s" % (st.get("title") or "A run", " (practice)" if st.get("practice") else "", st["phase"])
         words = what + (", since %s (%d min)" % (time.strftime("%H:%M", time.localtime(since)), (now - since) // 60)
                         if since else "") + "."
         if rob:
             words += " Robots: " + "; ".join("%s %s" % kv for kv in rob.items()) + "."
-        if waiting:
-            words += " Waiting: " + waiting.rstrip(".") + "."
+        if waiting and not (st.get("running") and st.get("phase")):
+            words += " Waiting for: " + waiting.rstrip(".") + "."
         return {"words": words, "running": bool(st.get("running")), "terminal": bool(folder and not st.get("running")),
                 "robots": rob, "waiting": waiting, "since": since}
 
@@ -1446,7 +1712,9 @@ class Starter:
                 "corners_needed": self.corners_needed(), "code": self.code_state(),
                 "upload": self.upload_state(None, False, pr),           # (12 Nov, 1b) said before a run starts
                 "upload_migrated": getattr(self.S, "upload_migrated", ""),
-                "clear_space": self.clear_space_words()}
+                "clear_space": self.clear_space_words(),
+                "last_order": self.last_order(),        # (e24) what "Run again" will run, named on its button
+                "session_asked": dict(getattr(self.S, "asked_once", {}) or {})}
 
     def clear_space_words(self):
         """(e14) The question asked before a run: the clear space each robot's finding stroke needs (derived:

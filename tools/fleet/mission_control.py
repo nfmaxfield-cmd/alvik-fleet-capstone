@@ -1472,6 +1472,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/review":
                 with S.lock:
                     return self._send(200, S.review())
+            if path == "/api/start/log":               # (e24, finding 8) the whole run's log, for the Log box
+                from urllib.parse import parse_qs
+                q_ = parse_qs(urlparse(self.path).query)
+                return self._send(200, clean(S.start.run_log(int((q_.get("from") or ["0"])[0] or 0))))
             if path == "/api/visit/points":
                 # (e11, Nick 9 Nov) the order picker: stickers on the map and in the camera's picture
                 from urllib.parse import parse_qs
@@ -1542,11 +1546,21 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with S.lock:
                 if path == "/api/start/run":
+                    if d.get("asked"):
+                        # (e24, Nick's default Q-e) what the start panel was told once this Mission Control session
+                        # ("Jay-Sun is here", "the space is clear"): remembered until Mission Control restarts
+                        S.asked_once = dict(getattr(S, "asked_once", {}) or {}, **{str(k): bool(v) for k, v in
+                                                                                   dict(d["asked"]).items()})
                     return self._send(200, clean(S.start.start(d.get("kind"), attended=bool(d.get("attended")),
                                                                order=d.get("order") or "",
                                                                keep_unreadable=bool(d.get("keep_unreadable")),
-                                                               clear_space=d.get("clear_space"))))
+                                                               clear_space=d.get("clear_space"),
+                                                               again=bool(d.get("again")))))
                 if path == "/api/visit/preset":
+                    if ":" in str(d.get("order") or ""):      # (e24) a preset holding a list per robot
+                        return self._send(200, clean({"presets": S.start.visit_presets(),
+                                                      "presets_each": S.start.save_visit_preset_each(d.get("name"),
+                                                                                                    d.get("order"))}))
                     return self._send(200, clean({"presets": S.start.save_visit_preset(d.get("name"), d.get("order"))}))
                 if path == "/api/restart":
                     # (e12) a fresh Mission Control on the new code: only when no run is going

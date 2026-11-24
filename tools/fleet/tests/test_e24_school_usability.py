@@ -100,17 +100,42 @@ def test_it_waits_for_a_fresh_camera_heading_only_when_the_next_leg_is_at_risk()
     assert any(ev == "turn_heading_wait" for ev, _ in c.logged)
     risky, room, at = RP.Coordinator.leg_heading_risk(c, "Alpha", c.steps("Alpha")[1], RP.Coordinator.YAW_JUMP_POSSIBLE_DEG)
     assert risky and room < 6.72 + 2.4 and at != 0.0
-    _pic(b, t + 0.2, -139.5)                     # the fresh picture agrees: it drives
-    assert RP.Coordinator.turn_heading_open(c, b, 1, t + 0.4) is True
+    _pic(b, t + 0.2, -139.5)                     # one fresh picture is not yet a pair that stands still
+    assert RP.Coordinator.turn_heading_open(c, b, 1, t + 0.35) is False
+    _pic(b, t + 0.5, -139.2)                     # two in a row agree with each other and with its own heading: it drives
+    assert RP.Coordinator.turn_heading_open(c, b, 1, t + 0.7) is True
     # nothing at risk: 20 cm in the middle of the table goes at once, and is compared on the way
     c, b, t = _turn_coord((200.0, 84.0), (220.0, 84.0), 0.0)
     assert RP.Coordinator.turn_heading_open(c, b, 1, t) is True
     assert b.thead_late is not None
     b.stat[1].update(status="started", t_sent=t)
-    _pic(b, t + 0.3, 25.0)                       # the first picture after the turn: 25 deg off
+    _pic(b, t + 0.3, 25.0)                       # the first pictures after the turn: 25 deg off
+    _pic(b, t + 0.6, 25.3)
+    b.pose_hist += [(t + 0.1 * k, 200.0 + k, 84.0, 0.0) for k in range(1, 9)]
     RP.Coordinator.turn_heading_watch(c)
     assert any(x[1] == "halt" for x in c.sent) and any(x[1].startswith("fpose") for x in c.sent)
     assert c.pending_replan is not None and c.pending_replan[0] == "Alpha"
+
+
+def test_a_camera_clock_that_is_off_cannot_make_the_heading_check_correct_a_right_heading():
+    """The practice room's cameras run 0.7 s ahead on purpose. The first version of this check took pictures STAMPED
+    after the turn's end: they had been taken during the turn, and it "corrected" headings that were right by 6-13 deg
+    (practice run 20261124-110023). Now: the Pi's own clock (arrival), and two pictures in a row that agree."""
+    plate = {"id": "zone 1 outlet plate", "shape": "polygon", "points": [[55, 80], [75, 80], [75, 95], [55, 95]]}
+    c, b, t = _turn_coord((150.0, 120.0), (68.0, 49.0), -139.0, obstacles=[plate])
+    td = b.stat[0]["t_done"]
+    # taken while it was still turning, stamped 0.7 s ahead (so "after" the turn), arriving just as the turn ends
+    b.cam_hist.append((td + 0.5, td + 0.05, 150.0, 120.0, "overhead", -146.0))
+    b.cam_hist.append((td + 0.6, td + 0.15, 150.0, 120.0, "overhead", -142.0))
+    assert RP.Coordinator.fresh_headings(c, b, td) == []
+    assert RP.Coordinator.turn_heading_open(c, b, 1, td + 0.2) is False and not c.sent      # waits; corrects nothing
+    # a pair that arrived late enough but is still turning in the picture (6 deg apart) is not read either
+    b.cam_hist.append((td + 1.1, td + 0.5, 150.0, 120.0, "overhead", -146.0))
+    b.cam_hist.append((td + 1.2, td + 0.6, 150.0, 120.0, "overhead", -139.5))
+    assert RP.Coordinator.fresh_headings(c, b, td) == []
+    b.cam_hist.append((td + 1.3, td + 0.7, 150.0, 120.0, "overhead", -139.2))
+    assert len(RP.Coordinator.fresh_headings(c, b, td)) == 2
+    assert RP.Coordinator.turn_heading_open(c, b, 1, td + 0.75) is True and not c.sent
 
 
 def test_a_gyro_step_its_own_turn_rate_does_not_explain_is_a_yaw_jump():
