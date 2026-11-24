@@ -70,17 +70,17 @@ def rng(vals, fmt="%.0f"):
     return fmt % lo if fmt % lo == fmt % hi else (fmt % lo + " to " + fmt % hi)
 
 
-L = ["| Case | Code | Seeds | Points reached of asked | Runs that said done | Run time (s) | Re-plans | Robots given up on | Nearest a robot's middle came to a keep-out (cm) | to an open edge (cm) |",
+L = ["| Case | Code | Seeds | Points reached of asked | Runs whose last line said done | Run time (s) | Re-plans | Times a robot was held out | Nearest a robot's middle came to a keep-out (cm) | to an open edge (cm) |",
      "|---|---|---|---|---|---|---|---|---|---|"]
 for c in ORDER:
     for code in ("before", "after"):
         g = [r for r in rows if r["case"] == c and r["code"] == code]
         if not g:
             continue
-        asked = g[0]["asked"]
+        asked = 8 if c == "miss" else g[0]["asked"]     # (the run counts the lists of the robots it found: 4; 8 were typed)
         L.append("| %s | %s | %s | %s of %s | %d of %d | %s | %s | %s | %s | %s |" % (
             WORDS.get(c, c), code, ", ".join(str(r["seed"]) for r in g), rng([r["reached"] for r in g]), asked,
-            sum(1 for r in g if r["result"] == "done"), len(g), rng([r["duration_s"] for r in g]),
+            sum(1 for r in g if (r["headline"] or "").startswith("Done") or (r["headline"] is None and r["result"] == "done")), len(g), rng([r["duration_s"] for r in g]),
             rng([r["replans"] for r in g]), rng([r["robots_out"] for r in g]),
             rng([r["closest_keepout_cm"] for r in g], "%.1f"), rng([r["closest_edge_cm"] for r in g], "%.1f")))
 open(os.path.join(OUT, "table.md"), "w").write("\n".join(L) + "\n")
