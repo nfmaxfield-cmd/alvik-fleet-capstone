@@ -1,0 +1,2 @@
+{"code":"before 39df4cf","typed":{"Alpha":["P01","P02"],"Bravo":["P12","P14"]},"first_run_ended":true,"run_again_button":"Run again","second_run_asked":null,"same_lists":false,"note":"the second run wrote no visit_order.json (no order was sent: the points shared out)"}
+{"code":"after e24","typed":{"Alpha":["P01","P02"],"Bravo":["P12","P14"]},"first_run_ended":true,"run_again_button":"Run again: Alpha P01, P02 · Bravo P12, P14","second_run_asked":"Alpha:P01,P02;Bravo:P12,P14","second_run_points":4,"same_lists":true,"note":""}

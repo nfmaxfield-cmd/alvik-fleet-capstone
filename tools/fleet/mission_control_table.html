@@ -338,7 +338,7 @@ function drawPlan(on) {
   if (!on) { pic.classList.add("hidden"); if (ex.dataset.h) { ex.innerHTML = ""; ex.dataset.h = ""; } return; }
   if (!VP) { vpLoad(); return; }
   const sz = VP.size, px = VP.px || {};
-  const hasPic = !!(sz && Object.keys(px).length);
+  const hasPic = !!(sz && Object.keys(px).length) && !VP.nopic;
   pic.classList.toggle("hidden", !hasPic);
   if (hasPic) {
     const sel = new Set(vpEach ? Object.values(lists).flat() : order);
@@ -349,7 +349,7 @@ function drawPlan(on) {
     if (pic.dataset.h !== h) { pic.innerHTML = h; pic.dataset.h = h;
       const img = $("vpimg");
       // no live picture (practice before any run, a camera unplugged): the last setup picture, else no picture at all (never a broken one)
-      img.onerror = () => { if (!img.dataset.fb) { img.dataset.fb = "1"; img.src = `/api/tags/picture?cam=${vpCam}&t=${vpStamp}`; } else { img.style.display = "none"; } };
+      img.onerror = () => { if (!img.dataset.fb) { img.dataset.fb = "1"; img.src = `/api/tags/picture?cam=${vpCam}&t=${vpStamp}`; } else { VP.nopic = true; pic.dataset.h = ""; render(); } };      // no picture at all: the map takes the whole width
       img.onclick = ev => { const b = img.getBoundingClientRect(), u = (ev.clientX - b.left) / b.width * sz[0], v = (ev.clientY - b.top) / b.height * sz[1];
         let best = null, bd = 1e9; for (const [l, q] of Object.entries(px)) { const d = Math.hypot(q[0] - u, q[1] - v); if (d < bd) { bd = d; best = l; } }
         if (best && bd <= sz[0] / 12) vpAdd(best); else flash("That click is too far from any sticker in the picture: click nearer one, or use the map.", true); };
@@ -364,7 +364,7 @@ function drawPlan(on) {
       <button class="ghost" id="vptypego">Use it</button>
       <select id="vppreset" style="padding:7px;border-radius:8px;border:1px solid var(--line);max-width:230px"><option value="">Presets...</option>${Object.keys(ps).map(k => `<option value="s:${esc(k)}">${esc(k)} (${ps[k].length}, one list)</option>`).join("")}${Object.keys(pe).map(k => `<option value="e:${esc(k)}">${esc(k)} (a list per robot)</option>`).join("")}</select>
       <button class="ghost" id="vpsave" ${cur ? "" : "disabled"} title="Keep the lists on screen under a name">Save as a preset</button></div>
-    <div class="tiny muted" style="margin-top:4px">Now: ${cur ? esc(cur) : "nothing chosen (Start shares the points out)"}. ${un.length ? `<span style="color:var(--red)">${un.length} sticker${un.length === 1 ? "" : "s"} ringed red: a roof tag cannot be read there (${esc(un.slice(0, 8).join(", "))}${un.length > 8 ? ", ..." : ""}).</span> ` : ""}${hasPic ? "" : esc((VP.words || []).join(" "))}</div></div>`;
+    <div class="tiny muted" style="margin-top:4px">Now: ${cur ? esc(cur) : "nothing chosen (Start shares the points out)"}. ${un.length ? `<span style="color:var(--red)">${un.length} sticker${un.length === 1 ? "" : "s"} ringed red: a roof tag cannot be read there (${esc(un.slice(0, 8).join(", "))}${un.length > 8 ? ", ..." : ""}).</span> ` : ""}${hasPic ? "" : esc((VP.words || []).join(" ") || (VP.nopic ? "No camera picture to show right now (practice with no run going, or the camera is not sending): use the map." : ""))}</div></div>`;
   if (ex.dataset.h !== eh && !typingIn("#planextra")) { ex.innerHTML = eh; ex.dataset.h = eh;
     const go = () => { const w = vpTyped($("vptype").value); if (w) flash(w, true); else { flash("Order set: " + (vpEach ? vpSpec() : order.join(","))); ex.dataset.h = ""; render(); } };
     $("vptypego").onclick = go; $("vptype").onkeydown = e => { if (e.key === "Enter") go(); };
@@ -495,7 +495,7 @@ function runbarHTML() {
   if (s.running && stopPressed && Date.now() - stopPressed < 10000) return `<b style="color:var(--amber)">Stopping…</b><span class="small muted">STOP sent to every robot: waiting for each to confirm.</span><span class="grow"></span><button class="stop" id="stopbar">STOP again</button>`;   // (e24, finding 12) no flip back to the running view while the stop is being confirmed
   if (s.running) { const pg = s.progress || (LIVE && LIVE.visit), pts = pg && pg.asked ? ` · <b>${pg.reached} of ${pg.asked} points</b>` : (s.points != null && s.kind !== "visit" ? ` · ${s.points} points` : "");
     // (e24, finding 8) a plain phase line; only a warning interrupts it (the raw program output stays in the Log)
-    return `<b>${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span><span class="upl">${uploadPill(s.upload)}</span><span class="small phase" id="phase" style="white-space:nowrap">${esc(String(s.phase || "Starting").replace(/^Driving: \d+ of \d+ points reached/, "Driving"))}</span><span class="small hide-s" style="color:var(--amber);flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.warning_line || "")}">${esc(s.warning_line || "")}</span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP every robot</button>`; }
+    return `<b class="hide-s">${esc(s.title)}${s.practice ? " (practice)" : ""}</b><span class="small">${fmt(s.elapsed_s)}${pts}</span><span class="upl">${uploadPill(s.upload)}</span><span class="small phase" id="phase">${esc(String(s.phase || "Starting").replace(/^Driving: \d+ of \d+ points reached/, "Driving"))}</span><span class="small hide-s" style="color:var(--amber);flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.warning_line || "")}">${esc(s.warning_line || "")}</span><span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="stop" id="stopbar">STOP<span class="hide-s"> every robot</span></button>`; }
   if (s.kind) { const lo = T && T.last_order, again = s.kind === "visit" && lo ? `Run again: ${lo.words}` : "Run again";
     return `<b>${esc(s.words || s.title)}</b><span class="upl">${uploadPill(s.upload)}</span>${s.upload && s.upload.link ? `<a class="small" href="${esc(s.upload.link)}" target="_blank" rel="noopener">the release</a>` : ""}${s.sleep_words ? `<span class="small muted hide-s">${esc(s.sleep_words)}</span>` : ""}<span class="grow"></span><button class="ghost" id="logbtn">Log</button><button class="ghost" id="newrun" title="Back to the plan: your lists are kept for editing">New run</button><button class="primary" id="again" title="${esc(again)}" style="max-width:min(560px,60vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(again)}</button>`; }
   const visit = kind === "visit" && isTags();

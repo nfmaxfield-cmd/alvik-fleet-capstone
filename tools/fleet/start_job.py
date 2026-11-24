@@ -638,6 +638,14 @@ class Starter:
             if pr:
                 lr = (getattr(S, "last_runs", {}) or {}).values()
                 dirs = [os.path.join(os.path.dirname(r_), "tagcal") for r_ in lr if r_] + dirs
+                # (e24) ... and, after a restart of Mission Control (which forgets its last runs), the newest practice
+                # runs on the card: their camera models are the practice room's own
+                try:
+                    rd_ = os.path.join(S.dir, "runs")
+                    dirs = dirs[:len(dirs) - 2] + [os.path.join(rd_, n_, "tagcal") for n_ in
+                                                   sorted(os.listdir(rd_), reverse=True)[:5]] + dirs[len(dirs) - 2:]
+                except OSError:
+                    pass
             for d_ in dirs:
                 p_ = os.path.join(d_, cam + ".json")
                 if os.path.exists(p_):
@@ -865,6 +873,8 @@ class Starter:
                     phase = words
         if driving and not phase.startswith(("Driving", "Finished", "Stopping", "Saving", "Uploading")):
             phase = "Driving"
+        if (live or {}).get("result") and not phase.startswith(("Stopping", "Uploading")):
+            phase = "Saving the run's records"       # the plan is over (run_plan wrote its result): only the saving is left
         vis = (live or {}).get("visit") or {}
         if (live or {}).get("t_run") is not None and phase.startswith("Driving"):
             if vis.get("asked"):
@@ -875,6 +885,8 @@ class Starter:
         warn = ""
         for ln in reversed(lines[-40:]):
             body = ln.split("] ", 1)[-1] if ln.startswith("[") else ln[9:] if ln[2:3] == ":" and ln[5:6] == ":" else ln
+            if body.startswith("WARNINGS ("):
+                continue                              # the summary's own count at the end, not a warning to act on
             if body.startswith(("WARNING", "NEEDS A HAND", "CAMERA", "CRASHED")):
                 warn = body[:220]
                 break
@@ -937,7 +949,7 @@ class Starter:
             elif result.startswith("crashed"):
                 card["next"] = "Run again; if it crashes again, send Nick the run folder below."
             else:
-                card["next"] = "Choose New run and run only the missed points (they are listed below with what to do for each)."
+                card["next"] = "Choose New run and run only the missed points (each is listed here with what to do)."
         else:
             card["headline"] = "%s %s" % (TITLES.get(kind, "The run"), how)
             card["next"] = ""
