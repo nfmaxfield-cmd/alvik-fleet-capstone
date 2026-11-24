@@ -84,6 +84,9 @@ DEFAULT_SETTINGS = {
     # "later" and come in at the next re-plan. 0: the whole list every time (before e23). run_plan picks the number
     # from the planning time it measures (Coordinator.plan_ahead_k)
     "plan_ahead_points": 0,
+    "dwell_at_cm": 0.0,          # (e24, N7) a re-plan that starts with a point's stop while the robot is further than this
+    #                             from the point plans the drive there again first (0: the stop where it stands, as before;
+    #                             run_plan passes twice the run's own reach tolerance)
     # (e23, school 18 Nov 17:54: a 62 cm leg at 15 cm/s to a point 19.7 cm from the long edge ended 11 cm too far) the
     # last part of a travel leg whose end lies inside this room of an edge or keep-out is driven at edge_slow_cms: by
     # how far the end is inside the room. 0: off (before e23). run_plan / mission_run set it from the measured numbers
@@ -2274,6 +2277,22 @@ def obstacle_decide(m, plan, states, new_obstacles, over=None, t_now=None):
                 break
             t += seq[k][1]["dur"] * s.tick_s
             k += 1
+        # (e24, school 23 Nov N4 / N7) its next step is a point's STOP that has not begun, and it stands further from
+        # where that stop was planned than dwell_at_cm (turned back, re-seeded or re-checked since it arrived): the
+        # stop is NOT carried on where it stands (it was: "at point P28" 198 cm from P28, refused; or made 4 cm off as
+        # the plan changed and the point lost with no line). It holds, and the new plan drives it to the point first
+        at_cm = float(s.get("dwell_at_cm", 0.0) or 0.0)
+        st0, i0 = states[n], states[n]["step"]
+        steps0 = plan["robots"][n]["steps"]
+        if at_cm > 0 and k > 0 and not st0["in_progress"] and i0 < len(steps0) and steps0[i0]["type"] == "wait" and \
+                str(steps0[i0].get("label") or "").startswith("at point ") and steps0[i0].get("to") is not None and \
+                math.hypot(st0["pose"][0] - steps0[i0]["to"][0], st0["pose"][1] - steps0[i0]["to"][1]) > at_cm:
+            keep[n] = 0
+            events.append({"robot": n, "action": "holds",
+                           "reason": "its stop at %s is due %.0f cm from where it stands: the new plan drives it there "
+                                     "first" % (str(steps0[i0]["label"])[3:], math.hypot(
+                                         st0["pose"][0] - steps0[i0]["to"][0], st0["pose"][1] - steps0[i0]["to"][1]))})
+            continue
         keep[n] = k
         if k == 0:
             events.append({"robot": n, "action": "holds", "reason": "was not moving; waits for the new plan"})

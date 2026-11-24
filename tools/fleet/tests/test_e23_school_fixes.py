@@ -666,6 +666,11 @@ def test_a_robot_standing_in_its_dwell_is_not_sent_on_the_veer_turn_back(monkeyp
     # the veer stage itself (blind_watch), a point 22 cm from two edges, the camera silent for 5 s
     def watch(standing, switch=True):
         monkeypatch.setattr(RP, "VEER_AT_POINT_STAND", switch)
+        # (e24) e23's veer stage as it was built: e24's own rules for a picture stall (a standing robot anywhere stays,
+        # a driving one is slowed: MIRLT_BLIND_STANDING, MIRLT_VEER_RULE) are set to their old ways here and tested in
+        # test_e24_school_usability.py
+        monkeypatch.setattr(RP, "BLIND_STANDING_STAY", False)
+        monkeypatch.setattr(RP, "VEER_REACH", False)
         pts = {"1": [22.0, 22.0], "2": [320.0, 120.0], "3": [120.0, 50.0], "4": [280.0, 50.0], "5": [60.0, 60.0],
                "6": [340.0, 60.0]}
         c2 = coord(*production_plan(points=pts))

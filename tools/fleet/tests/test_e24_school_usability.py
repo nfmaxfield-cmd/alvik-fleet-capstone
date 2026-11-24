@@ -621,3 +621,38 @@ def test_mission_controls_finished_runs_move_to_the_usb_drive_when_the_card_is_l
         assert json.loads((link / "visit_order.json").read_text())["asked"] == "Alpha:P01"       # still readable in place
     assert (logs / "mission-control-school-conference" / "settings.json").exists()               # its own files stay
     assert DG.total_gb(str(tmp_path / "not" / "there" / "yet")) > 0                              # B12: never "of 0 GB"
+
+
+# ================================================================= N7. a stop due at a point the robot has left
+def test_a_stop_due_at_a_point_the_robot_is_no_longer_at_gets_its_drive_back():
+    """School 23 Nov, run 7: a re-plan gave a robot the pause "point P28" where it stood, 198 cm from P28; the stop
+    was refused (rightly) and P28 never visited. The same in the simulator on 19 Nov (P27, 100 cm)."""
+    import planner as P
+    from test_keep_going import coord, production_plan
+    from test_e23_school_fixes import _dwelling
+    mm, plan = production_plan()
+    c = coord(mm, plan)
+    i, stp = _dwelling(c, "Alpha")                       # Alpha has arrived at its first point and its stop is due
+    px, py = RP.Coordinator.point_xy(c, "point 1")
+    for st in c.bots["Alpha"].stat:
+        st.setdefault("t_sent", 0.0)
+    c.bots["Alpha"].pose = (px + 60.0, py - 30.0, 0.0)   # ... but it was turned back since: it stands 67 cm away
+
+    def first_steps(over):
+        dec = P.obstacle_decide(c.m, c.plan, c.states(), [], over=dict(c.plan["settings"], **over), t_now=1.0)
+        new, _ = P.obstacle_replan(dec)
+        return new, [(s_["type"], s_.get("label")) for s_ in new["robots"]["Alpha"]["steps"] if s_.get("label")][:3]
+    new, labs = first_steps({"dwell_at_cm": 12.0})
+    assert labs[0] == ("drive", "point 1") or labs[0][1] == "point 1"       # the drive to the point comes first again
+    assert ("wait", "at point 1") in labs and new["returns"][0]["robot"] == "Alpha" and new["returns"][0]["from_cm"] > 60
+    drive = next(s_ for s_ in new["robots"]["Alpha"]["steps"] if s_.get("label") == "point 1" and s_["type"] == "drive")
+    assert abs(drive["to"][0] - px) < 0.5 and abs(drive["to"][1] - py) < 0.5
+    # the old way, kept behind its switch (dwell_at_cm 0): the stop is planned where it stands
+    new0, labs0 = first_steps({"dwell_at_cm": 0.0})
+    assert new0["robots"]["Alpha"]["steps"][0]["type"] == "wait" and not new0.get("returns")      # carried on where it stands
+    assert not any(l == "point 1" for _t, l in labs0)                                              # and never driven to
+    # a robot standing AT its point (2 cm off) is not sent anywhere: its stop is carried on there, as before
+    c.bots["Alpha"].pose = (px + 2.0, py, 0.0)
+    new1, labs1 = first_steps({"dwell_at_cm": 12.0})
+    assert new1["robots"]["Alpha"]["steps"][0]["type"] == "wait" and not new1.get("returns")
+    assert not any(l == "point 1" for _t, l in labs1)
