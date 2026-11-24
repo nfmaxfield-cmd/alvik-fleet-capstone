@@ -40,6 +40,11 @@ import time
 VERSION = "update-pi-2026-11-24"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+if not os.path.isdir(os.path.join(REPO, ".git")):
+    # the FIRST update of a Pi that does not have this file yet runs a copy fetched to another place
+    # (git show origin/main:tools/pi/update_pi.py > ~/update_pi.py; python3 ~/update_pi.py): the folder it is typed in
+    REPO = os.getcwd()
+REPO = os.path.abspath(os.environ.get("MIRLT_UPDATE_REPO") or REPO)
 MC_PORT = int(os.environ.get("MIRLT_MC_PORT") or 8095)
 PORT_WAIT_S = 40.0      # [chosen] how long Mission Control gets to close or to answer (it closes in about 5 s on the Pi
 #                         and opens in about 10). DOE: no (a patience; a longer wait only delays the FAIL words)
@@ -177,6 +182,18 @@ def main(argv=None):
     branch = "pi-backup-" + stamp
     say("UPDATE: bringing this Pi to GitHub's newest code%s." % (" (check only: nothing is changed)" if only_check else ""))
     kept = []          # where local things were kept, for the last lines
+    local_before = {}  # each site_local.json this update wrote: what it held before (None: it did not exist)
+
+    def local_back():
+        for lp_, was in local_before.items():
+            try:
+                if was is None:
+                    os.remove(lp_)
+                else:
+                    with open(lp_, "w") as f_:
+                        json.dump(was, f_, indent=1)
+            except OSError:
+                pass
 
     def fail(words, nxt):
         say("")
@@ -274,47 +291,8 @@ def main(argv=None):
         return fail("the backup could not be made (%s). Nothing else was changed." % e,
                     "check the card's free space (./run-fleet-pi.sh space), then try again.")
     say("   branch %s; folder %s" % (branch, backup_dir))
-    # 5. this Pi's own choices out of an edited site file
-    if edits:
-        say("4. Carrying this Pi's own choices out of the edited site file ...")
-        sys.path.insert(0, os.path.join(REPO, "tools", "fleet"))
-        for p, mine, base_text in edits:
-            name = os.path.basename(p)[:-5]
-            new_text = git("show", "origin/main:%s" % p, check=False).stdout
-            try:
-                import sites as SI
-                got, other = SI.local_from_edits(name, mine, base_text)
-                # what GitHub's file now says anyway needs no copy on the Pi
-                same, _ = SI.local_from_edits(name, mine, new_text) if new_text else (got, [])
-                got = {k: v for k, v in got.items() if k in same}
-                conf = os.path.expanduser(json.loads(mine).get("conf_dir") or (
-                    "~/.config/mirlt" if name == "home" else "~/.config/mirlt/sites/" + name))
-                lp = os.path.join(conf, SI.LOCAL_FILE)
-                cur_local = {}
-                try:
-                    with open(lp) as f:
-                        cur_local = json.load(f)
-                except (OSError, ValueError):
-                    pass
-                for k, v in sorted(got.items()):
-                    cur_local[k] = v
-                    say("   kept on this Pi: %s = %s (%s)" % (k, json.dumps(v), lp))
-                if got:
-                    os.makedirs(conf, exist_ok=True)
-                    with open(lp, "w") as f:
-                        json.dump(cur_local, f, indent=1)
-                    kept.append("this Pi's own choices: %s" % lp)
-                upstream = [k for k in SI.local_from_edits(name, mine, base_text)[0] if k not in got]
-                for k in upstream:
-                    say("   %s: GitHub's file now says the same as this Pi did: nothing to keep" % k)
-                for w in other:
-                    say("   NOT carried over (it is in the backup; tell Nick if it matters): %s" % w)
-            except Exception as e:  # noqa: BLE001  (the backup has the file whatever happens here)
-                say("   (%s: its edits could not be read as choices (%s); the file itself is in the backup)" % (p, e))
-    else:
-        say("4. No site file was edited on this Pi: nothing to carry.")
     # 6. onto origin/main
-    say("5. Putting the code on GitHub's newest ...")
+    say("4. Putting the code on GitHub's newest ...")
     stashed = False
     try:
         if changed:
@@ -341,6 +319,46 @@ def main(argv=None):
         return fail("the code could not be switched (%s). The Pi is back as it was." % e,
                     "send Nick the lines above.")
     say("   now at: %s" % git("log", "-1", "--format=%h %s").stdout.strip())
+    # 5. this Pi's own choices out of an edited site file (read with the NEW code's sites.py, after the switch)
+    if edits:
+        say("5. Carrying this Pi's own choices out of the edited site file (into the Pi's own file) ...")
+        sys.path.insert(0, os.path.join(REPO, "tools", "fleet"))
+        for p, mine, base_text in edits:
+            name = os.path.basename(p)[:-5]
+            new_text = git("show", "origin/main:%s" % p, check=False).stdout
+            try:
+                import sites as SI
+                got, other = SI.local_from_edits(name, mine, base_text)
+                # what GitHub's file now says anyway needs no copy on the Pi
+                same, _ = SI.local_from_edits(name, mine, new_text) if new_text else (got, [])
+                got = {k: v for k, v in got.items() if k in same}
+                conf = os.path.expanduser(json.loads(mine).get("conf_dir") or (
+                    "~/.config/mirlt" if name == "home" else "~/.config/mirlt/sites/" + name))
+                lp = os.path.join(conf, SI.LOCAL_FILE)
+                cur_local = {}
+                try:
+                    with open(lp) as f:
+                        cur_local = json.load(f)
+                except (OSError, ValueError):
+                    pass
+                local_before.setdefault(lp, dict(cur_local) if os.path.exists(lp) else None)
+                for k, v in sorted(got.items()):
+                    cur_local[k] = v
+                    say("   kept on this Pi: %s = %s (%s)" % (k, json.dumps(v), lp))
+                if got:
+                    os.makedirs(conf, exist_ok=True)
+                    with open(lp, "w") as f:
+                        json.dump(cur_local, f, indent=1)
+                    kept.append("this Pi's own choices: %s" % lp)
+                upstream = [k for k in SI.local_from_edits(name, mine, base_text)[0] if k not in got]
+                for k in upstream:
+                    say("   %s: GitHub's file now says the same as this Pi did: nothing to keep" % k)
+                for w in other:
+                    say("   NOT carried over (it is in the backup; tell Nick if it matters): %s" % w)
+            except Exception as e:  # noqa: BLE001  (the backup has the file whatever happens here)
+                say("   (%s: its edits could not be read as choices (%s); the file itself is in the backup)" % (p, e))
+    else:
+        say("5. No site file was edited on this Pi: nothing to carry.")
     # 7. checks
     say("6. Checking the result ...")
     bad = []
@@ -352,6 +370,7 @@ def main(argv=None):
         git("reset", "--hard", branch, check=False)
         if stashed:
             git("stash", "pop", check=False)
+        local_back()
         if was_open:
             open_mc()
         return fail("the new code did not pass its checks (%s). The Pi was put back exactly as it was before the "
