@@ -31,8 +31,32 @@ pictures a second (-1 to +1; near 0 = no link, or temperature barely varied).
 | 20261110-190334-visit-robots | none, case cover off (school Pi) | 81.3 / 83.8 | 9 | 84 / 16 / 0 % | - / - / - | - | - |
 | 20261110-191945-visit-robots | none, case cover off (school Pi) | 81.8 / 83.3 | 10 | 72 / 28 / 0 % | - / - / - | - | - |
 | 20261113-084020-freeroam | none (bare Pi, no cover) | 79.4 / 81.8 | 30 | 100 / 0 / 0 % | 25.0 / 20.0 / - | 0.10 | -0.44 |
+| 20261123-121029-visit-robots | none known (school Pi) | 80.8 / 82.8 | 2 | 83 / 17 / 0 % | 4.0 / 2.0 / - | - | -0.57 |
+| 20261123-121948-visit-robots | none known (school Pi) | 82.8 / 84.2 | 8 | 17 / 83 / 0 % | 1.5 / 1.5 / - | - | -0.22 |
+| 20261123-123706-visit-robots | none known (school Pi) | 82.8 / 84.2 | 6 | 13 / 87 / 0 % | 1.8 / 1.5 / - | - | -0.17 |
+| 20261123-124742-visit-robots | none known (school Pi) | 82.8 / 84.2 | 9 | 4 / 96 / 0 % | 1.0 / 1.0 / - | - | -0.18 |
+| 20261123-140510-visit-robots | none known (school Pi) | 81.8 / 84.2 | 11 | 74 / 26 / 0 % | 2.0 / 1.5 / - | - | -0.45 |
+| 20261123-143351-visit-robots | none known (school Pi) | 82.3 / 84.2 | 24 | 26 / 74 / 0 % | 2.0 / 1.5 / - | - | -0.17 |
+| 20261123-150835-visit-robots | none known (school Pi) | 81.3 / 83.3 | 2 | 70 / 30 / 0 % | 2.0 / 1.5 / - | - | -0.44 |
+| 20261123-151925-visit-robots | none known (school Pi) | 82.8 / 83.8 | 8 | 24 / 76 / 0 % | 1.5 / 1.0 / - | - | -0.26 |
+| 20261123-164906-visit-robots | none known (school Pi) | 82.8 / 84.7 | 9 | 18 / 82 / 0 % | 2.8 / 1.5 / - | - | -0.35 |
+| 20261123-172934-visit-robots | none known (school Pi) | 82.8 / 84.7 | 7 | 17 / 83 / 0 % | 2.0 / 1.5 / - | - | -0.46 |
+| 20261123-175440-visit-robots | none known (school Pi) | 82.8 / 84.7 | 15 | 15 / 85 / 0 % | 3.5 / 3.5 / - | - | -0.32 |
+| 20261123-181338-visit-robots | none known (school Pi) | 83.3 / 84.7 | 3 | 0 / 100 / 0 % | - / 2.0 / - | - | -0.33 |
+| 20261123-183558-visit-robots | none known (school Pi) | 82.3 / 84.2 | 13 | 37 / 63 / 0 % | 6.5 / 5.5 / - | - | -0.47 |
 
 ## Readings (newest first)
+- **20261123 school Visit points, 13 sessions 12:10-18:51 (school Pi, cooling none known; e23c):** 80.8-83.3 C median
+  in every session (max 84.7), under the soft temperature limit 17-100 % of the time and never throttling. The first run
+  of the day was the coolest (80.8 C, 17 % soft limit); from the second run on it sat at 82-83 C. Heat did not decide
+  these runs: the pictures the tag bridge read each second followed the number of robots (camera 1: 1.2-1.7 a second
+  with two robots, 3.4-4.9 with one, at the same 82-83 C), and core 0 was at 100 % for the recorder in every session
+  whether the cameras were set to 15 or to 10 pictures a second. The clock's median was 1726 MHz against 1800, about 4 %
+  slow. A fan would win back that 4 % and the flags; it would not free core 0 (docs/results/school-2026-11-23/report.md,
+  section 2.6).
+  ![Pi temperature and camera speed, 23 Nov 14:33, the longest session](heat/20261123-143351-visit-robots.png)
+  The Pi's temperature and the pictures the tag bridge read each second over the 22-minute two-robot run; data: the
+  session's cpu.csv and bridge/detect_times.csv.
 - **20261113-084020-freeroam (home free roam on e21, 08:45-12:45, 4 h, three robots, home Pi bare, no cover):** 79.4 C
   median (max 81.8), never throttled, no time under the soft limit flagged. Heat did not limit this run; work did: all
   four cores were busy (median 99 / 98 / 88 / 86 %) and the planner's slowest passes took 0.1-10 s against its 0.05 s

@@ -1,0 +1,2246 @@
+[
+ {
+  "run": "20261123-121029",
+  "clock": "12:10",
+  "plan_s": 118,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 43.5,
+  "core1_p95": 75.6,
+  "core2": 86.1,
+  "core3": 84.9,
+  "temp_c": 81.3,
+  "temp_c_p95": 82.3,
+  "arm_mhz": 1800.0,
+  "recorder_cpu": 95.9,
+  "tag_bridge_cpu": 152.5,
+  "run_plan_cpu": 37.5,
+  "run_plan_cpu_p95": 99.7,
+  "load1": 7.2,
+  "mem_avail_mb": 2286.0,
+  "rows": 51,
+  "throttled_now_rows": 4,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    4
+   ]
+  ],
+  "card_gb_end": 0.77,
+  "lag_overhead": {
+   "median": 0.14,
+   "p95": 0.18,
+   "max": 0.23,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.15,
+   "p95": 0.2,
+   "max": 0.21,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "overhead": {
+    "pictures": 331,
+    "per_s": 2.82,
+    "age_median": 0.33,
+    "age_p95": 0.66,
+    "age_max": 1.06,
+    "age_over1_pct": 0.6,
+    "detect_ms_median": 118.0,
+    "detect_ms_p95": 323.0,
+    "stalls": 55,
+    "stalls_per_min": 28.14,
+    "stall_len_median": 1.18,
+    "stall_len_p90": 1.43,
+    "stall_len_max": 2.0,
+    "stall_time_pct": 10.6,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 0.75,
+    "read_gap_max": 1.16
+   },
+   "side": {
+    "pictures": 791,
+    "per_s": 6.74,
+    "age_median": 0.25,
+    "age_p95": 0.6,
+    "age_max": 0.94,
+    "age_over1_pct": 0.0,
+    "detect_ms_median": 90.0,
+    "detect_ms_p95": 389.0,
+    "stalls": 15,
+    "stalls_per_min": 7.67,
+    "stall_len_median": 1.09,
+    "stall_len_p90": 1.28,
+    "stall_len_max": 1.5,
+    "stall_time_pct": 1.7,
+    "between_stalls_median_s": 4.8,
+    "read_gap_p95": 0.44,
+    "read_gap_max": 0.85
+   }
+  },
+  "both_stalls": 4,
+  "both_stall_len_median": 1.09,
+  "both_stalls_per_min": 2.04,
+  "fixes": {
+   "Alpha": {
+    "n": 311,
+    "gap_median": 0.35,
+    "gap_p90": 0.67,
+    "gap_max": 1.4,
+    "over1_time_pct": 5.8,
+    "by_cam": {
+     "overhead": 311
+    }
+   },
+   "Bravo": {
+    "n": 473,
+    "gap_median": 0.21,
+    "gap_p90": 0.45,
+    "gap_max": 0.9,
+    "over1_time_pct": 0.0,
+    "by_cam": {
+     "overhead": 155,
+     "side": 313,
+     "overhead+side": 2,
+     "side+overhead": 3
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Bravo": [
+    450,
+    9
+   ],
+   "Alpha": [
+    304,
+    8
+   ]
+  },
+  "replan": {
+   "n": 3,
+   "median": 3.86,
+   "p90": 3.86,
+   "max": 4.92,
+   "busy_pct": 10.0,
+   "over_budget": 3,
+   "by_points": [
+    [
+     1,
+     3.4
+    ],
+    [
+     4,
+     3.9
+    ]
+   ]
+  },
+  "first_plan_s": 15.3,
+  "tracker_lost": {
+   "n": 4,
+   "median": 1.11,
+   "max": 1.14
+  },
+  "old_fix": {
+   "n": 2,
+   "age_max": 1.06
+  }
+ },
+ {
+  "run": "20261123-121948",
+  "clock": "12:19",
+  "plan_s": 437,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 94.6,
+  "core1_p95": 100.0,
+  "core2": 93.3,
+  "core3": 91.8,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 92.1,
+  "tag_bridge_cpu": 129.2,
+  "run_plan_cpu": 36.9,
+  "run_plan_cpu_p95": 92.9,
+  "load1": 8.3,
+  "mem_avail_mb": 2162.0,
+  "rows": 184,
+  "throttled_now_rows": 166,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    166
+   ]
+  ],
+  "card_gb_end": 0.76,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.21,
+   "max": 0.33,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.18,
+   "p95": 0.23,
+   "max": 0.3,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 1667,
+    "per_s": 3.82,
+    "age_median": 0.38,
+    "age_p95": 0.78,
+    "age_max": 1.87,
+    "age_over1_pct": 1.3,
+    "detect_ms_median": 132.0,
+    "detect_ms_p95": 498.0,
+    "stalls": 189,
+    "stalls_per_min": 25.97,
+    "stall_len_median": 1.19,
+    "stall_len_p90": 1.52,
+    "stall_len_max": 2.26,
+    "stall_time_pct": 10.4,
+    "between_stalls_median_s": 1.4,
+    "read_gap_p95": 0.61,
+    "read_gap_max": 1.63
+   },
+   "overhead": {
+    "pictures": 635,
+    "per_s": 1.45,
+    "age_median": 0.45,
+    "age_p95": 0.94,
+    "age_max": 1.38,
+    "age_over1_pct": 4.4,
+    "detect_ms_median": 190.0,
+    "detect_ms_p95": 537.0,
+    "stalls": 421,
+    "stalls_per_min": 57.82,
+    "stall_len_median": 1.33,
+    "stall_len_p90": 1.84,
+    "stall_len_max": 3.32,
+    "stall_time_pct": 41.1,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 1.31,
+    "read_gap_max": 2.53
+   }
+  },
+  "both_stalls": 129,
+  "both_stall_len_median": 1.12,
+  "both_stalls_per_min": 17.71,
+  "fixes": {
+   "Bravo": {
+    "n": 1577,
+    "gap_median": 0.21,
+    "gap_p90": 0.56,
+    "gap_max": 1.6,
+    "over1_time_pct": 3.4,
+    "by_cam": {
+     "side": 1471,
+     "side+overhead": 23,
+     "overhead": 74,
+     "overhead+side": 9
+    }
+   },
+   "Alpha": {
+    "n": 695,
+    "gap_median": 0.58,
+    "gap_p90": 1.05,
+    "gap_max": 3.0,
+    "over1_time_pct": 26.4,
+    "by_cam": {
+     "overhead": 606,
+     "side": 89
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    530,
+    172
+   ],
+   "Bravo": [
+    1568,
+    24
+   ]
+  },
+  "replan": {
+   "n": 9,
+   "median": 4.86,
+   "p90": 6.98,
+   "max": 13.84,
+   "busy_pct": 12.0,
+   "over_budget": 8,
+   "by_points": [
+    [
+     2,
+     3.4
+    ],
+    [
+     4,
+     4.0
+    ],
+    [
+     4,
+     4.5
+    ],
+    [
+     4,
+     4.9
+    ],
+    [
+     4,
+     5.0
+    ],
+    [
+     13,
+     6.4
+    ],
+    [
+     13,
+     7.0
+    ],
+    [
+     34,
+     13.8
+    ]
+   ]
+  },
+  "first_plan_s": 14.6,
+  "tracker_lost": {
+   "n": 75,
+   "median": 1.24,
+   "max": 2.54
+  },
+  "old_fix": {
+   "n": 7,
+   "age_max": 1.37
+  }
+ },
+ {
+  "run": "20261123-123706",
+  "clock": "12:37",
+  "plan_s": 252,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 93.0,
+  "core1_p95": 100.0,
+  "core2": 93.4,
+  "core3": 91.4,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.3,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 91.8,
+  "tag_bridge_cpu": 132.7,
+  "run_plan_cpu": 37.7,
+  "run_plan_cpu_p95": 50.1,
+  "load1": 8.8,
+  "mem_avail_mb": 2184.0,
+  "rows": 106,
+  "throttled_now_rows": 89,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    89
+   ]
+  ],
+  "card_gb_end": 0.74,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.21,
+   "max": 0.26,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.17,
+   "p95": 0.22,
+   "max": 0.25,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 1024,
+    "per_s": 4.06,
+    "age_median": 0.36,
+    "age_p95": 0.74,
+    "age_max": 1.8,
+    "age_over1_pct": 1.4,
+    "detect_ms_median": 130.0,
+    "detect_ms_p95": 480.0,
+    "stalls": 90,
+    "stalls_per_min": 21.44,
+    "stall_len_median": 1.22,
+    "stall_len_p90": 1.4,
+    "stall_len_max": 1.98,
+    "stall_time_pct": 8.4,
+    "between_stalls_median_s": 1.6,
+    "read_gap_p95": 0.55,
+    "read_gap_max": 1.67
+   },
+   "overhead": {
+    "pictures": 364,
+    "per_s": 1.45,
+    "age_median": 0.43,
+    "age_p95": 0.92,
+    "age_max": 2.49,
+    "age_over1_pct": 4.4,
+    "detect_ms_median": 160.0,
+    "detect_ms_p95": 535.0,
+    "stalls": 237,
+    "stalls_per_min": 56.81,
+    "stall_len_median": 1.31,
+    "stall_len_p90": 1.79,
+    "stall_len_max": 3.27,
+    "stall_time_pct": 39.0,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 1.24,
+    "read_gap_max": 2.58
+   }
+  },
+  "both_stalls": 58,
+  "both_stall_len_median": 1.15,
+  "both_stalls_per_min": 13.81,
+  "fixes": {
+   "Bravo": {
+    "n": 940,
+    "gap_median": 0.2,
+    "gap_p90": 0.53,
+    "gap_max": 1.6,
+    "over1_time_pct": 3.3,
+    "by_cam": {
+     "side": 908,
+     "overhead": 25,
+     "overhead+side": 3,
+     "side+overhead": 4
+    }
+   },
+   "Alpha": {
+    "n": 389,
+    "gap_median": 0.59,
+    "gap_p90": 1.08,
+    "gap_max": 2.9,
+    "over1_time_pct": 24.2,
+    "by_cam": {
+     "overhead": 348,
+     "side": 40,
+     "side+overhead": 1
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Bravo": [
+    933,
+    6
+   ],
+   "Alpha": [
+    385,
+    12
+   ]
+  },
+  "replan": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "busy_pct": 0.0,
+   "over_budget": 0,
+   "by_points": []
+  },
+  "first_plan_s": 15.3,
+  "tracker_lost": {
+   "n": 49,
+   "median": 1.26,
+   "max": 7.78
+  },
+  "old_fix": {
+   "n": 4,
+   "age_max": 1.38
+  }
+ },
+ {
+  "run": "20261123-124742",
+  "clock": "12:47",
+  "plan_s": 470,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 99.5,
+  "core1_p95": 100.0,
+  "core2": 99.5,
+  "core3": 99.5,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 91.8,
+  "tag_bridge_cpu": 97.0,
+  "run_plan_cpu": 86.6,
+  "run_plan_cpu_p95": 116.4,
+  "load1": 10.1,
+  "mem_avail_mb": 2132.0,
+  "rows": 185,
+  "throttled_now_rows": 179,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    179
+   ]
+  ],
+  "card_gb_end": 0.73,
+  "lag_overhead": {
+   "median": 0.19,
+   "p95": 0.25,
+   "max": 0.28,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.2,
+   "p95": 0.25,
+   "max": 0.31,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 1241,
+    "per_s": 2.64,
+    "age_median": 0.46,
+    "age_p95": 1.05,
+    "age_max": 3.59,
+    "age_over1_pct": 6.1,
+    "detect_ms_median": 214.0,
+    "detect_ms_p95": 651.0,
+    "stalls": 379,
+    "stalls_per_min": 48.45,
+    "stall_len_median": 1.27,
+    "stall_len_p90": 2.09,
+    "stall_len_max": 4.48,
+    "stall_time_pct": 37.8,
+    "between_stalls_median_s": 0.8,
+    "read_gap_p95": 0.97,
+    "read_gap_max": 3.47
+   },
+   "overhead": {
+    "pictures": 564,
+    "per_s": 1.2,
+    "age_median": 0.52,
+    "age_p95": 1.29,
+    "age_max": 4.07,
+    "age_over1_pct": 12.1,
+    "detect_ms_median": 247.0,
+    "detect_ms_p95": 663.0,
+    "stalls": 368,
+    "stalls_per_min": 47.09,
+    "stall_len_median": 1.55,
+    "stall_len_p90": 2.9,
+    "stall_len_max": 6.66,
+    "stall_time_pct": 65.5,
+    "between_stalls_median_s": 1.1,
+    "read_gap_p95": 2.1,
+    "read_gap_max": 5.66
+   }
+  },
+  "both_stalls": 396,
+  "both_stall_len_median": 1.26,
+  "both_stalls_per_min": 50.52,
+  "fixes": {
+   "Bravo": {
+    "n": 976,
+    "gap_median": 0.36,
+    "gap_p90": 0.97,
+    "gap_max": 3.3,
+    "over1_time_pct": 26.5,
+    "by_cam": {
+     "side": 647,
+     "overhead+side": 1,
+     "side+overhead": 2,
+     "overhead": 326
+    }
+   },
+   "Alpha": {
+    "n": 906,
+    "gap_median": 0.34,
+    "gap_p90": 1.04,
+    "gap_max": 5.4,
+    "over1_time_pct": 36.7,
+    "by_cam": {
+     "overhead": 271,
+     "side": 601,
+     "overhead+side": 11,
+     "side+overhead": 23
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    196,
+    81
+   ],
+   "Bravo": [
+    479,
+    52
+   ]
+  },
+  "replan": {
+   "n": 21,
+   "median": 13.86,
+   "p90": 18.45,
+   "max": 24.82,
+   "busy_pct": 56.0,
+   "over_budget": 21,
+   "by_points": [
+    [
+     0,
+     8.8
+    ],
+    [
+     0,
+     8.9
+    ],
+    [
+     0,
+     9.9
+    ],
+    [
+     0,
+     13.9
+    ],
+    [
+     0,
+     14.9
+    ],
+    [
+     2,
+     4.8
+    ],
+    [
+     2,
+     6.1
+    ],
+    [
+     4,
+     5.2
+    ],
+    [
+     4,
+     5.2
+    ],
+    [
+     14,
+     18.4
+    ],
+    [
+     15,
+     16.4
+    ],
+    [
+     30,
+     10.8
+    ],
+    [
+     30,
+     14.3
+    ],
+    [
+     30,
+     14.8
+    ],
+    [
+     30,
+     16.1
+    ],
+    [
+     30,
+     16.4
+    ],
+    [
+     31,
+     17.7
+    ],
+    [
+     31,
+     20.7
+    ],
+    [
+     44,
+     24.8
+    ]
+   ]
+  },
+  "first_plan_s": 23.5,
+  "tracker_lost": {
+   "n": 158,
+   "median": 1.41,
+   "max": 16.22
+  },
+  "old_fix": {
+   "n": 6,
+   "age_max": 1.77
+  }
+ },
+ {
+  "run": "20261123-140510",
+  "clock": "14:05",
+  "plan_s": 671,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 66.2,
+  "core1_p95": 97.0,
+  "core2": 89.5,
+  "core3": 89.1,
+  "temp_c": 81.8,
+  "temp_c_p95": 82.8,
+  "arm_mhz": 1800.0,
+  "recorder_cpu": 94.2,
+  "tag_bridge_cpu": 146.1,
+  "run_plan_cpu": 44.4,
+  "run_plan_cpu_p95": 106.0,
+  "load1": 7.7,
+  "mem_avail_mb": 2293.0,
+  "rows": 288,
+  "throttled_now_rows": 107,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    107
+   ]
+  ],
+  "card_gb_end": 0.7,
+  "lag_overhead": {
+   "median": 0.16,
+   "p95": 0.22,
+   "max": 0.25,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.17,
+   "p95": 0.24,
+   "max": 0.28,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 2537,
+    "per_s": 3.78,
+    "age_median": 0.37,
+    "age_p95": 0.81,
+    "age_max": 2.53,
+    "age_over1_pct": 1.7,
+    "detect_ms_median": 159.0,
+    "detect_ms_p95": 471.0,
+    "stalls": 331,
+    "stalls_per_min": 29.61,
+    "stall_len_median": 1.17,
+    "stall_len_p90": 1.69,
+    "stall_len_max": 2.91,
+    "stall_time_pct": 13.3,
+    "between_stalls_median_s": 1.0,
+    "read_gap_p95": 0.64,
+    "read_gap_max": 2.3
+   },
+   "overhead": {
+    "pictures": 1140,
+    "per_s": 1.7,
+    "age_median": 0.38,
+    "age_p95": 1.0,
+    "age_max": 1.88,
+    "age_over1_pct": 5.1,
+    "detect_ms_median": 166.0,
+    "detect_ms_p95": 484.0,
+    "stalls": 487,
+    "stalls_per_min": 43.59,
+    "stall_len_median": 1.3,
+    "stall_len_p90": 2.09,
+    "stall_len_max": 3.51,
+    "stall_time_pct": 34.4,
+    "between_stalls_median_s": 1.0,
+    "read_gap_p95": 1.31,
+    "read_gap_max": 2.64
+   }
+  },
+  "both_stalls": 264,
+  "both_stall_len_median": 1.17,
+  "both_stalls_per_min": 23.62,
+  "fixes": {
+   "Alpha": {
+    "n": 1364,
+    "gap_median": 0.39,
+    "gap_p90": 0.91,
+    "gap_max": 2.2,
+    "over1_time_pct": 23.0,
+    "by_cam": {
+     "overhead": 879,
+     "side": 476,
+     "overhead+side": 3,
+     "side+overhead": 6
+    }
+   },
+   "Bravo": {
+    "n": 2129,
+    "gap_median": 0.24,
+    "gap_p90": 0.61,
+    "gap_max": 2.3,
+    "over1_time_pct": 5.5,
+    "by_cam": {
+     "overhead": 262,
+     "side": 1825,
+     "side+overhead": 25,
+     "overhead+side": 17
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    1157,
+    98
+   ],
+   "Bravo": [
+    1648,
+    36
+   ]
+  },
+  "replan": {
+   "n": 16,
+   "median": 6.31,
+   "p90": 12.24,
+   "max": 32.9,
+   "busy_pct": 20.0,
+   "over_budget": 16,
+   "by_points": [
+    [
+     1,
+     12.2
+    ],
+    [
+     2,
+     3.9
+    ],
+    [
+     2,
+     5.0
+    ],
+    [
+     4,
+     3.4
+    ],
+    [
+     4,
+     4.6
+    ],
+    [
+     4,
+     4.7
+    ],
+    [
+     8,
+     9.5
+    ],
+    [
+     9,
+     6.2
+    ],
+    [
+     9,
+     6.4
+    ],
+    [
+     9,
+     7.7
+    ],
+    [
+     9,
+     32.9
+    ],
+    [
+     12,
+     7.6
+    ],
+    [
+     14,
+     8.8
+    ],
+    [
+     24,
+     12.7
+    ]
+   ]
+  },
+  "first_plan_s": 15.4,
+  "tracker_lost": {
+   "n": 129,
+   "median": 1.31,
+   "max": 3.35
+  },
+  "old_fix": {
+   "n": 12,
+   "age_max": 1.37
+  }
+ },
+ {
+  "run": "20261123-143351",
+  "clock": "14:33",
+  "plan_s": 1326,
+  "camrec_pid": "24890",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 97.0,
+  "core1_p95": 100.0,
+  "core2": 95.0,
+  "core3": 93.4,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 91.5,
+  "tag_bridge_cpu": 136.3,
+  "run_plan_cpu": 31.6,
+  "run_plan_cpu_p95": 98.5,
+  "load1": 8.7,
+  "mem_avail_mb": 2153.0,
+  "rows": 552,
+  "throttled_now_rows": 433,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    433
+   ]
+  ],
+  "card_gb_end": 0.64,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.22,
+   "max": 0.29,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.19,
+   "p95": 0.24,
+   "max": 0.29,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "overhead": {
+    "pictures": 2050,
+    "per_s": 1.55,
+    "age_median": 0.37,
+    "age_p95": 0.89,
+    "age_max": 3.87,
+    "age_over1_pct": 3.4,
+    "detect_ms_median": 124.0,
+    "detect_ms_p95": 497.0,
+    "stalls": 933,
+    "stalls_per_min": 42.24,
+    "stall_len_median": 1.31,
+    "stall_len_p90": 2.02,
+    "stall_len_max": 8.85,
+    "stall_time_pct": 33.4,
+    "between_stalls_median_s": 1.0,
+    "read_gap_p95": 1.34,
+    "read_gap_max": 4.98
+   },
+   "side": {
+    "pictures": 5030,
+    "per_s": 3.79,
+    "age_median": 0.4,
+    "age_p95": 0.76,
+    "age_max": 3.07,
+    "age_over1_pct": 1.1,
+    "detect_ms_median": 180.0,
+    "detect_ms_p95": 428.0,
+    "stalls": 538,
+    "stalls_per_min": 24.35,
+    "stall_len_median": 1.14,
+    "stall_len_p90": 1.6,
+    "stall_len_max": 3.91,
+    "stall_time_pct": 10.0,
+    "between_stalls_median_s": 1.4,
+    "read_gap_p95": 0.61,
+    "read_gap_max": 2.81
+   }
+  },
+  "both_stalls": 337,
+  "both_stall_len_median": 1.13,
+  "both_stalls_per_min": 15.25,
+  "fixes": {
+   "Alpha": {
+    "n": 2850,
+    "gap_median": 0.33,
+    "gap_p90": 0.93,
+    "gap_max": 5.9,
+    "over1_time_pct": 24.1,
+    "by_cam": {
+     "overhead": 957,
+     "side": 1892,
+     "overhead+side": 1
+    }
+   },
+   "Bravo": {
+    "n": 4701,
+    "gap_median": 0.23,
+    "gap_p90": 0.52,
+    "gap_max": 3.3,
+    "over1_time_pct": 3.9,
+    "by_cam": {
+     "overhead": 45,
+     "side": 4652,
+     "side+overhead": 3,
+     "overhead+side": 1
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Bravo": [
+    228,
+    242
+   ],
+   "Alpha": [
+    2560,
+    122
+   ]
+  },
+  "replan": {
+   "n": 20,
+   "median": 13.03,
+   "p90": 17.91,
+   "max": 21.85,
+   "busy_pct": 19.0,
+   "over_budget": 20,
+   "by_points": [
+    [
+     2,
+     4.8
+    ],
+    [
+     2,
+     5.0
+    ],
+    [
+     4,
+     4.8
+    ],
+    [
+     4,
+     5.0
+    ],
+    [
+     12,
+     9.6
+    ],
+    [
+     13,
+     9.6
+    ],
+    [
+     13,
+     10.2
+    ],
+    [
+     16,
+     10.6
+    ],
+    [
+     19,
+     13.0
+    ],
+    [
+     21,
+     12.9
+    ],
+    [
+     24,
+     13.0
+    ],
+    [
+     26,
+     13.9
+    ],
+    [
+     29,
+     16.0
+    ],
+    [
+     32,
+     16.1
+    ],
+    [
+     33,
+     16.0
+    ],
+    [
+     35,
+     16.4
+    ],
+    [
+     35,
+     17.7
+    ],
+    [
+     35,
+     17.9
+    ],
+    [
+     35,
+     19.2
+    ],
+    [
+     35,
+     21.8
+    ]
+   ]
+  },
+  "first_plan_s": 22.8,
+  "tracker_lost": {
+   "n": 215,
+   "median": 1.27,
+   "max": 13.98
+  },
+  "old_fix": {
+   "n": 11,
+   "age_max": 1.9
+  }
+ },
+ {
+  "run": "20261123-150835",
+  "clock": "15:08",
+  "plan_s": 116,
+  "camrec_pid": "88333",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 77.1,
+  "core1_p95": 99.0,
+  "core2": 89.1,
+  "core3": 89.0,
+  "temp_c": 81.8,
+  "temp_c_p95": 82.8,
+  "arm_mhz": 1800.0,
+  "recorder_cpu": 93.0,
+  "tag_bridge_cpu": 130.4,
+  "run_plan_cpu": 40.8,
+  "run_plan_cpu_p95": 54.0,
+  "load1": 7.5,
+  "mem_avail_mb": 2422.0,
+  "rows": 50,
+  "throttled_now_rows": 17,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    17
+   ]
+  ],
+  "card_gb_end": 0.62,
+  "lag_overhead": {
+   "median": 0.17,
+   "p95": 0.22,
+   "max": 0.24,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.19,
+   "p95": 0.24,
+   "max": 0.26,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 519,
+    "per_s": 4.48,
+    "age_median": 0.33,
+    "age_p95": 0.86,
+    "age_max": 1.62,
+    "age_over1_pct": 2.5,
+    "detect_ms_median": 117.0,
+    "detect_ms_p95": 524.0,
+    "stalls": 72,
+    "stalls_per_min": 37.29,
+    "stall_len_median": 1.15,
+    "stall_len_p90": 1.58,
+    "stall_len_max": 1.88,
+    "stall_time_pct": 15.0,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 0.67,
+    "read_gap_max": 1.41
+   },
+   "overhead": {
+    "pictures": 192,
+    "per_s": 1.67,
+    "age_median": 0.41,
+    "age_p95": 1.09,
+    "age_max": 1.67,
+    "age_over1_pct": 7.3,
+    "detect_ms_median": 169.0,
+    "detect_ms_p95": 443.0,
+    "stalls": 94,
+    "stalls_per_min": 48.92,
+    "stall_len_median": 1.43,
+    "stall_len_p90": 2.23,
+    "stall_len_max": 2.85,
+    "stall_time_pct": 45.4,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 1.42,
+    "read_gap_max": 2.36
+   }
+  },
+  "both_stalls": 66,
+  "both_stall_len_median": 1.12,
+  "both_stalls_per_min": 34.15,
+  "fixes": {
+   "Alpha": {
+    "n": 187,
+    "gap_median": 0.47,
+    "gap_p90": 1.15,
+    "gap_max": 2.3,
+    "over1_time_pct": 35.7,
+    "by_cam": {
+     "overhead": 187
+    }
+   },
+   "Bravo": {
+    "n": 377,
+    "gap_median": 0.24,
+    "gap_p90": 0.6,
+    "gap_max": 1.4,
+    "over1_time_pct": 8.8,
+    "by_cam": {
+     "overhead": 50,
+     "side": 321,
+     "overhead+side": 2,
+     "side+overhead": 4
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    177,
+    13
+   ],
+   "Bravo": [
+    372,
+    8
+   ]
+  },
+  "replan": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "busy_pct": 0.0,
+   "over_budget": 0,
+   "by_points": []
+  },
+  "first_plan_s": 4.7,
+  "tracker_lost": {
+   "n": 31,
+   "median": 1.36,
+   "max": 2.36
+  },
+  "old_fix": {
+   "n": 3,
+   "age_max": 1.04
+  }
+ },
+ {
+  "run": "20261123-151925",
+  "clock": "15:19",
+  "plan_s": 409,
+  "camrec_pid": "88333",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 97.0,
+  "core1_p95": 100.0,
+  "core2": 94.5,
+  "core3": 92.8,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1775.0,
+  "recorder_cpu": 91.6,
+  "tag_bridge_cpu": 129.0,
+  "run_plan_cpu": 36.5,
+  "run_plan_cpu_p95": 100.2,
+  "load1": 8.8,
+  "mem_avail_mb": 2309.0,
+  "rows": 170,
+  "throttled_now_rows": 145,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    145
+   ]
+  ],
+  "card_gb_end": 0.6,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.23,
+   "max": 0.28,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.18,
+   "p95": 0.24,
+   "max": 0.29,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "overhead": {
+    "pictures": 549,
+    "per_s": 1.34,
+    "age_median": 0.42,
+    "age_p95": 1.07,
+    "age_max": 1.97,
+    "age_over1_pct": 6.2,
+    "detect_ms_median": 159.0,
+    "detect_ms_p95": 577.0,
+    "stalls": 358,
+    "stalls_per_min": 52.58,
+    "stall_len_median": 1.39,
+    "stall_len_p90": 2.15,
+    "stall_len_max": 3.85,
+    "stall_time_pct": 47.0,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 1.54,
+    "read_gap_max": 2.81
+   },
+   "side": {
+    "pictures": 1594,
+    "per_s": 3.9,
+    "age_median": 0.36,
+    "age_p95": 0.8,
+    "age_max": 2.0,
+    "age_over1_pct": 1.6,
+    "detect_ms_median": 136.0,
+    "detect_ms_p95": 524.0,
+    "stalls": 202,
+    "stalls_per_min": 29.68,
+    "stall_len_median": 1.2,
+    "stall_len_p90": 1.5,
+    "stall_len_max": 2.49,
+    "stall_time_pct": 12.4,
+    "between_stalls_median_s": 1.2,
+    "read_gap_p95": 0.65,
+    "read_gap_max": 1.85
+   }
+  },
+  "both_stalls": 165,
+  "both_stall_len_median": 1.15,
+  "both_stalls_per_min": 24.21,
+  "fixes": {
+   "Alpha": {
+    "n": 1367,
+    "gap_median": 0.22,
+    "gap_p90": 0.59,
+    "gap_max": 1.7,
+    "over1_time_pct": 4.9,
+    "by_cam": {
+     "overhead": 109,
+     "side": 1253,
+     "side+overhead": 3,
+     "overhead+side": 2
+    }
+   },
+   "Bravo": {
+    "n": 558,
+    "gap_median": 0.65,
+    "gap_p90": 1.22,
+    "gap_max": 2.7,
+    "over1_time_pct": 37.3,
+    "by_cam": {
+     "overhead": 524,
+     "side": 30,
+     "side+overhead": 4
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    1090,
+    75
+   ],
+   "Bravo": [
+    461,
+    28
+   ]
+  },
+  "replan": {
+   "n": 14,
+   "median": 8.16,
+   "p90": 10.27,
+   "max": 11.54,
+   "busy_pct": 26.0,
+   "over_budget": 14,
+   "by_points": [
+    [
+     0,
+     7.9
+    ],
+    [
+     2,
+     4.7
+    ],
+    [
+     4,
+     3.5
+    ],
+    [
+     4,
+     4.0
+    ],
+    [
+     4,
+     5.0
+    ],
+    [
+     20,
+     10.0
+    ],
+    [
+     21,
+     9.2
+    ],
+    [
+     22,
+     8.0
+    ],
+    [
+     22,
+     8.3
+    ],
+    [
+     22,
+     10.3
+    ],
+    [
+     25,
+     9.7
+    ],
+    [
+     26,
+     11.2
+    ],
+    [
+     31,
+     11.5
+    ]
+   ]
+  },
+  "first_plan_s": 78.5,
+  "tracker_lost": {
+   "n": 121,
+   "median": 1.26,
+   "max": 2.13
+  },
+  "old_fix": {
+   "n": 8,
+   "age_max": 1.45
+  }
+ },
+ {
+  "run": "20261123-164906",
+  "clock": "16:49",
+  "plan_s": 438,
+  "camrec_pid": "105701",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 76.3,
+  "core1_p95": 97.5,
+  "core2": 90.9,
+  "core3": 90.3,
+  "temp_c": 83.3,
+  "temp_c_p95": 84.2,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 93.8,
+  "tag_bridge_cpu": 144.5,
+  "run_plan_cpu": 60.4,
+  "run_plan_cpu_p95": 121.9,
+  "load1": 7.8,
+  "mem_avail_mb": 2374.0,
+  "rows": 185,
+  "throttled_now_rows": 172,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    172
+   ]
+  ],
+  "card_gb_end": 0.58,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.23,
+   "max": 0.35,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.18,
+   "p95": 0.26,
+   "max": 0.35,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 1740,
+    "per_s": 3.98,
+    "age_median": 0.34,
+    "age_p95": 0.85,
+    "age_max": 2.67,
+    "age_over1_pct": 2.6,
+    "detect_ms_median": 122.0,
+    "detect_ms_p95": 492.0,
+    "stalls": 229,
+    "stalls_per_min": 31.42,
+    "stall_len_median": 1.2,
+    "stall_len_p90": 1.88,
+    "stall_len_max": 2.98,
+    "stall_time_pct": 17.8,
+    "between_stalls_median_s": 1.2,
+    "read_gap_p95": 0.69,
+    "read_gap_max": 2.43
+   },
+   "overhead": {
+    "pictures": 608,
+    "per_s": 1.39,
+    "age_median": 0.42,
+    "age_p95": 1.07,
+    "age_max": 2.82,
+    "age_over1_pct": 6.2,
+    "detect_ms_median": 134.0,
+    "detect_ms_p95": 492.0,
+    "stalls": 390,
+    "stalls_per_min": 53.68,
+    "stall_len_median": 1.31,
+    "stall_len_p90": 2.12,
+    "stall_len_max": 4.18,
+    "stall_time_pct": 43.9,
+    "between_stalls_median_s": 0.9,
+    "read_gap_p95": 1.45,
+    "read_gap_max": 3.44
+   }
+  },
+  "both_stalls": 211,
+  "both_stall_len_median": 1.17,
+  "both_stalls_per_min": 28.91,
+  "fixes": {
+   "Alpha": {
+    "n": 1497,
+    "gap_median": 0.22,
+    "gap_p90": 0.57,
+    "gap_max": 2.5,
+    "over1_time_pct": 7.2,
+    "by_cam": {
+     "overhead": 31,
+     "side": 1463,
+     "side+overhead": 2,
+     "overhead+side": 1
+    }
+   },
+   "Bravo": {
+    "n": 607,
+    "gap_median": 0.63,
+    "gap_p90": 1.21,
+    "gap_max": 3.6,
+    "over1_time_pct": 34.4,
+    "by_cam": {
+     "overhead": 607
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    1159,
+    74
+   ],
+   "Bravo": [
+    122,
+    28
+   ]
+  },
+  "replan": {
+   "n": 13,
+   "median": 12.52,
+   "p90": 13.21,
+   "max": 14.28,
+   "busy_pct": 33.0,
+   "over_budget": 13,
+   "by_points": [
+    [
+     2,
+     3.9
+    ],
+    [
+     2,
+     5.1
+    ],
+    [
+     4,
+     5.6
+    ],
+    [
+     32,
+     13.0
+    ],
+    [
+     32,
+     13.2
+    ],
+    [
+     33,
+     12.3
+    ],
+    [
+     33,
+     12.5
+    ],
+    [
+     33,
+     12.5
+    ],
+    [
+     33,
+     12.5
+    ],
+    [
+     33,
+     12.9
+    ],
+    [
+     33,
+     13.1
+    ],
+    [
+     33,
+     13.5
+    ],
+    [
+     33,
+     14.3
+    ]
+   ]
+  },
+  "first_plan_s": 79.4,
+  "tracker_lost": {
+   "n": 89,
+   "median": 1.3,
+   "max": 13.32
+  },
+  "old_fix": {
+   "n": 6,
+   "age_max": 1.45
+  }
+ },
+ {
+  "run": "20261123-172934",
+  "clock": "17:29",
+  "plan_s": 299,
+  "camrec_pid": "110440",
+  "robots": 2,
+  "core0": 100.0,
+  "core1": 76.6,
+  "core1_p95": 98.5,
+  "core2": 91.2,
+  "core3": 90.7,
+  "temp_c": 82.8,
+  "temp_c_p95": 84.2,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 92.5,
+  "tag_bridge_cpu": 128.5,
+  "run_plan_cpu": 44.5,
+  "run_plan_cpu_p95": 97.4,
+  "load1": 8.4,
+  "mem_avail_mb": 2402.0,
+  "rows": 126,
+  "throttled_now_rows": 120,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    120
+   ]
+  ],
+  "card_gb_end": 0.57,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.25,
+   "max": 0.32,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.19,
+   "p95": 0.26,
+   "max": 0.32,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 1008,
+    "per_s": 3.38,
+    "age_median": 0.39,
+    "age_p95": 1.01,
+    "age_max": 1.63,
+    "age_over1_pct": 5.4,
+    "detect_ms_median": 151.0,
+    "detect_ms_p95": 656.0,
+    "stalls": 226,
+    "stalls_per_min": 45.45,
+    "stall_len_median": 1.21,
+    "stall_len_p90": 1.76,
+    "stall_len_max": 2.92,
+    "stall_time_pct": 25.3,
+    "between_stalls_median_s": 0.8,
+    "read_gap_p95": 0.83,
+    "read_gap_max": 1.63
+   },
+   "overhead": {
+    "pictures": 393,
+    "per_s": 1.32,
+    "age_median": 0.49,
+    "age_p95": 1.22,
+    "age_max": 2.02,
+    "age_over1_pct": 13.0,
+    "detect_ms_median": 201.0,
+    "detect_ms_p95": 726.0,
+    "stalls": 260,
+    "stalls_per_min": 52.38,
+    "stall_len_median": 1.44,
+    "stall_len_p90": 2.52,
+    "stall_len_max": 4.02,
+    "stall_time_pct": 55.7,
+    "between_stalls_median_s": 1.0,
+    "read_gap_p95": 1.68,
+    "read_gap_max": 2.61
+   }
+  },
+  "both_stalls": 233,
+  "both_stall_len_median": 1.21,
+  "both_stalls_per_min": 46.8,
+  "fixes": {
+   "Alpha": {
+    "n": 883,
+    "gap_median": 0.25,
+    "gap_p90": 0.71,
+    "gap_max": 1.7,
+    "over1_time_pct": 9.3,
+    "by_cam": {
+     "overhead": 36,
+     "side": 845,
+     "overhead+side": 1,
+     "side+overhead": 1
+    }
+   },
+   "Bravo": {
+    "n": 403,
+    "gap_median": 0.63,
+    "gap_p90": 1.35,
+    "gap_max": 2.9,
+    "over1_time_pct": 40.8,
+    "by_cam": {
+     "overhead": 378,
+     "side": 23,
+     "side+overhead": 2
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Bravo": [
+    343,
+    53
+   ],
+   "Alpha": [
+    761,
+    72
+   ]
+  },
+  "replan": {
+   "n": 5,
+   "median": 4.17,
+   "p90": 5.96,
+   "max": 14.79,
+   "busy_pct": 11.0,
+   "over_budget": 5,
+   "by_points": [
+    [
+     2,
+     4.2
+    ],
+    [
+     4,
+     3.6
+    ],
+    [
+     4,
+     3.9
+    ],
+    [
+     4,
+     6.0
+    ],
+    [
+     27,
+     14.8
+    ]
+   ]
+  },
+  "first_plan_s": 80.8,
+  "tracker_lost": {
+   "n": 90,
+   "median": 1.39,
+   "max": 3.09
+  },
+  "old_fix": {
+   "n": 7,
+   "age_max": 2.4
+  }
+ },
+ {
+  "run": "20261123-175440",
+  "clock": "17:54",
+  "plan_s": 805,
+  "camrec_pid": "110440",
+  "robots": 1,
+  "core0": 100.0,
+  "core1": 56.5,
+  "core1_p95": 98.5,
+  "core2": 91.2,
+  "core3": 89.2,
+  "temp_c": 82.8,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 95.5,
+  "tag_bridge_cpu": 138.8,
+  "run_plan_cpu": 30.0,
+  "run_plan_cpu_p95": 90.3,
+  "load1": 7.1,
+  "mem_avail_mb": 2439.0,
+  "rows": 340,
+  "throttled_now_rows": 307,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    307
+   ]
+  ],
+  "card_gb_end": 0.56,
+  "lag_overhead": {
+   "median": 0.18,
+   "p95": 0.24,
+   "max": 0.28,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.19,
+   "p95": 0.25,
+   "max": 0.3,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 5381,
+    "per_s": 6.69,
+    "age_median": 0.28,
+    "age_p95": 0.5,
+    "age_max": 1.68,
+    "age_over1_pct": 0.7,
+    "detect_ms_median": 98.0,
+    "detect_ms_p95": 206.0,
+    "stalls": 119,
+    "stalls_per_min": 8.88,
+    "stall_len_median": 1.21,
+    "stall_len_p90": 1.52,
+    "stall_len_max": 2.47,
+    "stall_time_pct": 3.9,
+    "between_stalls_median_s": 4.9,
+    "read_gap_p95": 0.34,
+    "read_gap_max": 1.89
+   },
+   "overhead": {
+    "pictures": 2752,
+    "per_s": 3.42,
+    "age_median": 0.29,
+    "age_p95": 0.56,
+    "age_max": 1.77,
+    "age_over1_pct": 0.7,
+    "detect_ms_median": 64.0,
+    "detect_ms_p95": 199.0,
+    "stalls": 233,
+    "stalls_per_min": 17.38,
+    "stall_len_median": 1.21,
+    "stall_len_p90": 1.75,
+    "stall_len_max": 2.68,
+    "stall_time_pct": 9.3,
+    "between_stalls_median_s": 1.4,
+    "read_gap_p95": 0.71,
+    "read_gap_max": 2.3
+   }
+  },
+  "both_stalls": 55,
+  "both_stall_len_median": 1.21,
+  "both_stalls_per_min": 4.1,
+  "fixes": {
+   "Alpha": {
+    "n": 3688,
+    "gap_median": 0.18,
+    "gap_p90": 0.4,
+    "gap_max": 1.4,
+    "over1_time_pct": 1.7,
+    "by_cam": {
+     "overhead": 1413,
+     "side": 2232,
+     "side+overhead": 21,
+     "overhead+side": 22
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    3242,
+    205
+   ]
+  },
+  "replan": {
+   "n": 7,
+   "median": 6.59,
+   "p90": 8.49,
+   "max": 8.74,
+   "busy_pct": 5.0,
+   "over_budget": 7,
+   "by_points": [
+    [
+     2,
+     3.8
+    ],
+    [
+     2,
+     4.3
+    ],
+    [
+     4,
+     4.1
+    ],
+    [
+     17,
+     6.6
+    ],
+    [
+     17,
+     7.6
+    ],
+    [
+     17,
+     8.5
+    ],
+    [
+     17,
+     8.7
+    ]
+   ]
+  },
+  "first_plan_s": 10.3,
+  "tracker_lost": {
+   "n": 14,
+   "median": 1.13,
+   "max": 1.88
+  },
+  "old_fix": {
+   "n": 2,
+   "age_max": 1.06
+  }
+ },
+ {
+  "run": "20261123-181338",
+  "clock": "18:13",
+  "plan_s": 92,
+  "camrec_pid": "110440",
+  "robots": 1,
+  "core0": 100.0,
+  "core1": 99.5,
+  "core1_p95": 100.0,
+  "core2": 99.0,
+  "core3": 99.5,
+  "temp_c": 83.3,
+  "temp_c_p95": 84.2,
+  "arm_mhz": 1677.0,
+  "recorder_cpu": 93.2,
+  "tag_bridge_cpu": 96.8,
+  "run_plan_cpu": 24.3,
+  "run_plan_cpu_p95": 64.2,
+  "load1": 8.4,
+  "mem_avail_mb": 2375.0,
+  "rows": 35,
+  "throttled_now_rows": 35,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    35
+   ]
+  ],
+  "card_gb_end": 0.55,
+  "lag_overhead": {
+   "median": 0.21,
+   "p95": 0.26,
+   "max": 0.27,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.22,
+   "p95": 0.24,
+   "max": 0.29,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "overhead": {
+    "pictures": 149,
+    "per_s": 1.64,
+    "age_median": 0.35,
+    "age_p95": 0.94,
+    "age_max": 1.94,
+    "age_over1_pct": 4.7,
+    "detect_ms_median": 58.0,
+    "detect_ms_p95": 266.0,
+    "stalls": 62,
+    "stalls_per_min": 40.92,
+    "stall_len_median": 1.34,
+    "stall_len_p90": 2.33,
+    "stall_len_max": 3.95,
+    "stall_time_pct": 39.9,
+    "between_stalls_median_s": 1.2,
+    "read_gap_p95": 1.54,
+    "read_gap_max": 3.61
+   },
+   "side": {
+    "pictures": 414,
+    "per_s": 4.54,
+    "age_median": 0.35,
+    "age_p95": 0.79,
+    "age_max": 2.0,
+    "age_over1_pct": 3.4,
+    "detect_ms_median": 125.0,
+    "detect_ms_p95": 300.0,
+    "stalls": 41,
+    "stalls_per_min": 26.97,
+    "stall_len_median": 1.36,
+    "stall_len_p90": 2.18,
+    "stall_len_max": 3.5,
+    "stall_time_pct": 21.3,
+    "between_stalls_median_s": 0.6,
+    "read_gap_p95": 0.57,
+    "read_gap_max": 1.73
+   }
+  },
+  "both_stalls": 37,
+  "both_stall_len_median": 1.28,
+  "both_stalls_per_min": 24.2,
+  "fixes": {
+   "Alpha": {
+    "n": 334,
+    "gap_median": 0.21,
+    "gap_p90": 0.54,
+    "gap_max": 2.4,
+    "over1_time_pct": 12.4,
+    "by_cam": {
+     "overhead": 48,
+     "side": 284,
+     "side+overhead": 2
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    329,
+    16
+   ]
+  },
+  "replan": {
+   "n": 2,
+   "median": 4.93,
+   "p90": 4.41,
+   "max": 5.45,
+   "busy_pct": 11.0,
+   "over_budget": 2,
+   "by_points": [
+    [
+     2,
+     4.4
+    ],
+    [
+     4,
+     5.4
+    ]
+   ]
+  },
+  "first_plan_s": 12.8,
+  "tracker_lost": {
+   "n": 7,
+   "median": 1.48,
+   "max": 2.78
+  },
+  "old_fix": {
+   "n": 1,
+   "age_max": 1.72
+  }
+ },
+ {
+  "run": "20261123-183558",
+  "clock": "18:35",
+  "plan_s": 704,
+  "camrec_pid": "110440",
+  "robots": 1,
+  "core0": 100.0,
+  "core1": 35.2,
+  "core1_p95": 43.5,
+  "core2": 87.2,
+  "core3": 86.8,
+  "temp_c": 82.3,
+  "temp_c_p95": 83.8,
+  "arm_mhz": 1726.0,
+  "recorder_cpu": 97.3,
+  "tag_bridge_cpu": 154.6,
+  "run_plan_cpu": 27.6,
+  "run_plan_cpu_p95": 33.3,
+  "load1": 7.2,
+  "mem_avail_mb": 2455.5,
+  "rows": 308,
+  "throttled_now_rows": 228,
+  "throttle_words": [
+   [
+    "soft temperature limit",
+    228
+   ]
+  ],
+  "card_gb_end": 0.88,
+  "lag_overhead": {
+   "median": 0.16,
+   "p95": 0.2,
+   "max": 0.24,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "lag_side": {
+   "median": 0.17,
+   "p95": 0.21,
+   "max": 0.24,
+   "over1_pct": 0.0,
+   "none_rows": 0
+  },
+  "cams": {
+   "side": {
+    "pictures": 6044,
+    "per_s": 8.59,
+    "age_median": 0.24,
+    "age_p95": 0.38,
+    "age_max": 1.0,
+    "age_over1_pct": 0.0,
+    "detect_ms_median": 81.0,
+    "detect_ms_p95": 139.0,
+    "stalls": 14,
+    "stalls_per_min": 1.19,
+    "stall_len_median": 1.08,
+    "stall_len_p90": 1.17,
+    "stall_len_max": 1.27,
+    "stall_time_pct": 0.2,
+    "between_stalls_median_s": 20.3,
+    "read_gap_p95": 0.24,
+    "read_gap_max": 0.82
+   },
+   "overhead": {
+    "pictures": 3466,
+    "per_s": 4.92,
+    "age_median": 0.24,
+    "age_p95": 0.4,
+    "age_max": 0.91,
+    "age_over1_pct": 0.0,
+    "detect_ms_median": 53.0,
+    "detect_ms_p95": 132.0,
+    "stalls": 34,
+    "stalls_per_min": 2.9,
+    "stall_len_median": 1.05,
+    "stall_len_p90": 1.1,
+    "stall_len_max": 1.53,
+    "stall_time_pct": 0.3,
+    "between_stalls_median_s": 5.5,
+    "read_gap_p95": 0.43,
+    "read_gap_max": 1.06
+   }
+  },
+  "both_stalls": 1,
+  "both_stall_len_median": 1.02,
+  "both_stalls_per_min": 0.09,
+  "fixes": {
+   "Alpha": {
+    "n": 3917,
+    "gap_median": 0.16,
+    "gap_p90": 0.3,
+    "gap_max": 1.0,
+    "over1_time_pct": 0.0,
+    "by_cam": {
+     "overhead": 1774,
+     "side+overhead": 48,
+     "side": 2071,
+     "overhead+side": 24
+    }
+   }
+  },
+  "fix_used_refused": {
+   "Alpha": [
+    3875,
+    18
+   ]
+  },
+  "replan": {
+   "n": 4,
+   "median": 3.4,
+   "p90": 3.57,
+   "max": 4.89,
+   "busy_pct": 2.0,
+   "over_budget": 4,
+   "by_points": [
+    [
+     2,
+     3.2
+    ],
+    [
+     2,
+     3.2
+    ],
+    [
+     4,
+     3.6
+    ],
+    [
+     7,
+     4.9
+    ]
+   ]
+  },
+  "first_plan_s": 8.6,
+  "tracker_lost": {
+   "n": 0,
+   "median": null,
+   "max": null
+  },
+  "old_fix": {
+   "n": 1,
+   "age_max": 1.03
+  }
+ }
+]

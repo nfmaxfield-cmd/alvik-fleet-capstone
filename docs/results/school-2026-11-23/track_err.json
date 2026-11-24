@@ -1,0 +1,401 @@
+[
+ {
+  "run": "1210",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 4,
+  "cam_over_wheel_median": 1.0343,
+  "cam_over_wheel_iqr": [
+   1.033,
+   1.089
+  ],
+  "blind_n": 2,
+  "blind_err_median_cm": 0.6,
+  "blind_err_per_10cm": 0.85,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1210",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 3,
+  "cam_over_wheel_median": 1.0032,
+  "cam_over_wheel_iqr": null,
+  "blind_n": 1,
+  "blind_err_median_cm": 1.84,
+  "blind_err_per_10cm": 3.28,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1219",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 25,
+  "cam_over_wheel_median": 1.0176,
+  "cam_over_wheel_iqr": [
+   1.002,
+   1.071
+  ],
+  "blind_n": 5,
+  "blind_err_median_cm": 0.94,
+  "blind_err_per_10cm": 3.54,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1219",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 16,
+  "cam_over_wheel_median": 1.0408,
+  "cam_over_wheel_iqr": [
+   1.018,
+   1.083
+  ],
+  "blind_n": 2,
+  "blind_err_median_cm": 0.16,
+  "blind_err_per_10cm": 0.23,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1237",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 0,
+  "cam_over_wheel_median": null,
+  "cam_over_wheel_iqr": null,
+  "blind_n": 2,
+  "blind_err_median_cm": 0.85,
+  "blind_err_per_10cm": 1.02,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1237",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 2,
+  "cam_over_wheel_median": 1.0475,
+  "cam_over_wheel_iqr": null,
+  "blind_n": 4,
+  "blind_err_median_cm": 0.58,
+  "blind_err_per_10cm": 1.14,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1247",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 6,
+  "cam_over_wheel_median": 1.0372,
+  "cam_over_wheel_iqr": [
+   1.002,
+   1.074
+  ],
+  "blind_n": 3,
+  "blind_err_median_cm": 0.85,
+  "blind_err_per_10cm": 0.84,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1247",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 4,
+  "cam_over_wheel_median": 1.006,
+  "cam_over_wheel_iqr": [
+   0.961,
+   1.099
+  ],
+  "blind_n": 5,
+  "blind_err_median_cm": 0.59,
+  "blind_err_per_10cm": 1.0,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1405",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 27,
+  "cam_over_wheel_median": 1.0359,
+  "cam_over_wheel_iqr": [
+   1.015,
+   1.056
+  ],
+  "blind_n": 10,
+  "blind_err_median_cm": 0.45,
+  "blind_err_per_10cm": 0.48,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1405",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 18,
+  "cam_over_wheel_median": 1.0564,
+  "cam_over_wheel_iqr": [
+   1.012,
+   1.091
+  ],
+  "blind_n": 4,
+  "blind_err_median_cm": 0.95,
+  "blind_err_per_10cm": 1.01,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1433",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 40,
+  "cam_over_wheel_median": 1.0379,
+  "cam_over_wheel_iqr": [
+   1.01,
+   1.066
+  ],
+  "blind_n": 24,
+  "blind_err_median_cm": 0.87,
+  "blind_err_per_10cm": 1.49,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1433",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 5,
+  "cam_over_wheel_median": 0.9894,
+  "cam_over_wheel_iqr": [
+   0.963,
+   1.038
+  ],
+  "blind_n": 3,
+  "blind_err_median_cm": 7.86,
+  "blind_err_per_10cm": 9.77,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1508",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 7,
+  "cam_over_wheel_median": 1.0384,
+  "cam_over_wheel_iqr": [
+   1.006,
+   1.058
+  ],
+  "blind_n": 2,
+  "blind_err_median_cm": 1.07,
+  "blind_err_per_10cm": 0.97,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1508",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 5,
+  "cam_over_wheel_median": 1.0389,
+  "cam_over_wheel_iqr": [
+   1.012,
+   1.096
+  ],
+  "blind_n": 5,
+  "blind_err_median_cm": 0.83,
+  "blind_err_per_10cm": 1.03,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1519",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 12,
+  "cam_over_wheel_median": 1.0634,
+  "cam_over_wheel_iqr": [
+   1.022,
+   1.081
+  ],
+  "blind_n": 2,
+  "blind_err_median_cm": 3.17,
+  "blind_err_per_10cm": 3.81,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1519",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 3,
+  "cam_over_wheel_median": 1.0435,
+  "cam_over_wheel_iqr": null,
+  "blind_n": 2,
+  "blind_err_median_cm": 0.58,
+  "blind_err_per_10cm": 0.6,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.325,10:0.625"
+ },
+ {
+  "run": "1649",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 9,
+  "cam_over_wheel_median": 1.0417,
+  "cam_over_wheel_iqr": [
+   1.027,
+   1.089
+  ],
+  "blind_n": 8,
+  "blind_err_median_cm": 0.77,
+  "blind_err_per_10cm": 2.41,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.369,10:0.754"
+ },
+ {
+  "run": "1649",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 4,
+  "cam_over_wheel_median": 1.0111,
+  "cam_over_wheel_iqr": [
+   1.004,
+   1.036
+  ],
+  "blind_n": 1,
+  "blind_err_median_cm": 4.7,
+  "blind_err_per_10cm": 3.78,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.369,10:0.754"
+ },
+ {
+  "run": "1729",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 6,
+  "cam_over_wheel_median": 1.0408,
+  "cam_over_wheel_iqr": [
+   1.006,
+   1.061
+  ],
+  "blind_n": 3,
+  "blind_err_median_cm": 0.92,
+  "blind_err_per_10cm": 1.82,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.369,10:0.754"
+ },
+ {
+  "run": "1729",
+  "slot": "Bravo",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 15,
+  "cam_over_wheel_median": 1.0499,
+  "cam_over_wheel_iqr": [
+   1.043,
+   1.087
+  ],
+  "blind_n": 4,
+  "blind_err_median_cm": 0.45,
+  "blind_err_per_10cm": 1.47,
+  "stop_lead": "Alpha 5:0.3,10:0.554; Bravo 5:0.369,10:0.754"
+ },
+ {
+  "run": "1754",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 26,
+  "cam_over_wheel_median": 1.0399,
+  "cam_over_wheel_iqr": [
+   1.02,
+   1.066
+  ],
+  "blind_n": 17,
+  "blind_err_median_cm": 0.57,
+  "blind_err_per_10cm": 1.31,
+  "stop_lead": "Alpha 5:0.3,10:0.554"
+ },
+ {
+  "run": "1813",
+  "slot": "Alpha",
+  "robot": "AL-E7DC",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 3,
+  "cam_over_wheel_median": 1.0195,
+  "cam_over_wheel_iqr": null,
+  "blind_n": 5,
+  "blind_err_median_cm": 1.25,
+  "blind_err_per_10cm": 1.37,
+  "stop_lead": "Alpha 5:0.3,10:0.554"
+ },
+ {
+  "run": "1835",
+  "slot": "Alpha",
+  "robot": "AL-EB54",
+  "wheel_scale": "0.9790",
+  "gyro_scale": "1.0750",
+  "gyro_drift_dps": "0.0000",
+  "steps": 21,
+  "cam_over_wheel_median": 1.0417,
+  "cam_over_wheel_iqr": [
+   1.022,
+   1.076
+  ],
+  "blind_n": 0,
+  "blind_err_median_cm": null,
+  "blind_err_per_10cm": null,
+  "stop_lead": "Alpha 5:0.369,10:0.754"
+ }
+]
