@@ -21,19 +21,20 @@ for c in ORDER:
     x0 = x
     for code, col in (("before", "#9aa3ad"), ("after", "#2f5fd0")):
         for r in sorted([r for r in g if r["code"] == code], key=lambda r: r["seed"]):
-            share = 100.0 * (r["reached"] or 0) / max(1, r["asked"] or 1)
+            asked = 8 if c == "miss" else (r["asked"] or 1)     # (one robot missing: 8 were typed; the run counts the lists of the robots found)
+            share = 100.0 * (r["reached"] or 0) / max(1, asked)
             ax[0].bar(x, share, color=col, width=0.8)
-            ax[0].text(x, share + 1.5, "%d/%d" % (r["reached"] or 0, r["asked"] or 0), ha="center", fontsize=7)
+            ax[0].text(x, share + 2, "%d of %d" % (r["reached"] or 0, asked), ha="center", va="bottom", fontsize=7, rotation=90)
             ax[1].bar(x, r["duration_s"] or 0, color=col, width=0.8)
             if r.get("capped") or r["result"] != "done":
                 ax[1].text(x, (r["duration_s"] or 0) + 10, "x", ha="center", fontsize=9, color="#b3261e")
             x += 1
         x += 0.4
     ticks.append((x0 + x - 1.4) / 2); lab.append(NAME[c]); x += 1.2
-ax[0].set_ylabel("points reached, % of asked"); ax[0].set_ylim(0, 115)
+ax[0].set_ylabel("points reached, % of asked"); ax[0].set_ylim(0, 150); ax[0].set_yticks([0, 25, 50, 75, 100])
 ax[1].set_ylabel("run time, s"); ax[1].set_xticks(ticks); ax[1].set_xticklabels(lab, fontsize=9)
 ax[0].bar(0, 0, color="#9aa3ad", label="before (39df4cf)"); ax[0].bar(0, 0, color="#2f5fd0", label="after (e24)")
-ax[0].legend(loc="lower right", fontsize=8)
+ax[0].legend(loc="upper left", fontsize=8, ncol=2)
 ax[0].set_title("Simulator acceptance runs on the 23 Nov school stand-in: one bar per run (seed), before and after e24", fontsize=10)
 fig.text(0.01, 0.01, "Measured: points a robot truly stopped at (simulator's true positions) and the run's own time; a red x marks a run that did not end 'done'. "
          "Source: docs/results/e24-school-usability/acceptance/runs.jsonl", fontsize=7)
