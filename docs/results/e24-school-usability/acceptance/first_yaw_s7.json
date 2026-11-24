@@ -1,0 +1,205 @@
+{
+ "folder": "A-yaw-s7",
+ "result": "done",
+ "duration_s": 291.88,
+ "planned_s": 87.0,
+ "crash": null,
+ "asked": {
+  "Alpha": 4,
+  "Bravo": 4
+ },
+ "reached": {
+  "Alpha": 4,
+  "Bravo": 1
+ },
+ "reached_by_anyone": 5,
+ "asked_total": 8,
+ "not_reached_stops": [
+  {
+   "robot": "Bravo",
+   "point": "point P21",
+   "miss_cm": 11.1
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P22",
+   "miss_cm": 6.3
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P23",
+   "miss_cm": 11.3
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P24",
+   "miss_cm": 17.1
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P21",
+   "miss_cm": 25.3
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P23",
+   "miss_cm": 10.3
+  },
+  {
+   "robot": "Bravo",
+   "point": "point P24",
+   "miss_cm": 23.2
+  }
+ ],
+ "skipped": [],
+ "never_reached": [
+  "P21",
+  "P23",
+  "P24"
+ ],
+ "false_credits": [],
+ "worst_credited_stop_off_cm": 5.2,
+ "replans": 46,
+ "replan_cpu_s": {
+  "n": 46,
+  "median": 0.68,
+  "max": 6.87,
+  "sum": 37.3,
+  "share_of_run": 0.128,
+  "over_budget": 1
+ },
+ "improve_tries": 14,
+ "points_planned_per_replan": [
+  0,
+  1,
+  2
+ ],
+ "plan_ahead": {
+  "on": true,
+  "points_each": 2,
+  "replans_points_s": [
+   [
+    1,
+    1.079
+   ],
+   [
+    1,
+    0.744
+   ],
+   [
+    1,
+    0.746
+   ],
+   [
+    1,
+    0.667
+   ],
+   [
+    1,
+    0.857
+   ],
+   [
+    1,
+    0.659
+   ],
+   [
+    1,
+    0.655
+   ],
+   [
+    2,
+    0.69
+   ],
+   [
+    2,
+    0.942
+   ],
+   [
+    1,
+    0.718
+   ],
+   [
+    1,
+    0.728
+   ],
+   [
+    1,
+    0.814
+   ],
+   [
+    1,
+    0.548
+   ],
+   [
+    1,
+    0.959
+   ],
+   [
+    1,
+    0.915
+   ],
+   [
+    1,
+    0.672
+   ],
+   [
+    1,
+    0.916
+   ],
+   [
+    1,
+    0.805
+   ],
+   [
+    1,
+    0.795
+   ],
+   [
+    1,
+    0.935
+   ]
+  ],
+  "cost": {
+   "fixed_s": 0.392,
+   "s_per_point": 0.3529,
+   "how": "the school Pi's line scaled to this run's 20 re-plans"
+  }
+ },
+ "did_not_move": 0,
+ "late_not_moved": 0,
+ "old_fixes_carried": {
+  "Alpha": 0,
+  "Bravo": 0
+ },
+ "robots_out": 2,
+ "rejoins": 2,
+ "sim": {
+  "closest_two_robots_cm": 30.94,
+  "closest_static_cm": Infinity,
+  "closest_static_at": null,
+  "contact": false,
+  "closest_open_edge_cm": 3.21,
+  "hung": [],
+  "events": [
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss",
+   "yaw_jump",
+   "standin_loss",
+   "standin_loss",
+   "standin_loss"
+  ]
+ },
+ "truth": {
+  "closest_middles_cm": 44.4,
+  "closest_middle_to_keepout_cm": 0.0,
+  "keepout": "middle outlet box by Bravo",
+  "closest_middle_to_edge_cm": 9.1,
+  "keepouts": 3
+ }
+}
