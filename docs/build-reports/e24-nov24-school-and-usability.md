@@ -34,7 +34,7 @@ Every changed behaviour keeps its old way behind a switch. Safety switches are i
 
 | Item | What the run does now | Old way (switch) | Evidence |
 |---|---|---|---|
-| Q-a. Heading check after a turn | After every turn the camera's heading is compared with the robot's own. It waits for a fresh picture only when the next leg could reach an edge or keep-out if the heading were 30 degrees off; a turn found wrong is driven again. A gyro step its own turn rate does not explain is logged as a yaw jump | `MIRLT_TURN_HEADING=off` | 5 tests; acceptance "yaw" rows |
+| Q-a. Heading check after a turn | After every turn the camera's heading is compared with the robot's own. It waits for a fresh picture only when the next leg could reach an edge or keep-out if the heading were 30 degrees off; a turn found wrong is driven again. A gyro step its own turn rate does not explain is logged as a yaw jump | `MIRLT_TURN_HEADING=off` | 5 tests; acceptance "gyro jump" rows |
 | Q-b. Battery under the floor | The robot finishes the point it is on, goes home, and its points go to the other robot | `MIRLT_BATTERY_LOW=finish` | test; acceptance "battery" rows |
 | Q-c. A robot drops out, a list per robot | Its points wait for it. They go to the other robot only at the end of that robot's own list (D3), or when the robot was never found | `MIRLT_HELD_POINTS=reassign` | 2 tests |
 | Q-d. Time limit of a Visit points run | 4 times the plan's length; past that, the run ends only once no new point has been reached for 4 times the plan's time per point (before: 900 s fixed) | `MIRLT_VISIT_TIME_LIMIT=fixed` | Appendix A |
@@ -45,13 +45,14 @@ Every changed behaviour keeps its old way behind a switch. Safety switches are i
 
 | Fault | Fix | Evidence |
 |---|---|---|
-| N1. Gyro jump at a turn put a robot on a plate | Q-a above. The simulator can now inject a jump at a turn | acceptance "yaw" rows |
+| N1. Gyro jump at a turn put a robot on a plate | Q-a above. The simulator can now inject a jump at a turn | acceptance "gyro jump" rows |
 | N2 and the slow re-plans | Every re-plan rebuilt the table's grid from nothing. It is now derived from the remembered one (`MIRLT_PLAN_FAST=0`: as before). Same plans, step for step | section 3 |
 | N3. Naming gave a tag to the wrong robot | The naming waits for late pictures after each robot's wiggle and gives a tag only where motion was found (`MIRLT_NAMING_SETTLE=0`) | test `naming_with_pictures_two_seconds_late...`: old way names neither robot, new way both |
 | N4. A point lost with no line | D3's ledger | test |
 | N5. "disagree by 0.0 cm" | A heading disagreement is said in degrees | read in the code path; no separate test (Sweep 1) |
 | N6. Second Ctrl+C lost the exports | The wrap-up ignores further Ctrl+C until the exports are written, says so, and gives up only at the third (`MIRLT_WRAPUP_GUARD=0`) | stop case, section 2 |
 | N7. A pause step far from its point | A stop due at a point the robot is no longer at gets its drive back before it (`MIRLT_DWELL_PLACE=where`) | test `a_stop_due_at_a_point_the_robot_is_no_longer_at_gets_its_drive_back` |
+| A tag's turn read wrong by the start crawl (found by this build's acceptance runs) | An answer between two quarter turns is crawled once more and averaged (`MIRLT_CRAWL_AGAIN=0`) | test `a_crawl_answer_between_two_quarter_turns...`; Appendix D |
 | N8. "nothing from the laptop for 1.5 s" 192 times | Traced: it is the firmware's idle notice, not a stop. It appears whenever a robot waits for a slow re-plan or is held. No change needed beyond N2 | Appendix B |
 | The thrash that ended run 5 | Chain found in the logs: standing robots turned back, the camera guard held them, their points were handed over, refused, and the 10-rejoin cap ended the run. D2, Q-c, no cap on rejoins (`MIRLT_REJOIN_CAP=ten`), a rejoined robot with no route waits instead of being held again (`MIRLT_REJOIN_STRANDED=hold`) | test `a_held_robot_is_never_given_up_on...`; Appendix B |
 | AL-EB54 drove on general corrections | Software, not the robot: every run start sent the general corrections over the robot's saved calibration. A calibrated robot now gets its own (`MIRLT_CALIBRATED_CORR=prior`) | test `a_calibrated_robot_is_sent_its_own_corrections...` |
@@ -87,7 +88,36 @@ other) and planning 15.1 times slower than this machine (the Pi's measured re-pl
 here). Two robots, 10 cm/s, a list per robot. A run's outcome depends on timing, so the same seed does not repeat
 exactly.
 
-<<ACCEPT>>
+| Case | Code | Seeds | Points reached of asked | Runs whose last line said done | Run time (s) | Re-plans | Times a robot was held out | Nearest a robot's middle came to a keep-out (cm) | to an open edge (cm) |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 + 4 points, a list per robot | before | 5, 6, 7 | 8 of 8 | 3 of 3 | 86 to 152 | 0 to 9 | 0 to 4 | 11.6 to 12.7 | 13.3 to 13.4 |
+| 4 + 4 points, a list per robot | after | 5, 6, 7 | 8 of 8 | 3 of 3 | 87 to 89 | 0 | 0 | 12.7 | 13.3 to 13.4 |
+| 20 + 20 points, a list per robot | before | 5, 6, 7 | 8 to 40 of 40 | 2 of 3 | 312 to 1095 | 0 to 35 | 0 to 14 | 12.0 to 16.7 | 13.3 to 15.9 |
+| 20 + 20 points, a list per robot | after | 5, 6, 7 | 40 of 40 | 3 of 3 | 313 to 318 | 0 | 0 | 12.0 to 12.2 | 13.3 to 13.4 |
+| 20 + 20, each list in the other robot's half | before | 5, 6 | 38 of 40 | 2 of 2 | 534 to 535 | 13 to 15 | 5 | 11.7 to 11.8 | 13.2 to 13.4 |
+| 20 + 20, each list in the other robot's half | after | 5, 6 | 40 of 40 | 2 of 2 | 329 to 332 | 0 | 0 | 11.7 to 11.8 | 13.2 to 13.4 |
+| 8 + 8, Bravo restarts 60 s in | before | 5, 6 | 9 to 15 of 16 | 1 of 2 | 569 to 736 | 11 to 19 | 4 to 9 | 11.3 to 11.4 | 3.0 to 15.9 |
+| 8 + 8, Bravo restarts 60 s in | after | 5, 6 | 16 of 16 | 2 of 2 | 246 to 250 | 3 | 1 | 11.9 to 12.0 | 13.4 |
+| 4 + 4, a 25 degree gyro jump at Alpha's turn (40 s in) | before | 5, 6, 7 | 4 to 8 of 8 | 3 of 3 | 281 to 354 | 15 to 29 | 0 to 14 | 0.0 to 5.4 | 7.5 to 13.3 |
+| 4 + 4, a 25 degree gyro jump at Alpha's turn (40 s in) | after | 5, 6, 7 | 8 of 8 | 3 of 3 | 88 to 89 | 0 | 0 | 12.7 | 13.3 to 13.4 |
+| 6 + 6, Bravo starts at 22 % (floor 25 %) | before | 5, 6 | 12 of 12 | 2 of 2 | 118 to 119 | 0 | 0 | 12.7 | 13.4 |
+| 6 + 6, Bravo starts at 22 % (floor 25 %) | after | 5, 6 | 12 of 12 | 2 of 2 | 330 to 335 | 13 | 0 | 11.5 to 11.7 | 13.3 to 13.4 |
+| 4 + 4, Bravo is not there | before | 5, 6 | 4 of 8 | 2 of 2 | 86 to 87 | 0 | 0 | 12.7 | 13.4 |
+| 4 + 4, Bravo is not there | after | 5, 6 | 8 of 8 | 2 of 2 | 159 to 161 | 1 | 0 | 12.1 to 12.2 | 13.4 |
+
+![Points reached and run time for every acceptance run, before and after](../results/e24-school-usability/acceptance_runs.png)
+
+Each bar is one simulator run: on the code before, 9 of 17 runs missed points and 7 of those 9 still ended "done"; on this build all 17 reached every point, in 320 of 320 points against 261 of 320.
+
+What the rows show, case by case:
+
+- **4 + 4:** the same on both (the code before was already clean on it in two of three seeds).
+- **20 + 20:** before, one seed in three ended in the thrash (8 of 40, stopped by the runner at 19 minutes after 35 re-plans). After: 40 of 40 three times, no re-plan.
+- **Crossed lists:** before 38 of 40 twice, said "done". After 40 of 40 twice, 200 s quicker.
+- **Restart:** before 9 and 15 of 16. After 16 of 16 twice.
+- **Gyro jump:** before 4, 5 and 8 of 8, said "done" each time, and the robot's middle came within 0.0, 1.7 and 5.4 cm of a keep-out (under 4.75 cm the body is over it). After: 8 of 8 three times, the jump found and the turn driven again, 12.7 cm from the keep-out. One after-run failed first for another reason (Appendix D).
+- **Low battery:** all points both ways. After takes about 330 s against 118 s, because Bravo goes home and Alpha drives all 12 (Q-b).
+- **One robot missing:** before, the missing robot's four points were never driven and the run said "done". After, the robot that is there drives all 8.
 
 <sub>A range is the lowest and highest value over the seeds run. With two or three runs it says what happened in those
 runs; it is not a prediction for the next run. "Points reached" counts points a robot truly stopped at (checked
@@ -113,15 +143,72 @@ Why it matters (my inference): on 23 Nov every re-plan on the Pi cost about 5 s 
 over the 2 s budget, so the "plan a few points ahead" rule fell back to the whole list every time. With the grid
 remembered, the fixed part measured here is 0.03 to 0.06 s for small re-plans (about 0.5 to 0.9 s at the Pi's factor).
 
-<<DOE>>
+**The plan-ahead experiment.** Asked for: 1, 2, 3 or the whole list planned ahead per robot, 10 runs each. Run: 3 runs
+each (seeds 11 to 13, 12 runs), because each run took 5 to 10 minutes and the server restarted twice during this build.
+Lists of 10 + 10 crossed, Bravo restarts 60 s in so that re-plans happen at all (a first try with no fault had no
+re-plan, so the setting could not matter; it was dropped).
+
+| Points planned ahead per robot | Runs | Runs with every point reached | Points reached of 20 | Run time (s): lowest, middle, highest | Time spent planning (s): middle | Re-plans: middle |
+|---|---|---|---|---|---|---|
+| 1 | 3 | 1 | 18 to 20 | 428, 473, 516 | 37.0 | 41 |
+| 2 | 3 | 1 | 19 to 20 | 327, 413, 449 | 33.7 | 21 |
+| 3 | 3 | 2 | 19 to 20 | 307, 322, 400 | 32.5 | 13 |
+| whole list | 3 | 3 | 20 | 318, 327, 337 | 32.0 | 3 |
+
+![Run time, planning time and re-plans by points planned ahead](../results/e24-school-usability/plan_ahead_doe.png)
+
+Each dot is one run: planning the whole list gave the fewest re-plans (3 each time) and was the only setting where all three runs reached every point; planning 1 ahead gave about 40 re-plans and the longest runs.
+
+<sub>"Middle" is the median: the middle one of the three runs. Three runs per setting show a direction, not a size;
+the difference between 3 ahead and the whole list is inside what three runs can tell apart.</sub>
+
+What it means (my reading): planning few points ahead makes each re-plan cheap but causes many more of them, and
+each one stops the robots for a moment. In these runs the automatic rule ended on the whole list by itself, because
+the first re-plan after a robot drops out still cost 9 to 14 s at the Pi's factor (a held robot is a new shape on the
+map, so the remembered grid does not cover it). So N2 is improved, not solved: small re-plans are 3 to 6 times
+quicker, the re-plan after a robot is held is not. No change to the default was made from 12 runs.
 
 ### 4. Tests
 
-<<SUITES>>
+| Suite | Result on the final code |
+|---|---|
+| Fleet (`tools/fleet/tests`) | 1239 passed, 10 skipped, 1 failed once (below), in 30 min 47 s |
+| Pi (`tools/pi/tests`) | 140 passed |
+| Analysis (`tools/analysis`) | 16 passed |
+| Simulator (`tools/sim/tests`) | 122 passed, 2 failed: the two in `test_follow.py` that failed before this build |
+
+The one fleet failure is `test_e22_no_standing.py::test_a_standing_robot_31_cm_off_is_corrected...` (a free roam test;
+4.3 cm against a 4.0 cm limit). It passed 5 of 5 times alone, 2 of 2 with its whole file and once with its neighbour
+files, and this build does not touch the free roam controller. I did not find why it failed once in the full run; it is
+in Sweep 1.
+
+New tests: 24 in `tools/fleet/tests/test_e24_school_usability.py` and 3 in `tools/pi/tests/test_update_pi.py`. Run
+against `39df4cf`: 24 fail, 2 are skipped (there is no update command there to test) and 1 passes (it tests the
+simulator's new gyro-jump injection, a simulator-only file that had to be copied to the old code for the acceptance
+runs). The fleet and Pi suites were run before the last simulator-only and results-folder commits; the crawl fix
+(`MIRLT_CRAWL_AGAIN`) and its test were in.
 
 ## Conclusion
 
-<<CONCLUSION>>
+- Every item of D1 to D6, N1 to N8 and the audit's findings and bugs has a change, a switch for the old way where
+  behaviour changed, and a test or a recorded run, except the few listed under "Not done" below.
+- In the simulator, on a stand-in built from the 23 Nov measurements, the build reached every point in all 17
+  acceptance runs (320 of 320) where the code before reached 261 of 320 and said "done" for 7 runs that had missed
+  points. The clearest gains are in the runs with a fault in them.
+- *My own conclusions, not the team's:* (1) a main cause of 23 Nov's long waits was the planner rebuilding its grid
+  on every re-plan (the re-plan after a robot is held is still slow, section 3); (2) the 18 Nov plate contact was not a heading fault; (3) the stand-in
+  is now too kind to tell 4 + 4 runs apart. Each needs the next school session to confirm.
+
+**Not done, and why**
+
+- Audit finding 12's "a broken camera picture on `/classic` in practice before any run": practice now finds camera
+  models from earlier runs, but I did not re-check that page state with no run on disk.
+- Audit finding 12's "ended: timeout" wording against "never ends by itself": the time limit now follows the plan
+  (Q-d), the wording of a run that does hit it was not reworked.
+- The thrash was reproduced through the stand-in (the 20 + 20 before-run that ended at 8 of 40), not by replaying
+  run 5's own logs through the simulator.
+- Page behaviour is tested by Playwright scripts in the results folder, not inside the pytest suites.
+- No firmware change was needed, so none was made.
 
 ## What's next
 
@@ -194,7 +281,7 @@ then list where each backup is. Nothing is deleted.
 ./run-fleet-pi.sh local
 ```
 
-You should see `Camera 2 (side): ON. Capture rate: 10 a second` (the reason after it may differ). If camera 2 says
+Among the lines you should see `Camera 2 (side): ON. Capture rate: 10 a second` (the reason in brackets after it may differ). If camera 2 says
 `off`, send me that screen before a run.
 
 **8.** In the same PowerShell window:
@@ -215,7 +302,7 @@ You should see a line with `:8095` in it. If step 6 said it started Mission Cont
 open: that is fine.
 
 **10.** In the laptop's browser (still on the **joincapstonedb** Tailscale account), open `http://100.72.183.28:8095/`.
-You should see Mission Control with the table's map first (the old page is the link "old page" at the bottom). Choose
+You should see Mission Control with the table's map first (the old page is the button "Open the old page" in Settings). Choose
 **Visit points** and you should see a box "Type the order" under the map.
 
 Firmware: nothing changed, nothing to flash.
@@ -251,7 +338,7 @@ Firmware: nothing changed, nothing to flash.
   site file on a Pi is backed up and replaced by GitHub's. Are there other per-Pi choices to keep?
 - **New 4.** The phone layout was built from the audit's numbers and checked at 390 x 844 only. Which phone do you
   and Jay-Sun use at the table?
-- **New 5.** The stand-in shows no difference between before and after on the plain 4 + 4 list (both clean). Do you
+- **New 5.** The stand-in shows almost no difference between before and after on the plain 4 + 4 list. Do you
   want the stand-in made harsher than the 23 Nov measurements, or left as measured?
 
 ## Appendix A: chosen numbers
@@ -296,17 +383,63 @@ Each is marked `[chosen]` in the code.
 - Update rehearsal: `update_rehearsal.sh <scratch folder> [fps15|sideoff|other]`; the three outputs are in
   `update-rehearsal/`. Each rebuilds a clone like the school Pi on 23 Nov (Jay-Sun's three commits, an edited site
   file, loose backup files) and checks that nothing was lost.
-- Screenshots: `docs/screenshots/2026-11-24/e24-*` (33 pictures; "mock" in a name means the real page fed staged
+- Screenshots: `docs/screenshots/2026-11-24/e24-*` (35 pictures, two of them charts; "mock" in a name means the real page fed staged
   answers, because the state needs real robots or a fault).
 
 ## Appendix D: Claude's review of this build
 
-<<REVIEW>>
+What I checked after building, and what I did about it.
+
+- **The acceptance runs found a fault that was not in either report.** In one gyro-jump run on the new code the
+  start's 3 cm crawl read Bravo's tag as turned +67 degrees (it is at +90), so every heading of Bravo was 23 degrees
+  out: 5 of 8 points, and its middle touched a keep-out. The crawl is e15's code; the stand-in's camera losses exposed
+  it. Fixed: an answer between two quarter turns is crawled once more and averaged (`MIRLT_CRAWL_AGAIN=0`: as before),
+  with a test. That first run is kept (`acceptance/first_yaw_s7.json`) and the seed was run again on the final code.
+- **The plain 4 + 4 list shows no gain**, because the code before was already clean on it in two of three seeds. The
+  gains are in the cases with a fault in them (restart, gyro jump, a missing robot) and in the endings' wording.
+- **Low battery costs time by design.** With Bravo sent home, Alpha drives all 12 points: about 330 s against 118 s
+  before. That is Q-b working as built, and a reason to confirm Q-b.
+- **Before's "done" was wrong in 7 of 17 runs** (points missed, ending "done"). After, every ending matched the
+  points truly reached.
+- **Mid-batch code change.** The crawl fix went in while the batch ran. The after-runs made before it (4 + 4, gyro
+  jump seeds 5 and 6, restart seed 5) did not meet the condition it changes (their crawls snapped to a quarter turn),
+  so they were not run again.
+- **What I could not check here:** anything on the Pi itself (the update on the real Pi, `space`'s total, the capture
+  rate rule on live load, the phone in a hand).
 
 ## Sweep 1: new tests that may now be needed
 
-<<SWEEP1>>
+- **On the school table (first session after the update):** a 4 + 4 and a 20 + 20 run; a deliberate Stop during
+  start-up; reload the page mid-run, then Run again; a second Ctrl+C during the wrap-up of a terminal run.
+- **Heading check on real pictures:** how often it waits and for how long (`turn_heading` in the summary), and whether
+  any "corrected" turn was a real jump (compare with the raw gyro rows). A false correction on real lag is the risk.
+- **Capture rate rule on the Pi:** one session at the automatic rate with the heat tracker, to see what it picks with
+  two robots and whether time unseen changes.
+- **The update on the real Pi**, including a second run of `./run-fleet-pi.sh update` straight after (should say
+  "already on GitHub's newest code").
+- **Page tests in the suite.** The page's behaviour is checked by Playwright scripts kept in the results folder, not
+  by pytest. A small pytest wrapper that runs them against practice mode would catch a broken page before a push.
+- **N5 wording** (a heading disagreement said in degrees) has no test of its own.
+- **Crawl again:** a simulator test that makes the first crawl read badly end to end (the unit test stubs the crawl).
+- **A single robot under the battery floor** (nobody to hand over to): only reasoned, not run.
+- **Naming with three or more robots** and late pictures (tested with two).
 
 ## Sweep 2: possible inaccuracies
 
-<<SWEEP2>>
+- **The stand-in is a model of 23 Nov, not the Pi.** Loss lengths are drawn from that day's 956 measurements and
+  placed at random; real losses came in bursts tied to the Pi's load. The planning factor (15.1) was fitted to the
+  planner before this build; the quicker planner may not scale the same way on the Pi. Re-fit after the next session.
+- **Two or three seeds per case.** The ranges say what happened in those runs. A difference of one point in one run
+  is not evidence either way.
+- **The simulator's gyro jump** is one step of 25 degrees at the start of a turn, as measured once. Real jumps may
+  come mid-leg; the raw-row watch covers that case only in a unit test.
+- **18 Nov run 14** was read from its raw rows by me alone; the conclusion (not a heading fault) contradicts the
+  23 Nov report's candidate cause and should be looked at by a second pair of eyes.
+- **"Same plans step for step"** was checked on 17 saved re-plans and the two first plans, not on every possible map.
+  The old way stays behind `MIRLT_PLAN_FAST=0`.
+- **Mocked screenshots.** States that need real robots or a fault (dead server, no pictures, the real start panel)
+  are the real page fed staged answers. The server side of those states is covered by unit tests, not by a real fault.
+- **Chosen numbers** are in Appendix A with a DOE yes or no for each. One is a yes: the capture rate's "at most 2 x
+  what the bridge reads".
+- **`space` on the Pi** (B12): the fix was made from the code; the sandbox's disk is not the Pi's card.
+- **Time planning costs on the Pi** in section 3 is this machine's time multiplied by 15.1, not a measurement.

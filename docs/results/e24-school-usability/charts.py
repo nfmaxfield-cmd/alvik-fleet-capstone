@@ -56,7 +56,7 @@ if os.path.exists(dp):
                 ys2 = sorted(ys); ax[i].plot([j - 0.3, j + 0.3], [ys2[len(ys2) // 2]] * 2, color="#333", lw=1.2)
         ax[i].set_xticks(range(len(lv))); ax[i].set_xticklabels(["1", "2", "3", "whole list"]); ax[i].set_ylabel(yl)
         ax[i].set_xlabel("points planned ahead per robot")
-    fig.suptitle("Plan-ahead experiment: 10 simulator runs per setting (10 + 10 crossed lists, school stand-in); line = middle run; red = not every point reached", fontsize=9)
+    fig.suptitle("Plan-ahead experiment: 3 simulator runs per setting (10 + 10 crossed lists, Bravo restarts 60 s in, school stand-in); line = middle run; red = not every point reached", fontsize=9)
     fig.text(0.01, 0.01, "Measured: each run's own time, planning time and re-plan count. Source: docs/results/e24-school-usability/acceptance/doe_runs.jsonl", fontsize=7)
     fig.tight_layout(rect=(0, 0.04, 1, 0.95))
     fig.savefig(os.path.join(R, "plan_ahead_doe.png"), dpi=110)
